@@ -4,6 +4,24 @@ T3 Code is a minimal GUI for coding agents. A Node WebSocket server wraps provid
 
 You can think of T3 Code as an open source "bring-your-own-subscription" alternative to apps like Claude Desktop, Codex App, Cursor Glass and Conductor.
 
+## Remix direction
+
+This repository is a personal remix of T3 Code. Upstream remains an important source of fixes and architectural context, but this repository has its own product direction and release decisions.
+
+### Product priorities
+
+1. **Resolve paper cuts.** Prioritize small, recurring sources of friction in daily agent work: unnecessary clicks, confusing state, stale feedback, weak keyboard flows, awkward resizing, and inconsistencies between related surfaces. Keep each fix narrow enough to understand and verify. Calling something a paper cut does not waive tests, performance work, or cross-surface decisions.
+2. **Make the right sidebar multipane.** The right sidebar should evolve from one active tab at a time into a workspace that can show multiple independently useful panes. Build on the existing right-panel surface and tab model instead of creating a parallel window system. Preserve clear focus, close/reopen, resizing, ordering, persistence, keyboard behavior, and loading/error states. A multipane change must remain performant and remote-ready, and must work in the shared web renderer rather than as an Electron-only feature.
+
+Implement the multipane direction incrementally. Prefer complete vertical slices that improve the current sidebar while keeping existing single-pane behavior valid during the transition. Avoid speculative layout machinery that has no immediate user-facing consumer.
+
+### Relationship to upstream
+
+- Do not open, prepare, or suggest pull requests against `pingdotgg/t3code` or another upstream repository from this checkout.
+- Pull requests, when explicitly requested, target this fork: `jsgrrchg/t3code`, normally its `main` branch.
+- Do not shape a change solely for upstream acceptance. Preserve straightforward upstream syncing when it does not compromise the remix's goals.
+- Keep remix-specific behavior documented and commits focused so upstream changes can still be understood and integrated deliberately.
+
 ## What makes T3 Code special?
 
 We have over 100,000 users who love T3 Code. It's important we maintain the things they love as we continue to iterate on the product. Here's a brief list of the things we can never compromise on.
@@ -45,7 +63,8 @@ Of note: Most T3 Code contributions will come from T3 Code itself, often control
 We need to be on the same page with terminology. When communicating, use this language:
 
 - **you** means the agent reading this file and changing T3 Code.
-- **we, us, and maintainers** mean Theo, Julius and the people building T3 Code. These are who you are talking to now.
+- **we, us, and remix maintainers** mean the people maintaining this personal remix.
+- **upstream maintainers** mean Theo, Julius and the people building the original T3 Code project.
 - **user** means the person using T3 Code to direct coding agents.
 - **agent** means the coding agent a user runs inside T3 Code. Depending on context, that may also include you.
 - **provider** means the agent runtime or harness T3 Code talks to, such as Codex, Claude, Cursor, or OpenCode.
@@ -112,9 +131,10 @@ An empty database is a bad test. Seed your worktree's `.t3` with a copy of real 
 ## Pull requests
 
 - Never make a PR unless the developer explicitly asks you to do so.
+- PRs from this checkout target `jsgrrchg/t3code`, normally `main`. Never open a PR against `pingdotgg/t3code` or another upstream repository.
 - Conventional commit titles, plain language: `fix(web): new threads no longer spike CPU`.
 - Body: the problem in a sentence or two, then how you fixed it. End with the model and harness that did the work.
-- **Rebase onto latest main before opening.** Stale branches conflict and burn a review round.
+- **Rebase onto the fork's latest main before opening.** Stale branches conflict and burn a review round.
 - UI changes need before/after images. Motion or timing needs a short video.
 - One concern per PR. If the description says "also", split it.
 - When babysitting: poll checks and comments newer than the last push, verify each bot finding against the source, fix real ones, dismiss false positives with a written reason. Stay quiet when nothing is new. Stop when the bots are green on the latest commit.
