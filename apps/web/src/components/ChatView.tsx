@@ -342,6 +342,7 @@ import { useDispatchDesktopQueuedFollowUp } from "../desktopFollowUpQueue";
 import {
   type DesktopQueuedMessageFollowUp,
   queuedFollowUpsForThread,
+  shouldQueueDesktopFollowUp,
   useDesktopFollowUpQueueStore,
 } from "../desktopFollowUpQueueStore";
 
@@ -1511,6 +1512,8 @@ function ChatViewContent(props: ChatViewProps) {
         : [],
     [activeThread, desktopQueueEntries],
   );
+  const activeQueuePaused =
+    activeThread?.latestTurn?.state === "interrupted" && activeQueuedFollowUps.length > 0;
   const dispatchDesktopQueuedFollowUp = useDispatchDesktopQueuedFollowUp();
   const threadError = isServerThread
     ? (localServerError ?? activeServerThread?.session?.lastError ?? null)
@@ -4910,11 +4913,12 @@ function ChatViewContent(props: ChatViewProps) {
         composerPreviewAnnotations.length +
         composerReviewComments.length,
     });
-    const shouldQueueFollowUp =
-      isElectron &&
-      isServerThread &&
-      phase === "running" &&
-      settings.followUpMessageBehavior === "queue";
+    const shouldQueueFollowUp = shouldQueueDesktopFollowUp({
+      desktop: isElectron,
+      serverThread: isServerThread,
+      phase,
+      behavior: settings.followUpMessageBehavior,
+    });
     const providerThreadActionCommand =
       ctxSelectedProvider === "codex" &&
       composerImages.length === 0 &&
@@ -6385,6 +6389,7 @@ function ChatViewContent(props: ChatViewProps) {
                       <div className="mx-auto mb-2 w-full max-w-3xl">
                         <DesktopFollowUpQueuePanel
                           entries={activeQueuedFollowUps}
+                          paused={activeQueuePaused}
                           dispatchingEntryId={desktopQueueDispatchingEntryId}
                           onRemove={onRemoveQueuedFollowUp}
                           onSteer={(entry) => void onSteerQueuedFollowUp(entry)}

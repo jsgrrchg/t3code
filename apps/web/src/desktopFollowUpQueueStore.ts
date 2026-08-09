@@ -1,6 +1,7 @@
 import {
   CommandId,
   EnvironmentId,
+  type FollowUpMessageBehavior,
   MessageId,
   ModelSelection,
   ProviderInteractionMode,
@@ -152,6 +153,30 @@ export function queuedFollowUpsForThread(
 ): ReadonlyArray<DesktopQueuedFollowUp> {
   return entries.filter(
     (entry) => entry.environmentId === environmentId && entry.threadId === threadId,
+  );
+}
+
+/** After an interruption, the next manual message starts a new turn instead of joining the queue. */
+export function shouldQueueDesktopFollowUp(input: {
+  readonly desktop: boolean;
+  readonly serverThread: boolean;
+  readonly phase: string;
+  readonly behavior: FollowUpMessageBehavior;
+}): boolean {
+  return (
+    input.desktop && input.serverThread && input.phase === "running" && input.behavior === "queue"
+  );
+}
+
+/** An interrupted turn keeps queued work paused until a later manual turn finishes. */
+export function canDispatchDesktopQueuedFollowUp(input: {
+  readonly sessionStatus: string | null;
+  readonly latestTurnState: string | null;
+}): boolean {
+  return (
+    input.sessionStatus !== "running" &&
+    input.sessionStatus !== "starting" &&
+    input.latestTurnState !== "interrupted"
   );
 }
 

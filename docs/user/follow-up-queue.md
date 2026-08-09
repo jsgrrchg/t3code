@@ -9,4 +9,6 @@ Choose the behavior under **Settings → General → Follow-up behavior**:
 
 Queued work appears above the composer. Remove an entry if it is no longer needed, or select **Steer** on a queued message to send it to the active turn immediately. The queue is stored locally and survives an app restart.
 
+Stopping the active turn pauses its queue instead of sending the next entry. The queue remains paused across restarts. The next message sent manually starts immediately; after that turn finishes, queued work resumes from the oldest entry.
+
 Native `/review`, `/review-branch`, `/review-commit`, and `/compact` commands run after the current turn finishes. They cannot be steered into active work because each command starts its own provider action.

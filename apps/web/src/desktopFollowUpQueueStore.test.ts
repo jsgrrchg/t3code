@@ -8,10 +8,12 @@ import {
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
+  canDispatchDesktopQueuedFollowUp,
   type DesktopQueuedFollowUp,
   type DesktopQueuedProviderAction,
   queuedFollowUpsForThread,
   reloadDesktopFollowUpQueueForTest,
+  shouldQueueDesktopFollowUp,
   useDesktopFollowUpQueueStore,
   writeDesktopFollowUpQueueStorageForTest,
 } from "./desktopFollowUpQueueStore";
@@ -123,5 +125,45 @@ describe("desktop follow-up queue", () => {
       ["message", message.id],
       ["provider-action", action.id],
     ]);
+  });
+
+  it("sends a manual message directly after an interrupted turn", () => {
+    expect(
+      shouldQueueDesktopFollowUp({
+        desktop: true,
+        serverThread: true,
+        phase: "disconnected",
+        behavior: "queue",
+      }),
+    ).toBe(false);
+    expect(
+      shouldQueueDesktopFollowUp({
+        desktop: true,
+        serverThread: true,
+        phase: "running",
+        behavior: "queue",
+      }),
+    ).toBe(true);
+  });
+
+  it("resumes queued work only after the manual turn finishes", () => {
+    expect(
+      canDispatchDesktopQueuedFollowUp({
+        sessionStatus: "interrupted",
+        latestTurnState: "interrupted",
+      }),
+    ).toBe(false);
+    expect(
+      canDispatchDesktopQueuedFollowUp({
+        sessionStatus: "running",
+        latestTurnState: "running",
+      }),
+    ).toBe(false);
+    expect(
+      canDispatchDesktopQueuedFollowUp({
+        sessionStatus: "ready",
+        latestTurnState: "completed",
+      }),
+    ).toBe(true);
   });
 });

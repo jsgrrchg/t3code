@@ -13,6 +13,7 @@ import { useEnvironments, usePrimaryEnvironmentId } from "./state/environments";
 import { threadEnvironment } from "./state/threads";
 import { useAtomCommand } from "./state/use-atom-command";
 import {
+  canDispatchDesktopQueuedFollowUp,
   type DesktopQueuedFollowUp,
   type DesktopQueuedMessageFollowUp,
   useDesktopFollowUpQueueStore,
@@ -175,7 +176,13 @@ export function DesktopFollowUpQueueDrain() {
           candidate.environmentId === entry.environmentId && candidate.id === entry.threadId,
       );
       if (!thread) continue;
-      if (thread.session?.status === "running" || thread.session?.status === "starting") continue;
+      if (
+        !canDispatchDesktopQueuedFollowUp({
+          sessionStatus: thread.session?.status ?? null,
+          latestTurnState: thread.latestTurn?.state ?? null,
+        })
+      )
+        continue;
       return { entry, thread };
     }
     return null;

@@ -1,4 +1,4 @@
-import { CornerDownRightIcon, ImageIcon, ListOrderedIcon, XIcon } from "lucide-react";
+import { CornerDownRightIcon, ImageIcon, ListOrderedIcon, PauseIcon, XIcon } from "lucide-react";
 import { memo } from "react";
 
 import type {
@@ -30,11 +30,13 @@ function queuedEntryLabel(entry: DesktopQueuedFollowUp): string {
 export const DesktopFollowUpQueuePanel = memo(function DesktopFollowUpQueuePanel({
   entries,
   dispatchingEntryId,
+  paused,
   onRemove,
   onSteer,
 }: {
   readonly entries: ReadonlyArray<DesktopQueuedFollowUp>;
   readonly dispatchingEntryId: string | null;
+  readonly paused: boolean;
   readonly onRemove: (entry: DesktopQueuedFollowUp) => void;
   readonly onSteer: (entry: DesktopQueuedMessageFollowUp) => void;
 }) {
@@ -46,6 +48,12 @@ export const DesktopFollowUpQueuePanel = memo(function DesktopFollowUpQueuePanel
         <ListOrderedIcon className="size-3" />
         Queue
         <span className="tabular-nums text-foreground/75">{entries.length}</span>
+        {paused ? (
+          <span className="inline-flex items-center gap-1 text-foreground/70">
+            <PauseIcon className="size-3" />
+            Paused
+          </span>
+        ) : null}
       </div>
       <div className="scrollbar-thin max-h-32 space-y-1 overflow-y-auto">
         {entries.map((entry, index) => {
