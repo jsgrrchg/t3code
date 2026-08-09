@@ -260,6 +260,15 @@ describe("sortThreadsForListV2", () => {
     ]);
     expect(sorted.map((thread) => thread.id)).toEqual(["newest", "middle", "oldest"]);
   });
+
+  it("reflects manual active order and leaves new threads at the bottom", () => {
+    const sorted = sortThreadsForListV2([
+      { id: "new", createdAt: "2026-06-01T14:00:00.000Z", activeOrderKey: null },
+      { id: "second", createdAt: "2026-06-01T12:00:00.000Z", activeOrderKey: "t" },
+      { id: "first", createdAt: "2026-06-01T08:00:00.000Z", activeOrderKey: "g" },
+    ]);
+    expect(sorted.map((thread) => thread.id)).toEqual(["first", "second", "new"]);
+  });
 });
 
 describe("buildThreadListV2Items", () => {

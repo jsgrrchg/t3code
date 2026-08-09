@@ -28,6 +28,8 @@ import {
   sortSettledThreadsForSidebar,
   pinOrderKeyBetween,
   planPinnedReorder,
+  planActiveReorder,
+  sortActiveThreadsForSidebar,
   sortPinnedThreadsForSidebar,
   sortThreadsForSidebar,
   sortProjectsForSidebar,
@@ -740,6 +742,48 @@ describe("sortThreadsForSidebar", () => {
     ]);
 
     expect(sorted.map((thread) => thread.id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("sortActiveThreadsForSidebar", () => {
+  const active = (input: { id: string; createdAt: string; activeOrderKey?: string | null }) => ({
+    environmentId: "environment-local",
+    activeOrderKey: input.activeOrderKey ?? null,
+    ...input,
+  });
+
+  it("keeps manual order ahead of new keyless threads", () => {
+    const ordered = sortActiveThreadsForSidebar([
+      active({ id: "new", createdAt: "2026-08-09T12:00:00.000Z" }),
+      active({ id: "second", createdAt: "2026-08-09T09:00:00.000Z", activeOrderKey: "t" }),
+      active({ id: "first", createdAt: "2026-08-09T11:00:00.000Z", activeOrderKey: "g" }),
+    ]);
+
+    expect(ordered.map((thread) => thread.id)).toEqual(["first", "second", "new"]);
+  });
+
+  it("preserves the existing newest-created order before any manual arrangement", () => {
+    const ordered = sortActiveThreadsForSidebar([
+      active({ id: "older", createdAt: "2026-08-09T09:00:00.000Z" }),
+      active({ id: "newer", createdAt: "2026-08-09T11:00:00.000Z" }),
+    ]);
+
+    expect(ordered.map((thread) => thread.id)).toEqual(["newer", "older"]);
+  });
+
+  it("materializes a keyless active section on its first move", () => {
+    const assignments = planActiveReorder({
+      orderedIds: ["second", "first", "third"],
+      keysById: new Map([
+        ["first", null],
+        ["second", null],
+        ["third", null],
+      ]),
+      movedId: "second",
+    });
+
+    expect(assignments.map((assignment) => assignment.id)).toEqual(["second", "first", "third"]);
+    expect(assignments.every((assignment) => assignment.orderKey.length > 0)).toBe(true);
   });
 });
 

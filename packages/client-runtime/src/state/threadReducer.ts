@@ -112,6 +112,7 @@ export function applyThreadDetailEvent(
         thread: {
           ...thread,
           archivedAt: event.payload.archivedAt,
+          activeOrderKey: null,
           titleRegeneration: null,
           updatedAt: event.payload.updatedAt,
         },
@@ -130,6 +131,7 @@ export function applyThreadDetailEvent(
           ...thread,
           settledOverride: "settled",
           settledAt: event.payload.settledAt,
+          activeOrderKey: null,
           updatedAt: event.payload.updatedAt,
         },
       };
@@ -152,6 +154,7 @@ export function applyThreadDetailEvent(
           ...thread,
           snoozedUntil: event.payload.snoozedUntil,
           snoozedAt: event.payload.snoozedAt,
+          activeOrderKey: null,
           updatedAt: event.payload.updatedAt,
         },
       };
@@ -173,6 +176,7 @@ export function applyThreadDetailEvent(
         thread: {
           ...thread,
           pinnedAt: event.payload.pinnedAt,
+          activeOrderKey: null,
           ...(event.payload.pinOrderKey !== undefined
             ? { pinOrderKey: event.payload.pinOrderKey }
             : {}),
@@ -197,6 +201,16 @@ export function applyThreadDetailEvent(
         thread: {
           ...thread,
           pinOrderKey: event.payload.orderKey,
+          updatedAt: event.payload.updatedAt,
+        },
+      };
+
+    case "thread.active-reordered":
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          activeOrderKey: event.payload.orderKey,
           updatedAt: event.payload.updatedAt,
         },
       };

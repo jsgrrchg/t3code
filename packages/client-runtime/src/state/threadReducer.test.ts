@@ -280,6 +280,45 @@ describe("applyThreadDetailEvent", () => {
     });
   });
 
+  describe("thread.active-reordered", () => {
+    it("updates and resets the active order key", () => {
+      const ordered = applyThreadDetailEvent(baseThread, {
+        ...baseEventFields,
+        sequence: 7,
+        occurredAt: "2026-04-01T07:00:00.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.active-reordered",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          orderKey: "m",
+          updatedAt: "2026-04-01T07:00:00.000Z",
+        },
+      });
+      expect(ordered.kind).toBe("updated");
+      if (ordered.kind !== "updated") return;
+      expect(ordered.thread.activeOrderKey).toBe("m");
+
+      const reset = applyThreadDetailEvent(ordered.thread, {
+        ...baseEventFields,
+        sequence: 8,
+        occurredAt: "2026-04-01T08:00:00.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.active-reordered",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          orderKey: null,
+          updatedAt: "2026-04-01T08:00:00.000Z",
+        },
+      });
+      expect(reset.kind).toBe("updated");
+      if (reset.kind === "updated") {
+        expect(reset.thread.activeOrderKey).toBeNull();
+      }
+    });
+  });
+
   describe("thread.meta-updated", () => {
     it("patches title and branch", () => {
       const result = applyThreadDetailEvent(baseThread, {

@@ -152,3 +152,52 @@ it.effect("projects pin order key lifecycle", () =>
     expect(unpinned.threads[0]?.pinOrderKey).toBeNull();
   }),
 );
+
+it.effect("projects active order and clears it when the thread leaves active work", () =>
+  Effect.gen(function* () {
+    const now = "2026-01-01T00:00:00.000Z";
+    const created = yield* projectEvent(
+      createEmptyReadModel(now),
+      makeEvent({
+        sequence: 1,
+        type: "thread.created",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          projectId: ProjectId.make("project-1"),
+          title: "Thread",
+          modelSelection: { provider: "codex", model: "gpt-5.4" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      }),
+    );
+
+    const reordered = yield* projectEvent(
+      created,
+      makeEvent({
+        sequence: 2,
+        type: "thread.active-reordered",
+        payload: { threadId: ThreadId.make("thread-1"), orderKey: "m", updatedAt: now },
+      }),
+    );
+    expect(reordered.threads[0]?.activeOrderKey).toBe("m");
+
+    const settled = yield* projectEvent(
+      reordered,
+      makeEvent({
+        sequence: 3,
+        type: "thread.settled",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          settledAt: now,
+          updatedAt: now,
+        },
+      }),
+    );
+    expect(settled.threads[0]?.activeOrderKey).toBeNull();
+  }),
+);

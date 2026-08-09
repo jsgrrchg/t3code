@@ -1,5 +1,15 @@
 # Organizing threads
 
+On web and desktop, hover an active thread and drag the handle that replaces its project icon to
+place it anywhere in the active section. The handle also supports keyboard reordering. New threads
+appear below the manually arranged threads, and activity does not move rows you placed. Settled and
+snoozed threads keep their automatic shelf ordering.
+
+The order is stored by the server, reflected on mobile, and shared by other connected clients. Open
+the project filter menu and choose **Reset active thread order** to return the visible active section
+to newest-created-first order. A thread that is explicitly settled, snoozed, or pinned leaves the
+manual active order and returns as a new active item later.
+
 Pin a thread from its context menu to keep it in the pinned section above your active work.
 Pinned threads are shown independently of their project, including when you connect to more than
 one environment.

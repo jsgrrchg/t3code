@@ -17,6 +17,7 @@ const PINNED_AT = "1969-12-30T00:00:00.000Z";
 function makeReadModel(input: {
   readonly pinnedAt?: string | null;
   readonly pinOrderKey?: string | null;
+  readonly activeOrderKey?: string | null;
   readonly archivedAt?: string | null;
   readonly settledOverride?: "settled" | "active" | null;
   readonly settledAt?: string | null;
@@ -46,6 +47,7 @@ function makeReadModel(input: {
         snoozedAt: input.snoozedAt ?? (input.snoozedUntil != null ? PINNED_AT : null),
         pinnedAt: input.pinnedAt ?? null,
         pinOrderKey: input.pinOrderKey ?? null,
+        activeOrderKey: input.activeOrderKey ?? null,
         deletedAt: null,
         messages: [],
         proposedPlans: [],
@@ -317,6 +319,56 @@ it.layer(NodeServices.layer)("pinned thread decider", (it) => {
           orderKey: "m",
         },
         readModel: makeReadModel({}),
+      }).pipe(Effect.flip);
+      expect(error._tag).toBe("OrchestrationCommandInvariantError");
+    }),
+  );
+
+  it.effect("reorders an active thread and can reset its slot", () =>
+    Effect.gen(function* () {
+      const reordered = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.active.reorder",
+          commandId: CommandId.make("cmd-active-reorder"),
+          threadId: ThreadId.make("thread-1"),
+          orderKey: "m",
+        },
+        readModel: makeReadModel({ activeOrderKey: "g" }),
+      });
+      const reorderedEvents = Array.isArray(reordered) ? reordered : [reordered];
+      expect(reorderedEvents[0]?.type).toBe("thread.active-reordered");
+      if (reorderedEvents[0]?.type === "thread.active-reordered") {
+        expect(reorderedEvents[0].payload.orderKey).toBe("m");
+        expect(reorderedEvents[0].payload.updatedAt).not.toBe(NOW);
+      }
+
+      const reset = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.active.reorder",
+          commandId: CommandId.make("cmd-active-reset"),
+          threadId: ThreadId.make("thread-1"),
+          orderKey: null,
+        },
+        readModel: makeReadModel({ pinnedAt: PINNED_AT, activeOrderKey: "m" }),
+      });
+      const resetEvents = Array.isArray(reset) ? reset : [reset];
+      expect(resetEvents[0]?.type).toBe("thread.active-reordered");
+      if (resetEvents[0]?.type === "thread.active-reordered") {
+        expect(resetEvents[0].payload.orderKey).toBeNull();
+      }
+    }),
+  );
+
+  it.effect("rejects assigning an active slot to a parked thread", () =>
+    Effect.gen(function* () {
+      const error = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.active.reorder",
+          commandId: CommandId.make("cmd-active-reorder-pinned"),
+          threadId: ThreadId.make("thread-1"),
+          orderKey: "m",
+        },
+        readModel: makeReadModel({ pinnedAt: PINNED_AT }),
       }).pipe(Effect.flip);
       expect(error._tag).toBe("OrchestrationCommandInvariantError");
     }),

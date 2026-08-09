@@ -516,11 +516,40 @@ export function sortThreadsForSidebar<
   );
 }
 
+/** Active section order: manually arranged threads first, then threads that
+    have never been arranged in the existing creation order. New and
+    re-activated threads therefore enter at the bottom of a manual run. */
+export function sortActiveThreadsForSidebar<
+  T extends {
+    readonly id: string;
+    readonly createdAt: string;
+    readonly activeOrderKey?: string | null | undefined;
+    readonly environmentId?: string | undefined;
+  },
+>(threads: readonly T[]): T[] {
+  const keyed: T[] = [];
+  const keyless: T[] = [];
+  for (const thread of threads) {
+    (thread.activeOrderKey != null ? keyed : keyless).push(thread);
+  }
+  keyed.sort((left, right) => {
+    const leftKey = left.activeOrderKey!;
+    const rightKey = right.activeOrderKey!;
+    return (
+      (leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0) ||
+      left.id.localeCompare(right.id) ||
+      (left.environmentId ?? "").localeCompare(right.environmentId ?? "")
+    );
+  });
+  return [...keyed, ...sortThreadsForSidebar(keyless)];
+}
+
 // Pinned-reorder key math and the keyed sort live in client-runtime
 // (state/thread-sort) so web and mobile compute identical pinned orders.
 export {
   generateSpreadPinOrderKeys,
   pinOrderKeyBetween,
+  planPinnedReorder as planActiveReorder,
   planPinnedReorder,
 } from "@t3tools/client-runtime/state/thread-sort";
 export { sortPinnedThreadsByOrderKey as sortPinnedThreadsForSidebar } from "@t3tools/client-runtime/state/thread-sort";

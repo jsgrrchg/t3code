@@ -25,6 +25,7 @@ import {
   ThreadSettledPayload,
   ThreadPinnedPayload,
   ThreadPinReorderedPayload,
+  ThreadActiveReorderedPayload,
   ThreadSnoozedPayload,
   ThreadUnpinnedPayload,
   ThreadUnarchivedPayload,
@@ -340,6 +341,7 @@ export function projectEvent(
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             archivedAt: payload.archivedAt,
+            activeOrderKey: null,
             titleRegeneration: null,
             updatedAt: payload.updatedAt,
           }),
@@ -364,6 +366,7 @@ export function projectEvent(
           threads: updateThread(nextBase.threads, payload.threadId, {
             settledOverride: "settled",
             settledAt: payload.settledAt,
+            activeOrderKey: null,
             updatedAt: payload.updatedAt,
           }),
         })),
@@ -388,6 +391,7 @@ export function projectEvent(
           threads: updateThread(nextBase.threads, payload.threadId, {
             snoozedUntil: payload.snoozedUntil,
             snoozedAt: payload.snoozedAt,
+            activeOrderKey: null,
             updatedAt: payload.updatedAt,
           }),
         })),
@@ -411,6 +415,7 @@ export function projectEvent(
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             pinnedAt: payload.pinnedAt,
+            activeOrderKey: null,
             ...(payload.pinOrderKey !== undefined ? { pinOrderKey: payload.pinOrderKey } : {}),
             updatedAt: payload.updatedAt,
           }),
@@ -437,6 +442,22 @@ export function projectEvent(
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             pinOrderKey: payload.orderKey,
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "thread.active-reordered":
+      return decodeForEvent(
+        ThreadActiveReorderedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            activeOrderKey: payload.orderKey,
             updatedAt: payload.updatedAt,
           }),
         })),

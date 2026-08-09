@@ -159,21 +159,38 @@ function firstValidTimestampMs(...candidates: ReadonlyArray<string | null | unde
 }
 
 /**
- * v2 sort: static creation order, newest thread on top. Activity NEVER
- * reorders the list — a row holds its position from open until settled, so
- * the screen only moves at lifecycle transitions. Mirrors web's
- * sortThreadsForSidebarV2.
+ * Active v2 sort: manual order first, followed by new keyless threads in
+ * static creation order. Mobile reflects ordering performed on web/desktop;
+ * this first slice intentionally keeps the drag affordance on the sidebar.
  */
-export function sortThreadsForListV2<T extends { readonly id: string; readonly createdAt: string }>(
-  threads: readonly T[],
-): T[] {
-  // .sort() on a copy, not .toSorted(): Hermes doesn't ship the ES2023
-  // change-by-copy array methods.
-  return [...threads].sort(
+export function sortThreadsForListV2<
+  T extends {
+    readonly id: string;
+    readonly createdAt: string;
+    readonly activeOrderKey?: string | null | undefined;
+    readonly environmentId?: string | undefined;
+  },
+>(threads: readonly T[]): T[] {
+  const keyed: T[] = [];
+  const keyless: T[] = [];
+  for (const thread of threads) {
+    (thread.activeOrderKey != null ? keyed : keyless).push(thread);
+  }
+  keyed.sort((left, right) => {
+    const leftKey = left.activeOrderKey!;
+    const rightKey = right.activeOrderKey!;
+    return (
+      (leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0) ||
+      left.id.localeCompare(right.id) ||
+      (left.environmentId ?? "").localeCompare(right.environmentId ?? "")
+    );
+  });
+  keyless.sort(
     (left, right) =>
       parseTimestampMs(right.createdAt) - parseTimestampMs(left.createdAt) ||
       left.id.localeCompare(right.id),
   );
+  return [...keyed, ...keyless];
 }
 
 export interface ThreadListV2Item {
