@@ -377,6 +377,8 @@ export type ThreadTitleRegeneration = typeof ThreadTitleRegeneration.Type;
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
+  /** The top-level thread whose Right Panel owns this conversation. */
+  parentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   title: TrimmedNonEmptyString,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
@@ -450,6 +452,8 @@ export type OrchestrationProjectShell = typeof OrchestrationProjectShell.Type;
 export const OrchestrationThreadShell = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
+  /** Null for primary navigation threads; set for Right Panel chats. */
+  parentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   title: TrimmedNonEmptyString,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
@@ -499,6 +503,18 @@ export const OrchestrationThreadShell = Schema.Struct({
   ),
 });
 export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;
+
+export function isTopLevelThread(
+  thread: Pick<OrchestrationThreadShell, "parentThreadId">,
+): boolean {
+  return thread.parentThreadId == null;
+}
+
+export function isPanelChatThread(
+  thread: Pick<OrchestrationThreadShell, "parentThreadId">,
+): boolean {
+  return thread.parentThreadId != null;
+}
 
 export const OrchestrationShellSnapshot = Schema.Struct({
   snapshotSequence: NonNegativeInt,
@@ -672,6 +688,7 @@ const ThreadCreateCommand = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   projectId: ProjectId,
+  parentThreadId: Schema.optionalKey(Schema.NullOr(ThreadId)),
   title: TrimmedNonEmptyString,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
@@ -809,6 +826,7 @@ const ThreadInteractionModeSetCommand = Schema.Struct({
 
 const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
   projectId: ProjectId,
+  parentThreadId: Schema.optionalKey(Schema.NullOr(ThreadId)),
   title: TrimmedNonEmptyString,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
@@ -1150,6 +1168,7 @@ export const ProjectDeletedPayload = Schema.Struct({
 export const ThreadCreatedPayload = Schema.Struct({
   threadId: ThreadId,
   projectId: ProjectId,
+  parentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   title: TrimmedNonEmptyString,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),

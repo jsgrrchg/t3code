@@ -23,6 +23,8 @@ import {
   ThreadCreatedPayload,
   ThreadTurnDiff,
   ThreadTurnStartRequestedPayload,
+  isPanelChatThread,
+  isTopLevelThread,
 } from "./orchestration.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 
@@ -313,6 +315,47 @@ it.effect("decodes thread.created runtime mode for historical events", () =>
 
     assert.strictEqual(parsed.runtimeMode, DEFAULT_RUNTIME_MODE);
     assert.strictEqual(parsed.modelSelection.instanceId, "codex");
+    assert.strictEqual(parsed.parentThreadId ?? null, null);
+  }),
+);
+
+it.effect("decodes panel chat relationships on commands and events", () =>
+  Effect.gen(function* () {
+    const command = yield* decodeOrchestrationCommand({
+      type: "thread.create",
+      commandId: "command-1",
+      threadId: "thread-child",
+      projectId: "project-1",
+      parentThreadId: "thread-parent",
+      title: "New chat",
+      modelSelection: { provider: "codex", model: "gpt-5.4" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: "main",
+      worktreePath: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    const payload = yield* decodeThreadCreatedPayload({
+      threadId: "thread-child",
+      projectId: "project-1",
+      parentThreadId: "thread-parent",
+      title: "New chat",
+      modelSelection: { provider: "codex", model: "gpt-5.4" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: "main",
+      worktreePath: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.strictEqual(command.type, "thread.create");
+    if (command.type === "thread.create") {
+      assert.strictEqual(command.parentThreadId, "thread-parent");
+    }
+    assert.strictEqual(payload.parentThreadId, "thread-parent");
+    assert.isTrue(isPanelChatThread(payload));
+    assert.isFalse(isTopLevelThread(payload));
   }),
 );
 
@@ -422,6 +465,9 @@ it.effect("defaults settled fields when decoding historical thread data", () =>
     assert.strictEqual(thread.settledAt, null);
     assert.strictEqual(shell.settledOverride, null);
     assert.strictEqual(shell.settledAt, null);
+    assert.strictEqual(thread.parentThreadId ?? null, null);
+    assert.strictEqual(shell.parentThreadId ?? null, null);
+    assert.isTrue(isTopLevelThread(shell));
   }),
 );
 
