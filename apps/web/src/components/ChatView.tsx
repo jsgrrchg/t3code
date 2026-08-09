@@ -173,7 +173,7 @@ import {
   nextProjectScriptId,
   projectScriptIdFromCommand,
 } from "~/projectScripts";
-import { newDraftId, newMessageId, newThreadId } from "~/lib/utils";
+import { newCommandId, newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { useBrowserHistoryStore } from "~/browserHistoryStore";
 import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
 import { NO_PROVIDER_MODEL_SELECTION } from "../providerInstances";
@@ -340,6 +340,7 @@ import {
 import { useAssetUrls } from "../assets/assetUrls";
 import { useDispatchDesktopQueuedFollowUp } from "../desktopFollowUpQueue";
 import {
+  type DesktopQueuedMessageFollowUp,
   queuedFollowUpsForThread,
   useDesktopFollowUpQueueStore,
 } from "../desktopFollowUpQueueStore";
@@ -4909,6 +4910,11 @@ function ChatViewContent(props: ChatViewProps) {
         composerPreviewAnnotations.length +
         composerReviewComments.length,
     });
+    const shouldQueueFollowUp =
+      isElectron &&
+      isServerThread &&
+      phase === "running" &&
+      settings.followUpMessageBehavior === "queue";
     const providerThreadActionCommand =
       ctxSelectedProvider === "codex" &&
       composerImages.length === 0 &&
@@ -4937,6 +4943,29 @@ function ChatViewContent(props: ChatViewProps) {
             description: "Codex review and compaction require an existing thread.",
           }),
         );
+        return;
+      }
+      if (shouldQueueFollowUp) {
+        const commandId = newCommandId();
+        const queued = useDesktopFollowUpQueueStore.getState().enqueue({
+          kind: "provider-action",
+          id: String(commandId),
+          commandId,
+          environmentId,
+          threadId: activeThread.id,
+          action: providerThreadActionCommand.action,
+          createdAt: new Date().toISOString(),
+        });
+        if (!queued) {
+          setThreadError(
+            activeThread.id,
+            "Could not save the queued Codex command. The composer content was preserved.",
+          );
+          return;
+        }
+        promptRef.current = "";
+        clearComposerDraftContent(composerDraftTarget);
+        composerRef.current?.resetCursorState();
         return;
       }
       const actionResult = await runThreadProviderAction({
@@ -5095,11 +5124,6 @@ function ChatViewContent(props: ChatViewProps) {
     }
     const title = truncate(titleSeed);
 
-    const shouldQueueFollowUp =
-      isElectron &&
-      isServerThread &&
-      phase === "running" &&
-      settings.followUpMessageBehavior === "queue";
     if (shouldQueueFollowUp) {
       const turnAttachmentsResult = await settlePromise(() => turnAttachmentsPromise);
       if (turnAttachmentsResult._tag === "Failure") {
@@ -5107,6 +5131,7 @@ function ChatViewContent(props: ChatViewProps) {
         return;
       }
       const queued = useDesktopFollowUpQueueStore.getState().enqueue({
+        kind: "message",
         id: String(messageIdForSend),
         commandId: CommandId.make(`${messageIdForSend}:queued-turn`),
         environmentId,
@@ -5397,7 +5422,7 @@ function ChatViewContent(props: ChatViewProps) {
   }, []);
 
   const onSteerQueuedFollowUp = useCallback(
-    async (entry: (typeof activeQueuedFollowUps)[number]) => {
+    async (entry: DesktopQueuedMessageFollowUp) => {
       if (!activeServerThread) return;
       const sent = await dispatchDesktopQueuedFollowUp(entry, activeServerThread);
       if (!sent) {

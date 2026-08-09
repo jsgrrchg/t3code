@@ -14,11 +14,12 @@ import { threadEnvironment } from "./state/threads";
 import { useAtomCommand } from "./state/use-atom-command";
 import {
   type DesktopQueuedFollowUp,
+  type DesktopQueuedMessageFollowUp,
   useDesktopFollowUpQueueStore,
 } from "./desktopFollowUpQueueStore";
 
 function modelSelectionsEqual(
-  left: DesktopQueuedFollowUp["modelSelection"],
+  left: DesktopQueuedMessageFollowUp["modelSelection"],
   right: ModelSelection,
 ): boolean {
   return (
@@ -47,6 +48,9 @@ export function useDispatchDesktopQueuedFollowUp() {
     reportFailure: false,
   });
   const startTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
+  const runProviderAction = useAtomCommand(threadEnvironment.runProviderAction, {
+    reportFailure: false,
+  });
 
   return useCallback(
     async (entry: DesktopQueuedFollowUp, thread: QueueDispatchThread): Promise<boolean> => {
@@ -54,6 +58,22 @@ export function useDispatchDesktopQueuedFollowUp() {
       if (!queue.claim(entry.id)) return false;
 
       try {
+        if (entry.kind === "provider-action") {
+          const result = await runProviderAction({
+            environmentId: entry.environmentId,
+            input: {
+              commandId: entry.commandId,
+              threadId: entry.threadId,
+              action: entry.action,
+              createdAt: entry.createdAt,
+            },
+          });
+          if (result._tag === "Failure") return false;
+
+          useDesktopFollowUpQueueStore.getState().remove(entry.id);
+          return true;
+        }
+
         const metadataChanged =
           !modelSelectionsEqual(entry.modelSelection, thread.modelSelection) ||
           (entry.branch !== undefined && entry.branch !== thread.branch);
@@ -126,7 +146,7 @@ export function useDispatchDesktopQueuedFollowUp() {
         useDesktopFollowUpQueueStore.getState().release(entry.id);
       }
     },
-    [setInteractionMode, setRuntimeMode, startTurn, updateMetadata],
+    [runProviderAction, setInteractionMode, setRuntimeMode, startTurn, updateMetadata],
   );
 }
 

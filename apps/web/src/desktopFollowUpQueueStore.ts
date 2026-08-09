@@ -4,9 +4,11 @@ import {
   MessageId,
   ModelSelection,
   ProviderInteractionMode,
+  ProviderThreadAction,
   RuntimeMode,
   ThreadId,
 } from "@t3tools/contracts";
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { create } from "zustand";
 
@@ -23,11 +25,17 @@ const QueuedUploadImage = Schema.Struct({
   dataUrl: Schema.String,
 });
 
-export const DesktopQueuedFollowUp = Schema.Struct({
+const DesktopQueuedFollowUpBase = {
   id: Schema.String,
   commandId: CommandId,
   environmentId: EnvironmentId,
   threadId: ThreadId,
+  createdAt: Schema.String,
+};
+
+export const DesktopQueuedMessageFollowUp = Schema.Struct({
+  ...DesktopQueuedFollowUpBase,
+  kind: Schema.Literal("message").pipe(Schema.withDecodingDefaultKey(Effect.succeed("message"))),
   messageId: MessageId,
   text: Schema.String,
   attachments: Schema.Array(QueuedUploadImage),
@@ -36,8 +44,20 @@ export const DesktopQueuedFollowUp = Schema.Struct({
   interactionMode: ProviderInteractionMode,
   titleSeed: Schema.String,
   branch: Schema.optionalKey(Schema.String),
-  createdAt: Schema.String,
 });
+export type DesktopQueuedMessageFollowUp = typeof DesktopQueuedMessageFollowUp.Type;
+
+export const DesktopQueuedProviderAction = Schema.Struct({
+  ...DesktopQueuedFollowUpBase,
+  kind: Schema.Literal("provider-action"),
+  action: ProviderThreadAction,
+});
+export type DesktopQueuedProviderAction = typeof DesktopQueuedProviderAction.Type;
+
+export const DesktopQueuedFollowUp = Schema.Union([
+  DesktopQueuedMessageFollowUp,
+  DesktopQueuedProviderAction,
+]);
 export type DesktopQueuedFollowUp = typeof DesktopQueuedFollowUp.Type;
 
 const PersistedDesktopFollowUpQueue = Schema.Struct({

@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
   type DesktopQueuedFollowUp,
+  type DesktopQueuedProviderAction,
   queuedFollowUpsForThread,
   reloadDesktopFollowUpQueueForTest,
   useDesktopFollowUpQueueStore,
@@ -17,6 +18,7 @@ import {
 
 function queuedFollowUp(index: number, threadId = "thread-1"): DesktopQueuedFollowUp {
   return {
+    kind: "message",
     id: `queue-${index}`,
     commandId: CommandId.make(`command-${index}`),
     environmentId: EnvironmentId.make("environment-1"),
@@ -32,6 +34,18 @@ function queuedFollowUp(index: number, threadId = "thread-1"): DesktopQueuedFoll
     interactionMode: "default",
     titleSeed: `Follow-up ${index}`,
     createdAt: `2026-08-09T00:00:0${index}.000Z`,
+  };
+}
+
+function queuedProviderAction(index: number): DesktopQueuedProviderAction {
+  return {
+    kind: "provider-action",
+    id: `action-${index}`,
+    commandId: CommandId.make(`action-command-${index}`),
+    environmentId: EnvironmentId.make("environment-1"),
+    threadId: ThreadId.make("thread-1"),
+    action: { type: "compact" },
+    createdAt: `2026-08-09T00:00:1${index}.000Z`,
   };
 }
 
@@ -77,6 +91,37 @@ describe("desktop follow-up queue", () => {
 
     expect(useDesktopFollowUpQueueStore.getState().entries.map((entry) => entry.id)).toEqual([
       second.id,
+    ]);
+  });
+
+  it("decodes legacy message entries without a kind", () => {
+    const legacyEntry = { ...queuedFollowUp(1), kind: undefined };
+    writeDesktopFollowUpQueueStorageForTest(JSON.stringify({ entries: [legacyEntry] }));
+
+    expect(useDesktopFollowUpQueueStore.getState().entries).toEqual([
+      expect.objectContaining({
+        kind: "message",
+        id: legacyEntry.id,
+      }),
+    ]);
+  });
+
+  it("persists provider actions alongside messages in FIFO order", () => {
+    const message = queuedFollowUp(1);
+    const action = queuedProviderAction(1);
+    const store = useDesktopFollowUpQueueStore.getState();
+
+    expect(store.enqueue(message)).toBe(true);
+    expect(store.enqueue(action)).toBe(true);
+
+    useDesktopFollowUpQueueStore.setState({ entries: [] });
+    reloadDesktopFollowUpQueueForTest();
+
+    expect(
+      useDesktopFollowUpQueueStore.getState().entries.map((entry) => [entry.kind, entry.id]),
+    ).toEqual([
+      ["message", message.id],
+      ["provider-action", action.id],
     ]);
   });
 });

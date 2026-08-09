@@ -1,13 +1,30 @@
 import { CornerDownRightIcon, ImageIcon, ListOrderedIcon, XIcon } from "lucide-react";
 import { memo } from "react";
 
-import type { DesktopQueuedFollowUp } from "../../desktopFollowUpQueueStore";
+import type {
+  DesktopQueuedFollowUp,
+  DesktopQueuedMessageFollowUp,
+} from "../../desktopFollowUpQueueStore";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 function promptPreview(text: string): string {
   return text.replace(/\s+/g, " ").trim() || "Image attachment";
+}
+
+function queuedEntryLabel(entry: DesktopQueuedFollowUp): string {
+  if (entry.kind === "message") return promptPreview(entry.text);
+  if (entry.action.type === "compact") return "/compact";
+
+  switch (entry.action.target.type) {
+    case "uncommittedChanges":
+      return "/review";
+    case "baseBranch":
+      return `/review-branch ${entry.action.target.branch}`;
+    case "commit":
+      return `/review-commit ${entry.action.target.sha}`;
+  }
 }
 
 export const DesktopFollowUpQueuePanel = memo(function DesktopFollowUpQueuePanel({
@@ -19,7 +36,7 @@ export const DesktopFollowUpQueuePanel = memo(function DesktopFollowUpQueuePanel
   readonly entries: ReadonlyArray<DesktopQueuedFollowUp>;
   readonly dispatchingEntryId: string | null;
   readonly onRemove: (entry: DesktopQueuedFollowUp) => void;
-  readonly onSteer: (entry: DesktopQueuedFollowUp) => void;
+  readonly onSteer: (entry: DesktopQueuedMessageFollowUp) => void;
 }) {
   if (entries.length === 0) return null;
 
@@ -46,9 +63,9 @@ export const DesktopFollowUpQueuePanel = memo(function DesktopFollowUpQueuePanel
                 {index + 1}
               </span>
               <span className="min-w-0 flex-1 truncate text-foreground/85">
-                {promptPreview(entry.text)}
+                {queuedEntryLabel(entry)}
               </span>
-              {entry.attachments.length > 0 ? (
+              {entry.kind === "message" && entry.attachments.length > 0 ? (
                 <span className="inline-flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground/75">
                   <ImageIcon className="size-3" />
                   {entry.attachments.length}
@@ -71,17 +88,23 @@ export const DesktopFollowUpQueuePanel = memo(function DesktopFollowUpQueuePanel
                 />
                 <TooltipPopup side="top">Remove from queue</TooltipPopup>
               </Tooltip>
-              <Button
-                type="button"
-                size="xs"
-                variant="ghost"
-                className="h-6 shrink-0 gap-1 px-2 text-[11px] text-foreground/80"
-                disabled={dispatching}
-                onClick={() => onSteer(entry)}
-              >
-                <CornerDownRightIcon className="size-3" />
-                {dispatching ? "Sending…" : "Steer"}
-              </Button>
+              {entry.kind === "message" ? (
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="ghost"
+                  className="h-6 shrink-0 gap-1 px-2 text-[11px] text-foreground/80"
+                  disabled={dispatching}
+                  onClick={() => onSteer(entry)}
+                >
+                  <CornerDownRightIcon className="size-3" />
+                  {dispatching ? "Sending…" : "Steer"}
+                </Button>
+              ) : (
+                <span className="shrink-0 px-2 text-[10px] text-muted-foreground/70">
+                  Runs next
+                </span>
+              )}
             </div>
           );
         })}
