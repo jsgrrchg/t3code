@@ -196,7 +196,11 @@ export const make = Effect.gen(function* () {
     }
     const entries = parts.flatMap((relativePath) => {
       const normalizedPath = relativePath.replaceAll("\\", "/").replace(/^\.\//, "");
-      return normalizedPath ? [{ path: normalizedPath, kind: "file" as const }] : [];
+      const directory = normalizedPath.endsWith("/");
+      const projectPath = normalizedPath.replace(/\/+$/, "");
+      return projectPath
+        ? [{ path: projectPath, kind: directory ? ("directory" as const) : ("file" as const) }]
+        : [];
     });
     return { entries, truncated: result.stdoutTruncated };
   });

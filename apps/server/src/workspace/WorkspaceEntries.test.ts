@@ -303,12 +303,19 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceEntries", (it) => {
 
     it.effect("includes git-excluded paths only when requested", () =>
       Effect.gen(function* () {
+        const path = yield* Path.Path;
         const cwd = yield* makeTempDir({ prefix: "t3code-workspace-show-ignored-", git: true });
-        yield* writeTextFile(cwd, ".gitignore", "ignored.txt\nignored-dir/\ntracked-ignored.txt\n");
+        yield* writeTextFile(
+          cwd,
+          ".gitignore",
+          "ignored.txt\nignored-dir/\nignored-repo/\ntracked-ignored.txt\n",
+        );
         yield* writeTextFile(cwd, ".git/info/exclude", "info-excluded.txt\n");
         yield* writeTextFile(cwd, "src/keep.ts", "export {};");
         yield* writeTextFile(cwd, "ignored.txt", "ignored");
         yield* writeTextFile(cwd, "ignored-dir/nested.txt", "ignored");
+        yield* writeTextFile(cwd, "ignored-repo/nested.txt", "ignored");
+        yield* git(path.join(cwd, "ignored-repo"), ["init"]);
         yield* writeTextFile(cwd, "info-excluded.txt", "ignored");
         yield* writeTextFile(cwd, "tracked-ignored.txt", "tracked");
         yield* git(cwd, ["add", "-f", "tracked-ignored.txt"]);
@@ -332,6 +339,11 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceEntries", (it) => {
           ]),
         );
         expect(ignoredPaths).toContain("src/keep.ts");
+        expect(withIgnored.entries).toContainEqual({
+          path: "ignored-repo",
+          kind: "directory",
+        });
+        expect(ignoredPaths).not.toContain("ignored-repo/");
       }),
     );
 
