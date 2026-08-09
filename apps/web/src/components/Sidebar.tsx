@@ -2613,6 +2613,28 @@ export default function Sidebar() {
     [orderedPinnedThreads, reorderPinnedThread, reorderablePinnedKeys],
   );
 
+  const threadListAutoAnimateControllerRef = useRef<ReturnType<typeof autoAnimate> | null>(null);
+  const threadListAutoAnimateResumeFrameRef = useRef<number | null>(null);
+  const suspendThreadListAutoAnimate = useCallback(() => {
+    if (threadListAutoAnimateResumeFrameRef.current !== null) {
+      cancelAnimationFrame(threadListAutoAnimateResumeFrameRef.current);
+      threadListAutoAnimateResumeFrameRef.current = null;
+    }
+    threadListAutoAnimateControllerRef.current?.disable();
+  }, []);
+  const resumeThreadListAutoAnimateAfterDrop = useCallback(() => {
+    if (threadListAutoAnimateResumeFrameRef.current !== null) {
+      cancelAnimationFrame(threadListAutoAnimateResumeFrameRef.current);
+    }
+    // dnd-kit owns the reorder transition. Re-enable lifecycle animations
+    // after React commits the optimistic DOM order so autoAnimate does not
+    // apply a second, competing transform to the dropped card.
+    threadListAutoAnimateResumeFrameRef.current = requestAnimationFrame(() => {
+      threadListAutoAnimateResumeFrameRef.current = null;
+      threadListAutoAnimateControllerRef.current?.enable();
+    });
+  }, []);
+
   const activeDndSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -2666,6 +2688,7 @@ export default function Sidebar() {
 
   const handleActiveDragEnd = useCallback(
     (event: DragEndEvent) => {
+      resumeThreadListAutoAnimateAfterDrop();
       const activeKey = String(event.active.id);
       const overKey = event.over === null ? null : String(event.over.id);
       if (overKey === null || activeKey === overKey) return;
@@ -2720,7 +2743,12 @@ export default function Sidebar() {
         }
       })();
     },
-    [orderedActiveThreads, reorderActiveThread, reorderableActiveKeys],
+    [
+      orderedActiveThreads,
+      reorderActiveThread,
+      reorderableActiveKeys,
+      resumeThreadListAutoAnimateAfterDrop,
+    ],
   );
 
   const [activeOrderResetting, setActiveOrderResetting] = useState(false);
@@ -3356,8 +3384,19 @@ export default function Sidebar() {
   }, [shouldShowJumpHintsNow]);
 
   const attachListAutoAnimateRef = useCallback((node: HTMLUListElement | null) => {
-    if (!node) return;
-    autoAnimate(node, { duration: 150, easing: "ease-out" });
+    if (!node) {
+      threadListAutoAnimateControllerRef.current?.disable();
+      threadListAutoAnimateControllerRef.current = null;
+      if (threadListAutoAnimateResumeFrameRef.current !== null) {
+        cancelAnimationFrame(threadListAutoAnimateResumeFrameRef.current);
+        threadListAutoAnimateResumeFrameRef.current = null;
+      }
+      return;
+    }
+    threadListAutoAnimateControllerRef.current = autoAnimate(node, {
+      duration: 150,
+      easing: "ease-out",
+    });
   }, []);
 
   // New thread defaults to the project you're in (active thread's project,
@@ -3810,6 +3849,8 @@ export default function Sidebar() {
                       sensors={activeDndSensors}
                       collisionDetection={closestCenter}
                       modifiers={[restrictToVerticalAxis, restrictToFirstScrollableAncestor]}
+                      onDragStart={suspendThreadListAutoAnimate}
+                      onDragCancel={resumeThreadListAutoAnimateAfterDrop}
                       onDragEnd={handleActiveDragEnd}
                     >
                       <SortableContext
