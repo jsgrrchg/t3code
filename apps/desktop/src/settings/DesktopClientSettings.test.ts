@@ -28,6 +28,7 @@ const clientSettings: ClientSettings = {
   fontSizePrompt: 14,
   fontSizeTerminal: 12,
   fontSmoothing: true,
+  followUpMessageBehavior: "queue",
   glassOpacity: 80,
   planModeEnabled: false,
   providerModelPreferences: {},

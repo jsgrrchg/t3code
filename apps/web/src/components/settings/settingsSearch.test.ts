@@ -85,4 +85,11 @@ describe("searchSettings", () => {
       targetId: "appearance",
     });
   });
+
+  it("indexes the desktop follow-up behavior setting", () => {
+    expect(searchSettings("follow-up behavior")[0]).toMatchObject({
+      id: "follow-up-behavior",
+      to: "/settings/general",
+    });
+  });
 });

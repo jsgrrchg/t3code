@@ -18,6 +18,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import {
   DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE,
+  DEFAULT_FOLLOW_UP_MESSAGE_BEHAVIOR,
   DEFAULT_UNIFIED_SETTINGS,
   type EnvironmentIdentificationMode,
   MAX_CODE_FONT_SIZE,
@@ -75,7 +76,7 @@ import {
   sortProviderInstanceEntries,
 } from "../../providerInstances";
 import { ensureLocalApi, readLocalApi } from "../../localApi";
-import { isMacPlatform } from "../../lib/utils";
+import { cn, isMacPlatform } from "../../lib/utils";
 import { primaryServerObservabilityAtom, primaryServerProvidersAtom } from "../../state/server";
 import { useProjects } from "../../state/entities";
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
@@ -1866,6 +1867,54 @@ export function GeneralSettingsPanel() {
             />
           }
         />
+
+        {isElectron ? (
+          <SettingsRow
+            {...searchableSetting("follow-up-behavior")}
+            description="Choose whether messages sent while the agent is working wait in the queue or steer the current turn."
+            resetAction={
+              settings.followUpMessageBehavior !== DEFAULT_FOLLOW_UP_MESSAGE_BEHAVIOR ? (
+                <SettingResetButton
+                  label="follow-up behavior"
+                  onClick={() =>
+                    updateSettings({
+                      followUpMessageBehavior: DEFAULT_FOLLOW_UP_MESSAGE_BEHAVIOR,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <div
+                className="inline-flex rounded-lg bg-muted/55 p-0.5"
+                role="radiogroup"
+                aria-label="Follow-up behavior"
+              >
+                {(["queue", "steer"] as const).map((behavior) => {
+                  const selected = settings.followUpMessageBehavior === behavior;
+                  const label = behavior === "queue" ? "Queue" : "Steer";
+                  return (
+                    <button
+                      key={behavior}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      className={cn(
+                        "min-w-16 rounded-md px-3 py-1.5 text-xs transition-colors",
+                        selected
+                          ? "bg-background text-foreground shadow-xs"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                      onClick={() => updateSettings({ followUpMessageBehavior: behavior })}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            }
+          />
+        ) : null}
 
         <SettingsRow
           {...searchableSetting("provider-update-checks")}

@@ -67,6 +67,20 @@ describe("ClientSettings environment identification", () => {
   });
 });
 
+describe("ClientSettings follow-up behavior", () => {
+  it("preserves steering for existing installs and accepts the desktop queue option", () => {
+    expect(decodeClientSettings({}).followUpMessageBehavior).toBe("steer");
+    expect(
+      decodeClientSettingsPatch({ followUpMessageBehavior: "queue" }).followUpMessageBehavior,
+    ).toBe("queue");
+  });
+
+  it("rejects unsupported follow-up behavior", () => {
+    expect(() => decodeClientSettings({ followUpMessageBehavior: "interrupt" })).toThrow();
+    expect(() => decodeClientSettingsPatch({ followUpMessageBehavior: "interrupt" })).toThrow();
+  });
+});
+
 describe("ClientSettings sidebar", () => {
   it("defaults to the current sidebar with a three-day auto-settle threshold", () => {
     const settings = decodeClientSettings({});

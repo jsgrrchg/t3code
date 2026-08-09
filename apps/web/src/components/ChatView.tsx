@@ -1,4 +1,5 @@
 import {
+  CommandId,
   type ApprovalRequestId,
   DEFAULT_MODEL,
   defaultInstanceIdForDriver,
@@ -241,6 +242,7 @@ import {
 } from "../state/entities";
 import { environmentShell } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
+import { DesktopFollowUpQueuePanel } from "./chat/DesktopFollowUpQueuePanel";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
@@ -334,6 +336,11 @@ import {
   serverUpdateGuidance,
 } from "../versionSkew";
 import { useAssetUrls } from "../assets/assetUrls";
+import { useDispatchDesktopQueuedFollowUp } from "../desktopFollowUpQueue";
+import {
+  queuedFollowUpsForThread,
+  useDesktopFollowUpQueueStore,
+} from "../desktopFollowUpQueueStore";
 
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
@@ -1490,6 +1497,18 @@ function ChatViewContent(props: ChatViewProps) {
   // depend on which route is mounted.
   const isServerThread = activeServerThread !== null;
   const activeThread = activeServerThread ?? localDraftThread;
+  const desktopQueueEntries = useDesktopFollowUpQueueStore((state) => state.entries);
+  const desktopQueueDispatchingEntryId = useDesktopFollowUpQueueStore(
+    (state) => state.dispatchingEntryId,
+  );
+  const activeQueuedFollowUps = useMemo(
+    () =>
+      isElectron && activeThread
+        ? queuedFollowUpsForThread(desktopQueueEntries, activeThread.environmentId, activeThread.id)
+        : [],
+    [activeThread, desktopQueueEntries],
+  );
+  const dispatchDesktopQueuedFollowUp = useDispatchDesktopQueuedFollowUp();
   const threadError = isServerThread
     ? (localServerError ?? activeServerThread?.session?.lastError ?? null)
     : localDraftError;
@@ -5011,24 +5030,6 @@ function ChatViewContent(props: ChatViewProps) {
       return;
     }
 
-    sendInFlightRef.current = true;
-    if (isDraftHeroState && activeThreadKey) {
-      let resolveDockStarted: (() => void) | undefined;
-      const dockStarted = new Promise<void>((resolve) => {
-        resolveDockStarted = resolve;
-      });
-      const dockTransition = runMobileComposerTransition(() => {
-        flushSync(() => {
-          captureDraftHeroComposerRect();
-          setDockedDraftHeroThreadKey(activeThreadKey);
-        });
-        resolveDockStarted?.();
-      });
-      void dockTransition.catch(() => resolveDockStarted?.());
-      await dockStarted;
-    }
-    beginLocalDispatch({ preparingWorktree: Boolean(baseBranchForWorktree) });
-
     const composerImagesSnapshot = [...composerImages];
     const composerTerminalContextsSnapshot = [...sendableComposerTerminalContexts];
     const composerElementContextsSnapshot = [...composerElementContexts];
@@ -5072,6 +5073,94 @@ function ChatViewContent(props: ChatViewProps) {
       sizeBytes: image.sizeBytes,
       previewUrl: image.previewUrl,
     }));
+
+    const firstComposerImageName = composerImagesSnapshot[0]?.name ?? null;
+    let titleSeed = trimmed;
+    if (!titleSeed) {
+      if (firstComposerImageName) {
+        titleSeed = `Image: ${firstComposerImageName}`;
+      } else if (composerTerminalContextsSnapshot.length > 0) {
+        titleSeed = formatTerminalContextLabel(composerTerminalContextsSnapshot[0]!);
+      } else if (composerElementContextsSnapshot.length > 0) {
+        titleSeed = formatElementContextLabel(composerElementContextsSnapshot[0]!);
+      } else {
+        titleSeed = "New thread";
+      }
+    }
+    const title = truncate(titleSeed);
+
+    const shouldQueueFollowUp =
+      isElectron &&
+      isServerThread &&
+      phase === "running" &&
+      settings.followUpMessageBehavior === "queue";
+    if (shouldQueueFollowUp) {
+      const turnAttachmentsResult = await settlePromise(() => turnAttachmentsPromise);
+      if (turnAttachmentsResult._tag === "Failure") {
+        setThreadError(threadIdForSend, "Could not prepare attachments for the queued message.");
+        return;
+      }
+      const queued = useDesktopFollowUpQueueStore.getState().enqueue({
+        id: String(messageIdForSend),
+        commandId: CommandId.make(`${messageIdForSend}:queued-turn`),
+        environmentId,
+        threadId: threadIdForSend,
+        messageId: messageIdForSend,
+        text: outgoingMessageText,
+        attachments: turnAttachmentsResult.value,
+        modelSelection: ctxSelectedModelSelection,
+        runtimeMode,
+        interactionMode,
+        titleSeed: title,
+        ...(localCheckoutBranchMismatch
+          ? { branch: localCheckoutBranchMismatch.currentBranch }
+          : {}),
+        createdAt: messageCreatedAt,
+      });
+      if (!queued) {
+        setThreadError(
+          threadIdForSend,
+          "Could not save the queued message. The composer content was preserved.",
+        );
+        return;
+      }
+      if (expiredTerminalContextCount > 0) {
+        const toastCopy = buildExpiredTerminalContextToastCopy(
+          expiredTerminalContextCount,
+          "omitted",
+        );
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: toastCopy.title,
+            description: toastCopy.description,
+          }),
+        );
+      }
+      promptRef.current = "";
+      clearComposerDraftContent(composerDraftTarget);
+      composerRef.current?.resetCursorState();
+      return;
+    }
+
+    sendInFlightRef.current = true;
+    if (isDraftHeroState && activeThreadKey) {
+      let resolveDockStarted: (() => void) | undefined;
+      const dockStarted = new Promise<void>((resolve) => {
+        resolveDockStarted = resolve;
+      });
+      const dockTransition = runMobileComposerTransition(() => {
+        flushSync(() => {
+          captureDraftHeroComposerRect();
+          setDockedDraftHeroThreadKey(activeThreadKey);
+        });
+        resolveDockStarted?.();
+      });
+      void dockTransition.catch(() => resolveDockStarted?.());
+      await dockStarted;
+    }
+    beginLocalDispatch({ preparingWorktree: Boolean(baseBranchForWorktree) });
+
     // Sending always returns to the live edge. The new row becomes the
     // anchored end-space target so it lands near the top while the response
     // streams into the reserved space below it.
@@ -5118,26 +5207,6 @@ function ChatViewContent(props: ChatViewProps) {
     clearComposerDraftContent(composerDraftTarget);
     composerRef.current?.resetCursorState();
 
-    let firstComposerImageName: string | null = null;
-    if (composerImagesSnapshot.length > 0) {
-      const firstComposerImage = composerImagesSnapshot[0];
-      if (firstComposerImage) {
-        firstComposerImageName = firstComposerImage.name;
-      }
-    }
-    let titleSeed = trimmed;
-    if (!titleSeed) {
-      if (firstComposerImageName) {
-        titleSeed = `Image: ${firstComposerImageName}`;
-      } else if (composerTerminalContextsSnapshot.length > 0) {
-        titleSeed = formatTerminalContextLabel(composerTerminalContextsSnapshot[0]!);
-      } else if (composerElementContextsSnapshot.length > 0) {
-        titleSeed = formatElementContextLabel(composerElementContextsSnapshot[0]!);
-      } else {
-        titleSeed = "New thread";
-      }
-    }
-    const title = truncate(titleSeed);
     const threadCreateModelSelection = createModelSelection(
       ctxSelectedModelSelection.instanceId,
       ctxSelectedModel || activeProject.defaultModelSelection?.model || DEFAULT_MODEL,
@@ -5306,6 +5375,28 @@ function ChatViewContent(props: ChatViewProps) {
       );
     }
   };
+
+  const onRemoveQueuedFollowUp = useCallback((entry: (typeof activeQueuedFollowUps)[number]) => {
+    useDesktopFollowUpQueueStore.getState().remove(entry.id);
+  }, []);
+
+  const onSteerQueuedFollowUp = useCallback(
+    async (entry: (typeof activeQueuedFollowUps)[number]) => {
+      if (!activeServerThread) return;
+      const sent = await dispatchDesktopQueuedFollowUp(entry, activeServerThread);
+      if (!sent) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not steer queued message",
+            description:
+              "The message is still in the queue. Try again when the connection is ready.",
+          }),
+        );
+      }
+    },
+    [activeServerThread, dispatchDesktopQueuedFollowUp],
+  );
 
   const onRespondToApproval = useCallback(
     async (requestId: ApprovalRequestId, decision: ProviderApprovalDecision) => {
@@ -6249,6 +6340,16 @@ function ChatViewContent(props: ChatViewProps) {
                         : undefined
                     }
                   >
+                    {activeQueuedFollowUps.length > 0 ? (
+                      <div className="mx-auto mb-2 w-full max-w-3xl">
+                        <DesktopFollowUpQueuePanel
+                          entries={activeQueuedFollowUps}
+                          dispatchingEntryId={desktopQueueDispatchingEntryId}
+                          onRemove={onRemoveQueuedFollowUp}
+                          onSteer={(entry) => void onSteerQueuedFollowUp(entry)}
+                        />
+                      </div>
+                    ) : null}
                     <div
                       className={cn(
                         "chat-composer-glass-shell relative mx-auto w-full max-w-3xl",
