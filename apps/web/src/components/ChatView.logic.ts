@@ -149,6 +149,18 @@ export function buildThreadTurnInterruptInput(thread: Pick<Thread, "id" | "sessi
   };
 }
 
+export function canInterruptThreadTurn(
+  thread: Pick<Thread, "session"> | null | undefined,
+  input: {
+    hasPendingApproval: boolean;
+    hasPendingUserInput: boolean;
+  },
+): boolean {
+  return (
+    thread?.session?.status === "running" && !input.hasPendingApproval && !input.hasPendingUserInput
+  );
+}
+
 export function reconcileMountedTerminalThreadIds(input: {
   currentThreadIds: ReadonlyArray<string>;
   openThreadIds: ReadonlyArray<string>;

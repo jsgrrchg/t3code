@@ -16,6 +16,7 @@ import {
   buildExpiredTerminalContextToastCopy,
   buildLoadingThreadFromShell,
   buildThreadTurnInterruptInput,
+  canInterruptThreadTurn,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
   dismissBranchMismatchForSession,
@@ -219,6 +220,55 @@ describe("buildThreadTurnInterruptInput", () => {
     expect(buildThreadTurnInterruptInput(makeThread({ session: readySession }))).toEqual({
       threadId,
     });
+  });
+});
+
+describe("canInterruptThreadTurn", () => {
+  const runningThread = makeThread({
+    session: {
+      ...readySession,
+      status: "running",
+      activeTurnId: TurnId.make("turn-running"),
+    },
+  });
+
+  it("allows interrupting an active turn without a pending interaction", () => {
+    expect(
+      canInterruptThreadTurn(runningThread, {
+        hasPendingApproval: false,
+        hasPendingUserInput: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("does not interrupt idle or background-only work", () => {
+    expect(
+      canInterruptThreadTurn(makeThread({ session: readySession }), {
+        hasPendingApproval: false,
+        hasPendingUserInput: false,
+      }),
+    ).toBe(false);
+    expect(
+      canInterruptThreadTurn(null, {
+        hasPendingApproval: false,
+        hasPendingUserInput: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("leaves pending approval and user-input interactions in control of Escape", () => {
+    expect(
+      canInterruptThreadTurn(runningThread, {
+        hasPendingApproval: true,
+        hasPendingUserInput: false,
+      }),
+    ).toBe(false);
+    expect(
+      canInterruptThreadTurn(runningThread, {
+        hasPendingApproval: false,
+        hasPendingUserInput: true,
+      }),
+    ).toBe(false);
   });
 });
 

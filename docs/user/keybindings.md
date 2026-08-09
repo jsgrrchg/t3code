@@ -37,6 +37,11 @@ Examples: `mod+j`, `mod+shift+d`, `ctrl+l`, `cmd+k`.
 Commands are IDs like `terminal.toggle`, `commandPalette.toggle`, `preview.refresh`, and
 `chat.new`. Project scripts are addressable as `script.{id}.run`, for example `script.test.run`.
 
+`chat.interrupt` stops the active turn in the visible chat and defaults to `Escape`. Transient UI
+gets first priority: an open dialog, menu, model picker, or multi-thread selection is dismissed
+without stopping the turn. The shortcut does not affect a terminal with focus or a thread working
+in the background.
+
 `filePicker.toggle` opens file search for the active project and defaults to `mod+p`.
 `projectSearch.toggle` searches inside the active project's files and defaults to `mod+shift+f`.
 Repeating either shortcut closes that search, and switching shortcuts replaces the open search.

@@ -282,6 +282,7 @@ import {
   buildLocalDraftThread,
   buildLoadingThreadFromShell,
   buildThreadTurnInterruptInput,
+  canInterruptThreadTurn,
   collectUserMessageBlobPreviewUrls,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
@@ -312,6 +313,7 @@ import type { ThreadSyncPhase } from "../threadSync";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { useComposerHandleContext } from "../composerHandleContext";
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
+import { subscribeChatAction } from "../chatActionBus";
 import { RightPanelSheet } from "./RightPanelSheet";
 import { previewEnvironment } from "../state/preview";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -2247,6 +2249,10 @@ function ChatViewContent(props: ChatViewProps) {
     latestTurnSettled &&
     hasActionableProposedPlan(activeProposedPlan);
   const activePendingApproval = pendingApprovals[0] ?? null;
+  const canInterruptActiveTurn = canInterruptThreadTurn(activeThread, {
+    hasPendingApproval: activePendingApproval !== null,
+    hasPendingUserInput: activePendingUserInput !== null,
+  });
   const {
     beginLocalDispatch,
     resetLocalDispatch,
@@ -5361,8 +5367,8 @@ function ChatViewContent(props: ChatViewProps) {
     }
   };
 
-  const onInterrupt = async () => {
-    if (!activeThread) return;
+  const onInterrupt = useCallback(async () => {
+    if (!activeThread || !canInterruptActiveTurn) return;
     const result = await interruptThreadTurn({
       environmentId,
       input: buildThreadTurnInterruptInput(activeThread),
@@ -5374,7 +5380,17 @@ function ChatViewContent(props: ChatViewProps) {
         error instanceof Error ? error.message : "Failed to interrupt the current turn.",
       );
     }
-  };
+  }, [activeThread, canInterruptActiveTurn, environmentId, interruptThreadTurn, setThreadError]);
+
+  useEffect(
+    () =>
+      subscribeChatAction((action) => {
+        if (action !== "interrupt-active-turn" || !canInterruptActiveTurn) return false;
+        void onInterrupt();
+        return true;
+      }),
+    [canInterruptActiveTurn, onInterrupt],
+  );
 
   const onRemoveQueuedFollowUp = useCallback((entry: (typeof activeQueuedFollowUps)[number]) => {
     useDesktopFollowUpQueueStore.getState().remove(entry.id);

@@ -605,6 +605,40 @@ describe("chat/editor shortcuts", () => {
   });
 });
 
+describe("chat interrupt shortcut", () => {
+  const keybindings = compile([
+    {
+      shortcut: {
+        key: "escape",
+        metaKey: false,
+        ctrlKey: false,
+        shiftKey: false,
+        altKey: false,
+        modKey: false,
+      },
+      command: "chat.interrupt",
+      whenAst: whenNot(whenIdentifier("terminalFocus")),
+    },
+  ]);
+
+  it("resolves Escape outside the terminal", () => {
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "Escape" }), keybindings, {
+        context: { terminalFocus: false },
+      }),
+      "chat.interrupt",
+    );
+  });
+
+  it("leaves Escape to a focused terminal", () => {
+    assert.isNull(
+      resolveShortcutCommand(event({ key: "Escape" }), keybindings, {
+        context: { terminalFocus: true },
+      }),
+    );
+  });
+});
+
 describe("cross-command precedence", () => {
   it("uses when + order so a later focused rule overrides a global rule", () => {
     const keybindings = compile([

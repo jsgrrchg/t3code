@@ -2,6 +2,8 @@ import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
 import { useEffect, useMemo } from "react";
 
+import { dispatchChatAction } from "../chatActionBus";
+import { isChatShortcutBlockedByTransientUi } from "../chatShortcutArbitration";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { useClientSettings, useLegacySidebarEnabled } from "../hooks/useSettings";
 import { openCommandPalette } from "../commandPaletteBus";
@@ -15,6 +17,7 @@ import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { resolveShortcutCommand } from "../keybindings";
+import { isModelPickerOpen } from "../modelPickerVisibility";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { isPreviewSupportedInRuntime } from "../previewStateStore";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
@@ -57,13 +60,15 @@ function ChatRouteGlobalShortcuts() {
   );
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return;
+      if (event.defaultPrevented || event.isComposing || event.repeat) return;
+      const modelPickerOpen = isModelPickerOpen();
       const command = resolveShortcutCommand(event, keybindings, {
         context: {
           terminalFocus: isTerminalFocused(),
           terminalOpen,
           previewFocus: isPreviewFocused(),
           previewOpen,
+          modelPickerOpen,
         },
       });
 
@@ -71,9 +76,21 @@ function ChatRouteGlobalShortcuts() {
         return;
       }
 
+      if (event.key === "Escape" && (modelPickerOpen || isChatShortcutBlockedByTransientUi())) {
+        return;
+      }
+
       if (event.key === "Escape" && selectedThreadKeysSize > 0) {
         event.preventDefault();
         clearSelection();
+        return;
+      }
+
+      if (command === "chat.interrupt") {
+        const handled = dispatchChatAction("interrupt-active-turn");
+        if (!handled) return;
+        event.preventDefault();
+        event.stopPropagation();
         return;
       }
 
