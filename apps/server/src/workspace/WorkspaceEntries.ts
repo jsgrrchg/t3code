@@ -25,6 +25,20 @@ import { normalizeSearchQuery } from "@t3tools/shared/searchRanking";
 
 import * as WorkspacePaths from "./WorkspacePaths.ts";
 import * as WorkspaceSearchIndex from "./WorkspaceSearchIndex.ts";
+import * as VcsProcess from "../vcs/VcsProcess.ts";
+
+const WORKSPACE_IGNORED_FILES_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
+const WORKSPACE_GIT_HARDENED_CONFIG_ARGS = [
+  "-c",
+  "core.fsmonitor=false",
+  "-c",
+  "core.untrackedCache=false",
+] as const;
+
+function parentProjectPath(input: string): string | undefined {
+  const separatorIndex = input.lastIndexOf("/");
+  return separatorIndex === -1 ? undefined : input.slice(0, separatorIndex);
+}
 
 export class WorkspaceEntriesWindowsPathUnsupportedError extends Schema.TaggedErrorClass<WorkspaceEntriesWindowsPathUnsupportedError>()(
   "WorkspaceEntriesWindowsPathUnsupportedError",
@@ -140,8 +154,77 @@ const resolveBrowseTarget = Effect.fn("WorkspaceEntries.resolveBrowseTarget")(fu
 
 export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
+  const vcsProcess = yield* VcsProcess.VcsProcess;
   const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
   const workspaceSearchIndexes = yield* WorkspaceSearchIndex.WorkspaceSearchIndexMap;
+
+  const listIgnoredEntries = Effect.fn("WorkspaceEntries.listIgnoredEntries")(function* (
+    cwd: string,
+  ) {
+    const result = yield* vcsProcess
+      .run({
+        operation: "WorkspaceEntries.listIgnoredEntries",
+        command: "git",
+        cwd,
+        args: [
+          ...WORKSPACE_GIT_HARDENED_CONFIG_ARGS,
+          "ls-files",
+          "--cached",
+          "--others",
+          "--ignored",
+          "--exclude-standard",
+          "-z",
+        ],
+        allowNonZeroExit: true,
+        timeoutMs: 20_000,
+        maxOutputBytes: WORKSPACE_IGNORED_FILES_MAX_OUTPUT_BYTES,
+      })
+      .pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("Failed to list ignored workspace entries", { cwd, cause }).pipe(
+            Effect.as(null),
+          ),
+        ),
+      );
+    if (result === null || result.exitCode !== 0) {
+      return { entries: [], truncated: false };
+    }
+
+    const parts = result.stdout.split("\0");
+    if (result.stdoutTruncated && parts.at(-1)?.length) {
+      parts.pop();
+    }
+    const entries = parts.flatMap((relativePath) => {
+      const normalizedPath = relativePath.replaceAll("\\", "/").replace(/^\.\//, "");
+      return normalizedPath ? [{ path: normalizedPath, kind: "file" as const }] : [];
+    });
+    return { entries, truncated: result.stdoutTruncated };
+  });
+
+  const mergeIgnoredEntries = (
+    visible: ProjectListEntriesResult,
+    ignored: ProjectListEntriesResult,
+  ): ProjectListEntriesResult => {
+    const entryByPath = new Map(visible.entries.map((entry) => [entry.path, entry]));
+    for (const entry of ignored.entries) {
+      entryByPath.set(entry.path, entry);
+      let parentPath = parentProjectPath(entry.path);
+      while (parentPath) {
+        if (!entryByPath.has(parentPath)) {
+          entryByPath.set(parentPath, { path: parentPath, kind: "directory" });
+        }
+        parentPath = parentProjectPath(parentPath);
+      }
+    }
+    const sortedEntries = [...entryByPath.values()].toSorted((left, right) =>
+      left.path.localeCompare(right.path),
+    );
+    const entries = sortedEntries.slice(0, WorkspaceSearchIndex.WORKSPACE_INDEX_MAX_ENTRIES);
+    return {
+      entries,
+      truncated: visible.truncated || ignored.truncated || entries.length < sortedEntries.length,
+    };
+  };
 
   const normalizeWorkspaceRoot = Effect.fn("WorkspaceEntries.normalizeWorkspaceRoot")(function* (
     cwd: string,
@@ -277,7 +360,10 @@ export const make = Effect.gen(function* () {
       const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd);
       return yield* Effect.gen(function* () {
         const searchIndex = yield* WorkspaceSearchIndex.WorkspaceSearchIndex;
-        return yield* searchIndex.list();
+        const visible = yield* searchIndex.list();
+        if (!input.includeIgnored) return visible;
+        const ignored = yield* listIgnoredEntries(normalizedCwd);
+        return mergeIgnoredEntries(visible, ignored);
       }).pipe(
         Effect.provide(
           workspaceSearchIndexes.get(
@@ -293,4 +379,5 @@ export const make = Effect.gen(function* () {
 
 export const layer = Layer.effect(WorkspaceEntries, make).pipe(
   Layer.provide(WorkspaceSearchIndex.WorkspaceSearchIndexMap.layer),
+  Layer.provide(VcsProcess.layer),
 );

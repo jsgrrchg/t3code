@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import {
   clearProjectFileQueryData,
   confirmProjectFileQueryData,
+  getProjectEntriesQueryAtom,
   getOptimisticProjectFileQueryData,
   resolveProjectFileQueryData,
   setProjectFileQueryData,
@@ -47,5 +48,14 @@ describe("project files queries", () => {
     expect(
       confirmProjectFileQueryData(environmentId, "/repo", "convex.json", '{"nodeVersion":"22"}'),
     ).toBe(true);
+  });
+
+  it("keeps visible and ignored workspace listings in separate query atoms", () => {
+    const visible = getProjectEntriesQueryAtom(environmentId, "/repo");
+    const withIgnored = getProjectEntriesQueryAtom(environmentId, "/repo", true);
+
+    expect(getProjectEntriesQueryAtom(environmentId, "/repo", false)).toBe(visible);
+    expect(getProjectEntriesQueryAtom(environmentId, "/repo", true)).toBe(withIgnored);
+    expect(withIgnored).not.toBe(visible);
   });
 });

@@ -301,6 +301,57 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceEntries", (it) => {
       }),
     );
 
+    it.effect("includes git-excluded paths only when requested", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-show-ignored-", git: true });
+        yield* writeTextFile(cwd, ".gitignore", "ignored.txt\nignored-dir/\ntracked-ignored.txt\n");
+        yield* writeTextFile(cwd, ".git/info/exclude", "info-excluded.txt\n");
+        yield* writeTextFile(cwd, "src/keep.ts", "export {};");
+        yield* writeTextFile(cwd, "ignored.txt", "ignored");
+        yield* writeTextFile(cwd, "ignored-dir/nested.txt", "ignored");
+        yield* writeTextFile(cwd, "info-excluded.txt", "ignored");
+        yield* writeTextFile(cwd, "tracked-ignored.txt", "tracked");
+        yield* git(cwd, ["add", "-f", "tracked-ignored.txt"]);
+
+        const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
+        const visible = yield* workspaceEntries.list({ cwd });
+        const withIgnored = yield* workspaceEntries.list({ cwd, includeIgnored: true });
+        const visiblePaths = visible.entries.map((entry) => entry.path);
+        const ignoredPaths = withIgnored.entries.map((entry) => entry.path);
+
+        expect(visiblePaths).not.toContain("ignored.txt");
+        expect(visiblePaths).not.toContain("info-excluded.txt");
+        expect(visiblePaths).not.toContain("tracked-ignored.txt");
+        expect(ignoredPaths).toEqual(
+          expect.arrayContaining([
+            "ignored.txt",
+            "ignored-dir",
+            "ignored-dir/nested.txt",
+            "info-excluded.txt",
+            "tracked-ignored.txt",
+          ]),
+        );
+        expect(ignoredPaths).toContain("src/keep.ts");
+      }),
+    );
+
+    it.effect("keeps non-git workspace listing available when ignored paths are requested", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-show-ignored-non-git-" });
+        yield* writeTextFile(cwd, "src/keep.ts", "export {};");
+
+        const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
+        const result = yield* workspaceEntries.list({ cwd, includeIgnored: true });
+
+        expect(result.entries).toEqual(
+          expect.arrayContaining([
+            { path: "src", kind: "directory" },
+            { path: "src/keep.ts", kind: "file" },
+          ]),
+        );
+      }),
+    );
+
     it.effect("excludes .convex in non-git workspaces", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTempDir({ prefix: "t3code-workspace-non-git-convex-" });
