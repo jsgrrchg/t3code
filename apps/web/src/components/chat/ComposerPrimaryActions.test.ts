@@ -39,12 +39,19 @@ function renderPendingActions(isRunning: boolean) {
   );
 }
 
-function renderStandaloneStop() {
+function renderStandaloneRunningAction({
+  hasSendableContent = false,
+  preferSendWhenRunningWithContent = false,
+}: {
+  hasSendableContent?: boolean;
+  preferSendWhenRunningWithContent?: boolean;
+} = {}) {
   return renderToStaticMarkup(
     createElement(ComposerPrimaryActions, {
       compact: true,
       pendingAction: null,
       isRunning: true,
+      preferSendWhenRunningWithContent,
       showPlanFollowUpPrompt: false,
       promptHasText: false,
       isSendBusy: false,
@@ -52,7 +59,7 @@ function renderStandaloneStop() {
       isConnecting: false,
       isEnvironmentUnavailable: false,
       isPreparingWorktree: false,
-      hasSendableContent: false,
+      hasSendableContent,
       onPreviousPendingQuestion: () => {},
       onInterrupt: () => {},
       onImplementPlanInNewThread: () => {},
@@ -161,7 +168,31 @@ describe("ComposerPrimaryActions", () => {
 
   it("matches the small pending action size without changing the standalone size", () => {
     expect(renderPendingActions(true)).toContain("size-8 sm:size-7");
-    expect(renderStandaloneStop()).toContain("size-8 sm:h-8 sm:w-8");
-    expect(renderStandaloneStop()).not.toContain("sm:size-7");
+    expect(renderStandaloneRunningAction()).toContain("size-8 sm:h-8 sm:w-8");
+    expect(renderStandaloneRunningAction()).not.toContain("sm:size-7");
+  });
+
+  it("keeps Stop generation while a running turn has no sendable composer content", () => {
+    const markup = renderStandaloneRunningAction({ preferSendWhenRunningWithContent: true });
+
+    expect(markup).toContain('aria-label="Stop generation"');
+    expect(markup).not.toContain('aria-label="Send message"');
+  });
+
+  it("offers Send message during a running turn when desktop composer content is sendable", () => {
+    const markup = renderStandaloneRunningAction({
+      hasSendableContent: true,
+      preferSendWhenRunningWithContent: true,
+    });
+
+    expect(markup).toContain('aria-label="Send message"');
+    expect(markup).not.toContain('aria-label="Stop generation"');
+  });
+
+  it("preserves the stop-first behavior when running-send preference is disabled", () => {
+    const markup = renderStandaloneRunningAction({ hasSendableContent: true });
+
+    expect(markup).toContain('aria-label="Stop generation"');
+    expect(markup).not.toContain('aria-label="Send message"');
   });
 });

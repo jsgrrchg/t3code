@@ -17,6 +17,7 @@ interface ComposerPrimaryActionsProps {
   compact: boolean;
   pendingAction: PendingActionState | null;
   isRunning: boolean;
+  preferSendWhenRunningWithContent?: boolean;
   showPlanFollowUpPrompt: boolean;
   promptHasText: boolean;
   isSendBusy: boolean;
@@ -57,6 +58,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   compact,
   pendingAction,
   isRunning,
+  preferSendWhenRunningWithContent = false,
   showPlanFollowUpPrompt,
   promptHasText,
   isSendBusy,
@@ -147,7 +149,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     );
   }
 
-  if (isRunning) {
+  if (isRunning && !(preferSendWhenRunningWithContent && hasSendableContent)) {
     return renderStopGenerationButton(false);
   }
 
