@@ -5,8 +5,9 @@ import type {
 import type { EnvironmentId, ProjectEntry } from "@t3tools/contracts";
 import { FileTree, useFileTree, useFileTreeSearch } from "@pierre/trees/react";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
+import * as Schema from "effect/Schema";
 import { EyeOff, RotateCw } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 import { Button } from "~/components/ui/button";
 import { InputGroup, InputGroupInput } from "~/components/ui/input-group";
@@ -15,6 +16,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { Toggle } from "~/components/ui/toggle";
 import { useComposerHandleContext } from "~/composerHandleContext";
 import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
+import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { useTheme } from "~/hooks/useTheme";
 import { cn } from "~/lib/utils";
 import { readLocalApi } from "~/localApi";
@@ -45,6 +47,8 @@ const TREE_UNSAFE_CSS = `
   }
   button[data-type='item'] { border-radius: 5px; }
 `;
+
+const INCLUDE_IGNORED_STORAGE_KEY = "t3code.fileBrowser.includeIgnored";
 
 function treePath(entry: ProjectEntry): string {
   return entry.kind === "directory" ? `${entry.path}/` : entry.path;
@@ -135,7 +139,13 @@ export default function FileBrowserPanel({
 }: FileBrowserPanelProps) {
   const { resolvedTheme } = useTheme();
   const composerRef = useComposerHandleContext();
-  const [includeIgnored, setIncludeIgnored] = useState(false);
+  // Showing ignored files is an explorer preference, not a property of one
+  // thread. Persist it so switching chats does not silently reset the tree.
+  const [includeIgnored, setIncludeIgnored] = useLocalStorage(
+    INCLUDE_IGNORED_STORAGE_KEY,
+    false,
+    Schema.Boolean,
+  );
   const entriesQuery = useProjectEntriesQuery(environmentId, cwd, includeIgnored);
   const entries = entriesQuery.data?.entries ?? [];
   const entryKinds = useMemo(

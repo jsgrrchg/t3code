@@ -31,6 +31,20 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("local storage values", () => {
+  it("round trips both values for boolean preferences", async () => {
+    const storage = createStorage();
+    const { getLocalStorageItem, setLocalStorageItem } = await loadWithStorage(storage);
+
+    setLocalStorageItem("boolean-preference", true, Schema.Boolean);
+    expect(getLocalStorageItem("boolean-preference", Schema.Boolean)).toBe(true);
+
+    setLocalStorageItem("boolean-preference", false, Schema.Boolean);
+    expect(storage.getItem("boolean-preference")).toBe("false");
+    expect(getLocalStorageItem("boolean-preference", Schema.Boolean)).toBe(false);
+  });
+});
+
 describe("local storage errors", () => {
   it("preserves read failure context", async () => {
     const cause = new Error("storage unavailable");
