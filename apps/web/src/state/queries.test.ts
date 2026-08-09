@@ -10,7 +10,7 @@ describe("areProjectPathSearchTargetsEqual", () => {
     query: "index",
   };
 
-  it("requires the environment, workspace, query, entry kind, and image filter to match", () => {
+  it("requires all project path search options to match", () => {
     expect(areProjectPathSearchTargetsEqual(target, target)).toBe(true);
     expect(
       areProjectPathSearchTargetsEqual(target, {
@@ -22,5 +22,8 @@ describe("areProjectPathSearchTargetsEqual", () => {
     expect(areProjectPathSearchTargetsEqual(target, { ...target, query: "readme" })).toBe(false);
     expect(areProjectPathSearchTargetsEqual(target, { ...target, kind: "file" })).toBe(false);
     expect(areProjectPathSearchTargetsEqual(target, { ...target, imageOnly: true })).toBe(false);
+    expect(areProjectPathSearchTargetsEqual(target, { ...target, includeIgnored: true })).toBe(
+      false,
+    );
   });
 });

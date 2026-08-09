@@ -2,6 +2,7 @@
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 
+import * as Cache from "effect/Cache";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -12,6 +13,7 @@ import * as Schema from "effect/Schema";
 import type {
   FilesystemBrowseInput,
   FilesystemBrowseResult,
+  ProjectEntry,
   ProjectListEntriesInput,
   ProjectListEntriesResult,
   ProjectSearchContentsInput,
@@ -20,14 +22,21 @@ import type {
   ProjectSearchEntriesResult,
 } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
 import { isExplicitRelativePath, isWindowsAbsolutePath } from "@t3tools/shared/path";
-import { normalizeSearchQuery } from "@t3tools/shared/searchRanking";
+import {
+  insertRankedSearchResult,
+  normalizeSearchQuery,
+  scoreQueryMatch,
+} from "@t3tools/shared/searchRanking";
 
 import * as WorkspacePaths from "./WorkspacePaths.ts";
 import * as WorkspaceSearchIndex from "./WorkspaceSearchIndex.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 
 const WORKSPACE_IGNORED_FILES_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
+const WORKSPACE_IGNORED_FILES_CACHE_CAPACITY = 16;
+const WORKSPACE_IGNORED_FILES_CACHE_TTL = "3 seconds";
 const WORKSPACE_GIT_HARDENED_CONFIG_ARGS = [
   "-c",
   "core.fsmonitor=false",
@@ -38,6 +47,131 @@ const WORKSPACE_GIT_HARDENED_CONFIG_ARGS = [
 function parentProjectPath(input: string): string | undefined {
   const separatorIndex = input.lastIndexOf("/");
   return separatorIndex === -1 ? undefined : input.slice(0, separatorIndex);
+}
+
+function projectEntryName(entry: ProjectEntry): string {
+  return entry.path.slice(entry.path.lastIndexOf("/") + 1);
+}
+
+function scoreProjectEntry(entry: ProjectEntry, query: string): number | null {
+  if (!query) return 0;
+
+  const path = entry.path.toLowerCase();
+  const name = projectEntryName(entry).toLowerCase();
+  let totalScore = 0;
+
+  for (const term of query.split(/\s+/)) {
+    const nameScore = scoreQueryMatch({
+      value: name,
+      query: term,
+      exactBase: 0,
+      prefixBase: 100,
+      boundaryBase: 200,
+      includesBase: 300,
+      fuzzyBase: 500,
+    });
+    const pathScore = scoreQueryMatch({
+      value: path,
+      query: term,
+      exactBase: 50,
+      prefixBase: 150,
+      boundaryBase: 250,
+      includesBase: 350,
+      fuzzyBase: 550,
+    });
+    const termScore =
+      nameScore === null
+        ? pathScore
+        : pathScore === null
+          ? nameScore
+          : Math.min(nameScore, pathScore);
+    if (termScore === null) return null;
+    totalScore += termScore;
+  }
+
+  return totalScore;
+}
+
+function entryPassesSearchFilters(entry: ProjectEntry, input: ProjectSearchEntriesInput): boolean {
+  if (input.kind !== undefined && entry.kind !== input.kind) return false;
+  return !input.imageOnly || (entry.kind === "file" && isWorkspaceImagePreviewPath(entry.path));
+}
+
+function mergeIgnoredEntries(
+  visible: ProjectListEntriesResult,
+  ignored: ProjectListEntriesResult,
+): ProjectListEntriesResult {
+  const entryByPath = new Map(visible.entries.map((entry) => [entry.path, entry]));
+  for (const entry of ignored.entries) {
+    entryByPath.set(entry.path, entry);
+    let parentPath = parentProjectPath(entry.path);
+    while (parentPath) {
+      if (!entryByPath.has(parentPath)) {
+        entryByPath.set(parentPath, { path: parentPath, kind: "directory" });
+      }
+      parentPath = parentProjectPath(parentPath);
+    }
+  }
+  const sortedEntries = [...entryByPath.values()].toSorted((left, right) =>
+    left.path.localeCompare(right.path),
+  );
+  const entries = sortedEntries.slice(0, WorkspaceSearchIndex.WORKSPACE_INDEX_MAX_ENTRIES);
+  return {
+    entries,
+    truncated: visible.truncated || ignored.truncated || entries.length < sortedEntries.length,
+  };
+}
+
+function mergeSearchEntries(
+  visible: ProjectSearchEntriesResult,
+  ignored: ProjectListEntriesResult,
+  input: ProjectSearchEntriesInput,
+  normalizedQuery: string,
+): ProjectSearchEntriesResult {
+  const seen = new Set<string>();
+
+  if (!normalizedQuery) {
+    const entries: ProjectEntry[] = [];
+    for (const entry of [...visible.entries, ...ignored.entries]) {
+      if (seen.has(entry.path) || !entryPassesSearchFilters(entry, input)) continue;
+      seen.add(entry.path);
+      entries.push(entry);
+    }
+    return {
+      entries: entries.slice(0, input.limit),
+      truncated: visible.truncated || ignored.truncated || entries.length > input.limit,
+    };
+  }
+
+  const ranked: Array<{ item: ProjectEntry; score: number; tieBreaker: string }> = [];
+  let matchedCount = 0;
+  for (const [visibleIndex, entry] of visible.entries.entries()) {
+    if (seen.has(entry.path) || !entryPassesSearchFilters(entry, input)) continue;
+    seen.add(entry.path);
+    matchedCount += 1;
+    insertRankedSearchResult(
+      ranked,
+      {
+        item: entry,
+        score: scoreProjectEntry(entry, normalizedQuery) ?? 10_000 + visibleIndex,
+        tieBreaker: entry.path,
+      },
+      input.limit,
+    );
+  }
+  for (const entry of ignored.entries) {
+    if (seen.has(entry.path) || !entryPassesSearchFilters(entry, input)) continue;
+    seen.add(entry.path);
+    const score = scoreProjectEntry(entry, normalizedQuery);
+    if (score === null) continue;
+    matchedCount += 1;
+    insertRankedSearchResult(ranked, { item: entry, score, tieBreaker: entry.path }, input.limit);
+  }
+
+  return {
+    entries: ranked.map((entry) => entry.item),
+    truncated: visible.truncated || ignored.truncated || matchedCount > input.limit,
+  };
 }
 
 export class WorkspaceEntriesWindowsPathUnsupportedError extends Schema.TaggedErrorClass<WorkspaceEntriesWindowsPathUnsupportedError>()(
@@ -204,31 +338,16 @@ export const make = Effect.gen(function* () {
     });
     return { entries, truncated: result.stdoutTruncated };
   });
-
-  const mergeIgnoredEntries = (
-    visible: ProjectListEntriesResult,
-    ignored: ProjectListEntriesResult,
-  ): ProjectListEntriesResult => {
-    const entryByPath = new Map(visible.entries.map((entry) => [entry.path, entry]));
-    for (const entry of ignored.entries) {
-      entryByPath.set(entry.path, entry);
-      let parentPath = parentProjectPath(entry.path);
-      while (parentPath) {
-        if (!entryByPath.has(parentPath)) {
-          entryByPath.set(parentPath, { path: parentPath, kind: "directory" });
-        }
-        parentPath = parentProjectPath(parentPath);
-      }
-    }
-    const sortedEntries = [...entryByPath.values()].toSorted((left, right) =>
-      left.path.localeCompare(right.path),
-    );
-    const entries = sortedEntries.slice(0, WorkspaceSearchIndex.WORKSPACE_INDEX_MAX_ENTRIES);
-    return {
-      entries,
-      truncated: visible.truncated || ignored.truncated || entries.length < sortedEntries.length,
-    };
-  };
+  const ignoredEntriesCache = yield* Cache.makeWith(
+    (cwd: string) =>
+      listIgnoredEntries(cwd).pipe(
+        Effect.map((ignored) => mergeIgnoredEntries({ entries: [], truncated: false }, ignored)),
+      ),
+    {
+      capacity: WORKSPACE_IGNORED_FILES_CACHE_CAPACITY,
+      timeToLive: () => WORKSPACE_IGNORED_FILES_CACHE_TTL,
+    },
+  );
 
   const normalizeWorkspaceRoot = Effect.fn("WorkspaceEntries.normalizeWorkspaceRoot")(function* (
     cwd: string,
@@ -241,6 +360,7 @@ export const make = Effect.gen(function* () {
       const normalizedCwd = yield* normalizeWorkspaceRoot(cwd).pipe(
         Effect.orElseSucceed(() => cwd),
       );
+      yield* Cache.invalidate(ignoredEntriesCache, normalizedCwd);
       for (const variant of WorkspaceSearchIndex.WORKSPACE_SEARCH_INDEX_VARIANTS) {
         const indexKey = WorkspaceSearchIndex.workspaceSearchIndexKey(normalizedCwd, variant);
         if (!(yield* RcMap.has(workspaceSearchIndexes.rcMap, indexKey))) {
@@ -332,7 +452,15 @@ export const make = Effect.gen(function* () {
       });
       return yield* Effect.gen(function* () {
         const searchIndex = yield* WorkspaceSearchIndex.WorkspaceSearchIndex;
-        return yield* searchIndex.search(normalizedQuery, input.limit, input.kind, input.imageOnly);
+        const visible = yield* searchIndex.search(
+          normalizedQuery,
+          input.limit,
+          input.kind,
+          input.imageOnly,
+        );
+        if (!input.includeIgnored) return visible;
+        const ignored = yield* Cache.get(ignoredEntriesCache, normalizedCwd);
+        return mergeSearchEntries(visible, ignored, input, normalizedQuery);
       }).pipe(
         Effect.provide(
           workspaceSearchIndexes.get(
@@ -366,7 +494,7 @@ export const make = Effect.gen(function* () {
         const searchIndex = yield* WorkspaceSearchIndex.WorkspaceSearchIndex;
         const visible = yield* searchIndex.list();
         if (!input.includeIgnored) return visible;
-        const ignored = yield* listIgnoredEntries(normalizedCwd);
+        const ignored = yield* Cache.get(ignoredEntriesCache, normalizedCwd);
         return mergeIgnoredEntries(visible, ignored);
       }).pipe(
         Effect.provide(

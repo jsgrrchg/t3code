@@ -77,6 +77,7 @@ const searchWorkspaceEntries = (input: {
   query: string;
   limit: number;
   kind?: "file" | "directory";
+  includeIgnored?: boolean;
 }) =>
   Effect.gen(function* () {
     const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
@@ -298,6 +299,55 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceEntries", (it) => {
         expect(paths).toContain("src");
         expect(paths).toContain("src/keep.ts");
         expect(paths.some((entryPath) => entryPath.startsWith(".convex/"))).toBe(false);
+      }),
+    );
+
+    it.effect("includes ignored paths on request and refreshes them after workspace changes", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir({
+          prefix: "t3code-workspace-search-ignored-",
+          git: true,
+        });
+        yield* writeTextFile(cwd, ".gitignore", "ignored/\n");
+        yield* writeTextFile(cwd, ".git/info/exclude", "local-secret.txt\n");
+        yield* writeTextFile(cwd, "src/keep.ts", "export {};");
+        yield* writeTextFile(cwd, "ignored/first-secret.txt", "ignored");
+        yield* writeTextFile(cwd, "local-secret.txt", "ignored");
+
+        const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
+        const visible = yield* workspaceEntries.search({ cwd, query: "secret", limit: 100 });
+        const withIgnored = yield* workspaceEntries.search({
+          cwd,
+          query: "secret",
+          limit: 2,
+          includeIgnored: true,
+        });
+
+        expect(visible.entries).not.toContainEqual({
+          path: "ignored/first-secret.txt",
+          kind: "file",
+        });
+        expect(visible.entries).not.toContainEqual({ path: "local-secret.txt", kind: "file" });
+        expect(withIgnored.entries).toEqual(
+          expect.arrayContaining([
+            { path: "ignored/first-secret.txt", kind: "file" },
+            { path: "local-secret.txt", kind: "file" },
+          ]),
+        );
+
+        yield* writeTextFile(cwd, "ignored/second-secret.txt", "ignored");
+        yield* workspaceEntries.refresh(cwd);
+
+        const refreshed = yield* workspaceEntries.search({
+          cwd,
+          query: "second secret",
+          limit: 100,
+          includeIgnored: true,
+        });
+        expect(refreshed.entries).toContainEqual({
+          path: "ignored/second-secret.txt",
+          kind: "file",
+        });
       }),
     );
 

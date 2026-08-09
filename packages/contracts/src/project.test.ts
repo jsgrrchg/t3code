@@ -33,6 +33,22 @@ describe("project search inputs", () => {
     expect(decoded.query).toBe("");
   });
 
+  it("keeps ignored search entries opt-in", () => {
+    expect(decodeSearchEntriesInput({ cwd: "/workspace", query: "env", limit: 10 })).toEqual({
+      cwd: "/workspace",
+      query: "env",
+      limit: 10,
+    });
+    expect(
+      decodeSearchEntriesInput({
+        cwd: "/workspace",
+        query: "env",
+        limit: 10,
+        includeIgnored: true,
+      }).includeIgnored,
+    ).toBe(true);
+  });
+
   it("preserves whitespace in content search queries", () => {
     const decoded = decodeSearchContentsInput({
       cwd: "/workspace",

@@ -158,7 +158,7 @@ export function useProjectFilePickerQuery(
   cwd: string,
   query: string,
   limit: number,
-  options?: { readonly imageOnly?: boolean },
+  options?: { readonly imageOnly?: boolean; readonly includeIgnored?: boolean },
 ) {
   const search = useProjectPathSearch(
     {
@@ -167,6 +167,7 @@ export function useProjectFilePickerQuery(
       query,
       kind: "file",
       ...(options?.imageOnly ? { imageOnly: true } : {}),
+      ...(options?.includeIgnored ? { includeIgnored: true } : {}),
     },
     limit,
     { allowEmptyQuery: true },

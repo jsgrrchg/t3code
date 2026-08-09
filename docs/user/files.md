@@ -6,3 +6,6 @@ by default so generated dependencies, build output, and local caches do not over
 Use **Show ignored files** in the Files toolbar to include paths matched by `.gitignore`,
 `.git/info/exclude`, or Git's configured global excludes. Ignored text files can be opened and read
 like any other project file. Turn the option off to return to the filtered tree.
+
+Ignored files are also available when searching for a file from **Open file** or typing `@` in the
+composer. They stay out of the default Files tree, but appear when their path matches the search.

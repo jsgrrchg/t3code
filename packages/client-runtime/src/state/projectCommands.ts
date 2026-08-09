@@ -58,7 +58,9 @@ export function createProjectEnvironmentAtoms<R, E>(
     searchEntries: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:projects:search-entries",
       tag: WS_METHODS.projectsSearchEntries,
-      staleTimeMs: 15_000,
+      // File search surfaces are transient. Revalidate when they mount so a
+      // workspace refresh from the previous turn is visible immediately.
+      staleTimeMs: 0,
     }),
     listEntries: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:projects:list-entries",

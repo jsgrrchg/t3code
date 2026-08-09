@@ -237,6 +237,7 @@ export function usePaginatedBranches(target: VcsRefTarget) {
 type ProjectPathSearchTarget = ComposerPathSearchTarget & {
   readonly kind?: ProjectEntryKind | undefined;
   readonly imageOnly?: boolean | undefined;
+  readonly includeIgnored?: boolean | undefined;
 };
 
 export function areProjectPathSearchTargetsEqual(
@@ -248,7 +249,8 @@ export function areProjectPathSearchTargetsEqual(
     left.cwd === right.cwd &&
     left.query === right.query &&
     left.kind === right.kind &&
-    left.imageOnly === right.imageOnly
+    left.imageOnly === right.imageOnly &&
+    left.includeIgnored === right.includeIgnored
   );
 }
 
@@ -265,8 +267,16 @@ export function useProjectPathSearch(
       query: target.query == null ? null : target.query.trim(),
       kind: target.kind,
       imageOnly: target.imageOnly,
+      includeIgnored: target.includeIgnored,
     }),
-    [target.cwd, target.environmentId, target.imageOnly, target.kind, target.query],
+    [
+      target.cwd,
+      target.environmentId,
+      target.imageOnly,
+      target.includeIgnored,
+      target.kind,
+      target.query,
+    ],
   );
   const debouncedTarget = useDebouncedValue(normalizedTarget, PROJECT_PATH_SEARCH_DEBOUNCE_MS);
   const result = useEnvironmentQuery(
@@ -282,6 +292,7 @@ export function useProjectPathSearch(
             limit,
             ...(debouncedTarget.kind ? { kind: debouncedTarget.kind } : {}),
             ...(debouncedTarget.imageOnly ? { imageOnly: true } : {}),
+            ...(debouncedTarget.includeIgnored ? { includeIgnored: true } : {}),
           },
         })
       : null,
@@ -298,7 +309,7 @@ export function useProjectPathSearch(
 }
 
 export function useComposerPathSearch(target: ComposerPathSearchTarget) {
-  return useProjectPathSearch(target, COMPOSER_PATH_SEARCH_LIMIT);
+  return useProjectPathSearch({ ...target, includeIgnored: true }, COMPOSER_PATH_SEARCH_LIMIT);
 }
 
 interface ProjectContentSearchTarget {

@@ -77,6 +77,7 @@ function OpenProjectFilePicker(props: ProjectFilePickerProps & { target: ActiveP
     target.cwd,
     query,
     PROJECT_FILE_PICKER_RESULT_LIMIT,
+    { includeIgnored: true },
   );
   const { resolvedTheme } = useTheme();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
