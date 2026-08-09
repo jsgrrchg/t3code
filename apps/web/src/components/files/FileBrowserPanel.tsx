@@ -6,7 +6,7 @@ import type { EnvironmentId, ProjectEntry } from "@t3tools/contracts";
 import { FileTree, useFileTree, useFileTreeSearch } from "@pierre/trees/react";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import * as Schema from "effect/Schema";
-import { EyeOff, RotateCw } from "lucide-react";
+import { Eye, EyeOff, RotateCw } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 
 import { Button } from "~/components/ui/button";
@@ -92,7 +92,7 @@ function ShowIgnoredFilesButton(props: {
             aria-label={label}
             onPressedChange={props.onIncludeIgnoredChange}
           >
-            <EyeOff />
+            {props.includeIgnored ? <Eye /> : <EyeOff />}
           </Toggle>
         }
       />
