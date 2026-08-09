@@ -44,7 +44,6 @@ import {
   FolderIcon,
   FolderPlusIcon,
   GitBranchIcon,
-  GripVerticalIcon,
   EllipsisIcon,
   MessageSquareIcon,
   PinIcon,
@@ -65,6 +64,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 import { useParams, useRouter } from "@tanstack/react-router";
@@ -406,8 +406,8 @@ function SnoozePopoverButton(props: {
   );
 }
 
-// Sortable state shared by pinned rows (whole-card pointer target) and active
-// rows (dedicated, keyboard-enabled handle).
+// Sortable state shared by pinned and active thread cards. The card surface is
+// the activator; its distance-constrained pointer sensor preserves plain clicks.
 type SortableThreadRowBag = Pick<
   ReturnType<typeof useSortable>,
   | "attributes"
@@ -673,11 +673,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // the descriptor is not loaded. Pinning itself lives in the context menu.
   pinningSupported: boolean;
   isPinned: boolean;
-  // Present only on pinned cards whose server supports reordering: dnd-kit
-  // sortable bag applied to the card root so the whole card drags (the
-  // pointer sensor's distance constraint keeps plain clicks working).
+  // Present only on cards whose server supports reordering: dnd-kit sortable
+  // state applied to the card root so the whole card drags.
   sortable?: SortableThreadRowBag | undefined;
-  sortableHandle?: boolean | undefined;
   // Compact wake countdown ("2h") for rows in the snoozed shelf.
   snoozeWakeLabelText: string | null;
   // When a snooze ended (timer or early wake); drives the Woke pill until
@@ -920,6 +918,34 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       onThreadActivate(threadRef);
     },
     [onThreadActivate, threadRef],
+  );
+  const sortable = props.sortable;
+  const handleSortablePointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target !== event.currentTarget &&
+        target.closest("button, a, input, textarea, select, [contenteditable='true']")
+      ) {
+        return;
+      }
+      sortable?.listeners?.onPointerDown?.(event);
+    },
+    [sortable],
+  );
+  const handleCardKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (event.target === event.currentTarget && sortable) {
+        if (event.key === " ") {
+          sortable.listeners?.onKeyDown?.(event);
+          return;
+        }
+        if (sortable.isDragging) return;
+      }
+      handleKeyDown(event);
+    },
+    [handleKeyDown, sortable],
   );
   const handleDoubleClick = useCallback(
     (event: ReactMouseEvent) => {
@@ -1245,7 +1271,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
 
   const diff = latestTurnDiff(thread);
 
-  const sortable = props.sortable;
   return (
     <li
       data-thread-item
@@ -1258,7 +1283,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             }
           : undefined
       }
-      {...(!props.sortableHandle ? (sortable?.listeners ?? {}) : {})}
       className={cn(
         "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_96px]",
         sortable?.isDragging && "z-20 opacity-80",
@@ -1268,46 +1292,30 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         <TooltipTrigger
           render={
             <div
+              ref={sortable?.setActivatorNodeRef}
+              {...(sortable?.attributes ?? {})}
               role="button"
               tabIndex={0}
               data-testid="sidebar-row-card"
               aria-busy={isRegeneratingTitle || undefined}
-              className={rowSurfaceClassName}
+              className={cn(rowSurfaceClassName, sortable && "cursor-grab active:cursor-grabbing")}
               onClick={handleClick}
               onDoubleClick={handleDoubleClick}
-              onKeyDown={handleKeyDown}
+              onPointerDown={sortable ? handleSortablePointerDown : undefined}
+              onKeyDown={handleCardKeyDown}
               onContextMenu={handleContextMenu}
             />
           }
         >
           <div className="relative z-10 h-[4.875rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
             <div className="flex h-5 min-w-0 items-center gap-1.5">
-              <span className="relative size-4 shrink-0">
+              <span className="size-4 shrink-0">
                 <ProjectFavicon
                   environmentId={thread.environmentId}
                   cwd={props.projectCwd ?? ""}
                   faviconPath={props.projectFaviconPath}
-                  className={cn(
-                    "size-4 transition-opacity",
-                    props.sortableHandle &&
-                      "group-hover/sidebar-row:opacity-0 group-has-[:focus-visible]/sidebar-row:opacity-0",
-                  )}
+                  className="size-4"
                 />
-                {props.sortableHandle && sortable ? (
-                  <button
-                    ref={sortable.setActivatorNodeRef}
-                    type="button"
-                    aria-label={`Reorder ${thread.title}`}
-                    title="Drag to reorder"
-                    {...sortable.attributes}
-                    {...sortable.listeners}
-                    onClick={(event) => event.stopPropagation()}
-                    onDoubleClick={(event) => event.stopPropagation()}
-                    className="absolute inset-0 inline-flex cursor-grab items-center justify-center rounded-sm text-muted-foreground opacity-0 outline-none transition-opacity active:cursor-grabbing group-hover/sidebar-row:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <GripVerticalIcon aria-hidden className="size-4" />
-                  </button>
-                ) : null}
               </span>
               {props.projectTitle ? (
                 <span
@@ -3688,7 +3696,6 @@ export default function Sidebar() {
                         }
                         isPinned={section === "pinned"}
                         sortable={sortable}
-                        sortableHandle={section === "active" && sortable !== undefined}
                         snoozeWakeLabelText={
                           section === "snoozed" && thread.snoozedUntil != null
                             ? snoozeWakeLabel(thread.snoozedUntil, {

@@ -1,9 +1,9 @@
 # Organizing threads
 
-On web and desktop, hover an active thread and drag the handle that replaces its project icon to
-place it anywhere in the active section. The handle also supports keyboard reordering. New threads
-appear below the manually arranged threads, and activity does not move rows you placed. Settled and
-snoozed threads keep their automatic shelf ordering.
+On web and desktop, drag an active thread card anywhere within the active section. To reorder with a
+keyboard, focus the card and press Space. New threads appear below the manually arranged threads,
+and activity does not move rows you placed. Settled and snoozed threads keep their automatic shelf
+ordering.
 
 The order is stored by the server, reflected on mobile, and shared by other connected clients. Open
 the project filter menu and choose **Reset active thread order** to return the visible active section
