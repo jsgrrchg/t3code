@@ -1063,6 +1063,38 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               },
             ] as const)
           : []),
+        ...(selectedProvider === "codex"
+          ? ([
+              {
+                id: "slash:review",
+                type: "slash-command",
+                command: "review",
+                label: "/review",
+                description: "Review uncommitted changes",
+              },
+              {
+                id: "slash:review-branch",
+                type: "slash-command",
+                command: "review-branch",
+                label: "/review-branch",
+                description: "Review changes against a base branch",
+              },
+              {
+                id: "slash:review-commit",
+                type: "slash-command",
+                command: "review-commit",
+                label: "/review-commit",
+                description: "Review changes introduced by a commit",
+              },
+              {
+                id: "slash:compact",
+                type: "slash-command",
+                command: "compact",
+                label: "/compact",
+                description: "Summarize the conversation to free context",
+              },
+            ] as const)
+          : []),
       ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
       const providerSlashCommandItems = (selectedProviderStatus?.slashCommands ?? []).map(
         (command) => ({
@@ -1688,7 +1720,22 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           }
           return;
         }
-        void handleInteractionModeChange(item.command === "plan" ? "plan" : "default");
+        if (item.command !== "plan" && item.command !== "default") {
+          const replacement = `/${item.command} `;
+          const applied = applyPromptReplacement(
+            trigger.rangeStart,
+            trigger.rangeEnd,
+            replacement,
+            {
+              expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+            },
+          );
+          if (applied) {
+            setComposerHighlightedItemId(null);
+          }
+          return;
+        }
+        void handleInteractionModeChange(item.command);
         const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
           expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
         });

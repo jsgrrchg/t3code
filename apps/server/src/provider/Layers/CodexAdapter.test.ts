@@ -14,6 +14,7 @@ import {
   type ProviderEvent,
   type ProviderSession,
   type ProviderTurnStartResult,
+  type ProviderThreadAction,
   type ProviderUserInputAnswers,
   ThreadId,
   TurnId,
@@ -83,6 +84,10 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
       }),
   );
 
+  public readonly runThreadActionImpl = vi.fn(
+    (_action: ProviderThreadAction): Promise<void> => Promise.resolve(undefined),
+  );
+
   public readonly interruptTurnImpl = vi.fn(
     (_turnId?: TurnId): Promise<void> => Promise.resolve(undefined),
   );
@@ -129,6 +134,10 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
 
   sendTurn(input: CodexSessionRuntimeSendTurnInput) {
     return Effect.promise(() => this.sendTurnImpl(input));
+  }
+
+  runThreadAction(action: ProviderThreadAction) {
+    return Effect.promise(() => this.runThreadActionImpl(action));
   }
 
   interruptTurn(turnId?: TurnId) {
@@ -357,6 +366,33 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         effort: "high",
         serviceTier: "priority",
       });
+    }),
+  );
+
+  it.effect("routes native review and compact actions to the Codex runtime", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("sess-actions"),
+        runtimeMode: "full-access",
+      });
+      const runtime = sessionRuntimeFactory.lastRuntime;
+      NodeAssert.ok(runtime);
+      runtime.runThreadActionImpl.mockClear();
+      const runThreadAction = adapter.runThreadAction;
+      NodeAssert.ok(runThreadAction);
+
+      yield* runThreadAction(asThreadId("sess-actions"), {
+        type: "review",
+        target: { type: "baseBranch", branch: "main" },
+      });
+      yield* runThreadAction(asThreadId("sess-actions"), { type: "compact" });
+
+      NodeAssert.deepStrictEqual(runtime.runThreadActionImpl.mock.calls, [
+        [{ type: "review", target: { type: "baseBranch", branch: "main" } }],
+        [{ type: "compact" }],
+      ]);
     }),
   );
 

@@ -92,6 +92,18 @@ click the blurred email to reveal it.
 
 Use display names and accent colors to make accounts easy to tell apart in the model picker.
 
+## Review Or Compact A Thread
+
+Type `/` in the composer to use Codex actions without leaving T3 Code:
+
+- `/review` reviews staged, unstaged, and untracked changes.
+- `/review-branch <branch>` reviews the current branch against a base branch.
+- `/review-commit <sha>` reviews the changes introduced by a commit.
+- `/compact` summarizes earlier conversation context so the thread can continue with more room.
+
+These actions require an existing Codex thread. They run on the connected T3 environment, so they
+also work when the app is connected remotely to that environment.
+
 ## I Need A Different API Key Or Endpoint
 
 Use the provider's Environment variables section in Settings.

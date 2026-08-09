@@ -141,6 +141,19 @@ export type ProviderApprovalDecision = typeof ProviderApprovalDecision.Type;
 export const ProviderUserInputAnswers = Schema.Record(Schema.String, Schema.Unknown);
 export type ProviderUserInputAnswers = typeof ProviderUserInputAnswers.Type;
 
+export const ProviderThreadReviewTarget = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("uncommittedChanges") }),
+  Schema.Struct({ type: Schema.Literal("baseBranch"), branch: TrimmedNonEmptyString }),
+  Schema.Struct({ type: Schema.Literal("commit"), sha: TrimmedNonEmptyString }),
+]);
+export type ProviderThreadReviewTarget = typeof ProviderThreadReviewTarget.Type;
+
+export const ProviderThreadAction = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("review"), target: ProviderThreadReviewTarget }),
+  Schema.Struct({ type: Schema.Literal("compact") }),
+]);
+export type ProviderThreadAction = typeof ProviderThreadAction.Type;
+
 export const PROVIDER_SEND_TURN_MAX_INPUT_CHARS = 120_000;
 export const PROVIDER_SEND_TURN_MAX_ATTACHMENTS = 8;
 export const PROVIDER_SEND_TURN_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -856,6 +869,14 @@ const ThreadTurnInterruptCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadProviderActionRunCommand = Schema.Struct({
+  type: Schema.Literal("thread.provider-action.run"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  action: ProviderThreadAction,
+  createdAt: IsoDateTime,
+});
+
 const ThreadApprovalRespondCommand = Schema.Struct({
   type: Schema.Literal("thread.approval.respond"),
   commandId: CommandId,
@@ -915,6 +936,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadInteractionModeSetCommand,
   ThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
+  ThreadProviderActionRunCommand,
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
@@ -943,6 +965,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadInteractionModeSetCommand,
   ClientThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
+  ThreadProviderActionRunCommand,
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
@@ -1062,6 +1085,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.message-sent",
   "thread.turn-start-requested",
   "thread.turn-interrupt-requested",
+  "thread.provider-action-requested",
   "thread.approval-response-requested",
   "thread.user-input-response-requested",
   "thread.checkpoint-revert-requested",
@@ -1249,6 +1273,12 @@ export const ThreadTurnInterruptRequestedPayload = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+export const ThreadProviderActionRequestedPayload = Schema.Struct({
+  threadId: ThreadId,
+  action: ProviderThreadAction,
+  createdAt: IsoDateTime,
+});
+
 export const ThreadApprovalResponseRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   requestId: ApprovalRequestId,
@@ -1426,6 +1456,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.turn-interrupt-requested"),
     payload: ThreadTurnInterruptRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.provider-action-requested"),
+    payload: ThreadProviderActionRequestedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

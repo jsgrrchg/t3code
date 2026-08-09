@@ -1,8 +1,20 @@
 import { splitPromptIntoComposerSegments } from "./composer-editor-mentions";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
+import type { ProviderThreadAction } from "@t3tools/contracts";
 
 export type ComposerTriggerKind = "path" | "slash-command" | "skill";
-export type ComposerSlashCommand = "model" | "plan" | "default";
+export type ComposerSlashCommand =
+  | "model"
+  | "plan"
+  | "default"
+  | "review"
+  | "review-branch"
+  | "review-commit"
+  | "compact";
+
+export type ParsedProviderThreadActionCommand =
+  | { readonly action: ProviderThreadAction; readonly error?: never }
+  | { readonly action?: never; readonly error: string };
 
 export interface ComposerTrigger {
   kind: ComposerTriggerKind;
@@ -262,9 +274,7 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
   };
 }
 
-export function parseStandaloneComposerSlashCommand(
-  text: string,
-): Exclude<ComposerSlashCommand, "model"> | null {
+export function parseStandaloneComposerSlashCommand(text: string): "plan" | "default" | null {
   const match = /^\/(plan|default)\s*$/i.exec(text.trim());
   if (!match) {
     return null;
@@ -272,6 +282,37 @@ export function parseStandaloneComposerSlashCommand(
   const command = match[1]?.toLowerCase();
   if (command === "plan") return "plan";
   return "default";
+}
+
+export function parseProviderThreadActionCommand(
+  text: string,
+): ParsedProviderThreadActionCommand | null {
+  const match = /^\/(review|review-branch|review-commit|compact)(?:\s+(.*))?$/i.exec(text.trim());
+  if (!match) return null;
+
+  const command = match[1]?.toLowerCase();
+  const argument = match[2]?.trim();
+  if (command === "review") {
+    return argument
+      ? { error: "/review does not accept an argument. Use /review-branch or /review-commit." }
+      : { action: { type: "review", target: { type: "uncommittedChanges" } } };
+  }
+  if (command === "compact") {
+    return argument
+      ? { error: "/compact does not accept an argument." }
+      : { action: { type: "compact" } };
+  }
+  if (!argument) {
+    return {
+      error:
+        command === "review-branch"
+          ? "Enter a base branch after /review-branch."
+          : "Enter a commit SHA after /review-commit.",
+    };
+  }
+  return command === "review-branch"
+    ? { action: { type: "review", target: { type: "baseBranch", branch: argument } } }
+    : { action: { type: "review", target: { type: "commit", sha: argument } } };
 }
 
 export function replaceTextRange(

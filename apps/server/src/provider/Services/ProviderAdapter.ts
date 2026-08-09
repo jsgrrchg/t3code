@@ -13,6 +13,7 @@ import type {
   ProviderDriverKind,
   ProviderUserInputAnswers,
   ProviderRuntimeEvent,
+  ProviderThreadAction,
   ProviderSendTurnInput,
   ProviderSession,
   ProviderSessionStartInput,
@@ -62,6 +63,12 @@ export interface ProviderAdapterShape<TError> {
   readonly sendTurn: (
     input: ProviderSendTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, TError>;
+
+  /** Run an optional provider-native action against an active thread. */
+  readonly runThreadAction?: (
+    threadId: ThreadId,
+    action: ProviderThreadAction,
+  ) => Effect.Effect<void, TError>;
 
   /**
    * Interrupt an active turn.

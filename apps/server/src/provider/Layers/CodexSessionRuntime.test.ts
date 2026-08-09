@@ -15,6 +15,7 @@ import {
 } from "../CodexDeveloperInstructions.ts";
 import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import {
+  buildCodexThreadActionRequest,
   buildTurnStartParams,
   hasConfiguredMcpServer,
   isRecoverableThreadResumeError,
@@ -35,6 +36,32 @@ describe("CodexSessionRuntimeIdentifierGenerationError", () => {
     NodeAssert.equal(
       error.message,
       "Failed to generate Codex App Server identifier for provider-event.",
+    );
+  });
+});
+
+describe("buildCodexThreadActionRequest", () => {
+  it("maps native review targets and compaction to dedicated app-server RPCs", () => {
+    NodeAssert.deepStrictEqual(
+      buildCodexThreadActionRequest("provider-thread-1", {
+        type: "review",
+        target: { type: "commit", sha: "9e40f9f" },
+      }),
+      {
+        method: "review/start",
+        params: {
+          threadId: "provider-thread-1",
+          delivery: "inline",
+          target: { type: "commit", sha: "9e40f9f" },
+        },
+      },
+    );
+    NodeAssert.deepStrictEqual(
+      buildCodexThreadActionRequest("provider-thread-1", { type: "compact" }),
+      {
+        method: "thread/compact/start",
+        params: { threadId: "provider-thread-1" },
+      },
     );
   });
 });

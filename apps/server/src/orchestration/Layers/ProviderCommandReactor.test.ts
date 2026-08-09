@@ -235,6 +235,7 @@ describe("ProviderCommandReactor", () => {
         turnId: asTurnId("turn-1"),
       }),
     );
+    const runThreadAction = vi.fn<ProviderServiceShape["runThreadAction"]>(() => Effect.void);
     const interruptTurn = vi.fn((_: unknown) => Effect.void);
     const respondToRequest = vi.fn<ProviderServiceShape["respondToRequest"]>(() => Effect.void);
     const respondToUserInput = vi.fn<ProviderServiceShape["respondToUserInput"]>(() => Effect.void);
@@ -311,6 +312,7 @@ describe("ProviderCommandReactor", () => {
     const service: ProviderServiceShape = {
       startSession: startSession as ProviderServiceShape["startSession"],
       sendTurn: sendTurn as ProviderServiceShape["sendTurn"],
+      runThreadAction,
       interruptTurn: interruptTurn as ProviderServiceShape["interruptTurn"],
       respondToRequest: respondToRequest as ProviderServiceShape["respondToRequest"],
       respondToUserInput: respondToUserInput as ProviderServiceShape["respondToUserInput"],
@@ -494,6 +496,7 @@ describe("ProviderCommandReactor", () => {
       readModel: () => Effect.runPromise(snapshotQuery.getSnapshot()),
       startSession,
       sendTurn,
+      runThreadAction,
       interruptTurn,
       respondToRequest,
       respondToUserInput,
@@ -2484,6 +2487,49 @@ describe("ProviderCommandReactor", () => {
     expect(harness.interruptTurn.mock.calls[0]?.[0]).toEqual({
       threadId: "thread-1",
     });
+  });
+
+  it("routes provider-native review actions through the active session", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-before-provider-review"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("message-before-provider-review"),
+          role: "user",
+          text: "prepare the session",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    harness.startSession.mockClear();
+    harness.sendTurn.mockClear();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.provider-action.run",
+        commandId: CommandId.make("cmd-provider-review"),
+        threadId: ThreadId.make("thread-1"),
+        action: { type: "review", target: { type: "commit", sha: "9e40f9f" } },
+        createdAt: now,
+      }),
+    );
+    await waitFor(() => harness.runThreadAction.mock.calls.length === 1);
+
+    expect(harness.startSession.mock.calls.length).toBe(0);
+    expect(harness.runThreadAction.mock.calls[0]?.[0]).toEqual({
+      threadId: "thread-1",
+      action: { type: "review", target: { type: "commit", sha: "9e40f9f" } },
+    });
+    expect(harness.sendTurn.mock.calls.length).toBe(0);
   });
 
   it("starts a fresh session when only projected session state exists", async () => {

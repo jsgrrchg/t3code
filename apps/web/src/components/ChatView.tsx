@@ -76,6 +76,7 @@ import { readLocalApi } from "../localApi";
 import { useDiffPanelStore } from "../diffPanelStore";
 import {
   collapseExpandedComposerCursor,
+  parseProviderThreadActionCommand,
   parseStandaloneComposerSlashCommand,
 } from "../composer-logic";
 import {
@@ -1204,6 +1205,9 @@ function ChatViewContent(props: ChatViewProps) {
     reportFailure: false,
   });
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
+  const runThreadProviderAction = useAtomCommand(threadEnvironment.runProviderAction, {
+    reportFailure: false,
+  });
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, {
     reportFailure: false,
   });
@@ -4880,6 +4884,59 @@ function ChatViewContent(props: ChatViewProps) {
         composerPreviewAnnotations.length +
         composerReviewComments.length,
     });
+    const providerThreadActionCommand =
+      ctxSelectedProvider === "codex" &&
+      composerImages.length === 0 &&
+      sendableComposerTerminalContexts.length === 0 &&
+      composerElementContexts.length === 0 &&
+      composerPreviewAnnotations.length === 0 &&
+      composerReviewComments.length === 0
+        ? parseProviderThreadActionCommand(trimmed)
+        : null;
+    if (providerThreadActionCommand) {
+      if ("error" in providerThreadActionCommand) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: "Invalid Codex command",
+            description: providerThreadActionCommand.error,
+          }),
+        );
+        return;
+      }
+      if (!isServerThread) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: "Start the thread first",
+            description: "Codex review and compaction require an existing thread.",
+          }),
+        );
+        return;
+      }
+      const actionResult = await runThreadProviderAction({
+        environmentId,
+        input: {
+          threadId: activeThread.id,
+          action: providerThreadActionCommand.action,
+        },
+      });
+      if (actionResult._tag === "Failure") {
+        if (!isAtomCommandInterrupted(actionResult)) {
+          const error = squashAtomCommandFailure(actionResult);
+          setThreadError(
+            activeThread.id,
+            error instanceof Error ? error.message : "Failed to run the Codex command.",
+          );
+        }
+        return;
+      }
+      promptRef.current = "";
+      clearComposerDraftContent(composerDraftTarget);
+      composerRef.current?.resetCursorState();
+      acknowledgeActiveThreadWoke();
+      return;
+    }
     if (!directAnnotation && showPlanFollowUpPrompt && activeProposedPlan) {
       const followUp = resolvePlanFollowUpSubmission({
         draftText: trimmed,

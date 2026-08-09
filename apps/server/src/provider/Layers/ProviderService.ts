@@ -16,6 +16,7 @@ import {
   ProviderInterruptTurnInput,
   ProviderRespondToRequestInput,
   ProviderRespondToUserInputInput,
+  ProviderRunThreadActionInput,
   ProviderSendTurnInput,
   ProviderSessionStartInput,
   ProviderStopSessionInput,
@@ -774,6 +775,29 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     );
   });
 
+  const runThreadAction: ProviderServiceMethod<"runThreadAction"> = Effect.fn("runThreadAction")(
+    function* (rawInput) {
+      const input = yield* decodeInputOrValidationError({
+        operation: "ProviderService.runThreadAction",
+        schema: ProviderRunThreadActionInput,
+        payload: rawInput,
+      });
+      const routed = yield* resolveRoutableSession({
+        threadId: input.threadId,
+        operation: "ProviderService.runThreadAction",
+        allowRecovery: true,
+      });
+      if (!routed.adapter.runThreadAction) {
+        return yield* toValidationError(
+          "ProviderService.runThreadAction",
+          `Provider '${routed.adapter.provider}' does not support native thread actions`,
+        );
+      }
+      yield* McpSessionRegistry.touchActiveMcpThread(input.threadId);
+      yield* routed.adapter.runThreadAction(input.threadId, input.action);
+    },
+  );
+
   const interruptTurn: ProviderServiceMethod<"interruptTurn"> = Effect.fn("interruptTurn")(
     function* (rawInput) {
       const input = yield* decodeInputOrValidationError({
@@ -1128,6 +1152,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   return {
     startSession,
     sendTurn,
+    runThreadAction,
     interruptTurn,
     respondToRequest,
     respondToUserInput,

@@ -25,6 +25,7 @@ import {
   ProviderApprovalDecision,
   ThreadId,
   ProviderSendTurnInput,
+  type ProviderThreadAction,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Crypto from "effect/Crypto";
@@ -1830,6 +1831,24 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       .pipe(Effect.mapError((cause) => mapCodexRuntimeError(input.threadId, "turn/start", cause)));
   });
 
+  const runThreadAction = Effect.fn("runThreadAction")(function* (
+    threadId: ThreadId,
+    action: ProviderThreadAction,
+  ) {
+    const session = yield* requireSession(threadId);
+    yield* session.runtime
+      .runThreadAction(action)
+      .pipe(
+        Effect.mapError((cause) =>
+          mapCodexRuntimeError(
+            threadId,
+            action.type === "compact" ? "thread/compact/start" : "review/start",
+            cause,
+          ),
+        ),
+      );
+  });
+
   const requireSession = Effect.fn("requireSession")(function* (threadId: ThreadId) {
     const session = sessions.get(threadId);
     if (!session || session.stopped) {
@@ -1974,6 +1993,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     },
     startSession,
     sendTurn,
+    runThreadAction,
     interruptTurn,
     readThread,
     rollbackThread,

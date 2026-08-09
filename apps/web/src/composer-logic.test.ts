@@ -6,6 +6,7 @@ import {
   detectComposerTrigger,
   expandCollapsedComposerCursor,
   isCollapsedCursorAdjacentToInlineToken,
+  parseProviderThreadActionCommand,
   parseStandaloneComposerSlashCommand,
   replaceTextRange,
   shouldSubmitComposerOnEnter,
@@ -370,5 +371,29 @@ describe("parseStandaloneComposerSlashCommand", () => {
 
   it("ignores slash commands with extra message text", () => {
     expect(parseStandaloneComposerSlashCommand("/plan explain this")).toBeNull();
+  });
+});
+
+describe("parseProviderThreadActionCommand", () => {
+  it("maps review commands to native Codex review targets", () => {
+    expect(parseProviderThreadActionCommand("/review")).toEqual({
+      action: { type: "review", target: { type: "uncommittedChanges" } },
+    });
+    expect(parseProviderThreadActionCommand("/review-branch main")).toEqual({
+      action: { type: "review", target: { type: "baseBranch", branch: "main" } },
+    });
+    expect(parseProviderThreadActionCommand("/review-commit 9e40f9f")).toEqual({
+      action: { type: "review", target: { type: "commit", sha: "9e40f9f" } },
+    });
+  });
+
+  it("maps compact and validates required review arguments", () => {
+    expect(parseProviderThreadActionCommand(" /compact ")).toEqual({
+      action: { type: "compact" },
+    });
+    expect(parseProviderThreadActionCommand("/review-branch")).toEqual({
+      error: "Enter a base branch after /review-branch.",
+    });
+    expect(parseProviderThreadActionCommand("ordinary message")).toBeNull();
   });
 });

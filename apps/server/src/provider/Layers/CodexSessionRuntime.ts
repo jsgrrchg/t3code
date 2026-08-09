@@ -9,6 +9,7 @@ import {
   type ProviderEvent,
   type ProviderInteractionMode,
   type ProviderRequestKind,
+  type ProviderThreadAction,
   type ProviderSession,
   type ProviderTurnStartResult,
   type ProviderUserInputAnswers,
@@ -88,6 +89,34 @@ export type CodexTurnStartParamsWithCollaborationMode =
   typeof CodexTurnStartParamsWithCollaborationMode.Type;
 
 export type CodexResumeCursor = typeof CodexResumeCursorSchema.Type;
+export type CodexThreadActionRequest =
+  | {
+      readonly method: "thread/compact/start";
+      readonly params: EffectCodexSchema.V2ThreadCompactStartParams;
+    }
+  | {
+      readonly method: "review/start";
+      readonly params: EffectCodexSchema.V2ReviewStartParams;
+    };
+
+export function buildCodexThreadActionRequest(
+  providerThreadId: string,
+  action: ProviderThreadAction,
+): CodexThreadActionRequest {
+  return action.type === "compact"
+    ? {
+        method: "thread/compact/start",
+        params: { threadId: providerThreadId },
+      }
+    : {
+        method: "review/start",
+        params: {
+          threadId: providerThreadId,
+          delivery: "inline",
+          target: action.target,
+        },
+      };
+}
 type CodexServiceTier = NonNullable<EffectCodexSchema.V2ThreadStartParams["serviceTier"]>;
 type CodexThreadItem =
   | EffectCodexSchema.V2ThreadReadResponse["thread"]["turns"][number]["items"][number]
@@ -136,6 +165,9 @@ export interface CodexSessionRuntimeShape {
   readonly sendTurn: (
     input: CodexSessionRuntimeSendTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, CodexSessionRuntimeError>;
+  readonly runThreadAction: (
+    action: ProviderThreadAction,
+  ) => Effect.Effect<void, CodexSessionRuntimeError>;
   readonly interruptTurn: (turnId?: TurnId) => Effect.Effect<void, CodexSessionRuntimeError>;
   readonly readThread: Effect.Effect<CodexThreadSnapshot, CodexSessionRuntimeError>;
   readonly rollbackThread: (
@@ -1798,6 +1830,21 @@ export const makeCodexSessionRuntime = (
               ? { resumeCursor: { threadId: resumedProviderThreadId } }
               : {}),
           } satisfies ProviderTurnStartResult;
+        }),
+      runThreadAction: (action) =>
+        Effect.gen(function* () {
+          const providerThreadId = yield* readProviderThreadId;
+          const request = buildCodexThreadActionRequest(providerThreadId, action);
+          if (request.method === "thread/compact/start") {
+            yield* client.request(request.method, request.params);
+            return;
+          }
+
+          const response = yield* client.request(request.method, request.params);
+          yield* updateSession(sessionRef, {
+            status: "running",
+            activeTurnId: TurnId.make(response.turn.id),
+          });
         }),
       interruptTurn: (turnId) =>
         Effect.gen(function* () {
