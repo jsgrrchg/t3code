@@ -615,6 +615,33 @@ describe("buildHomeThreadGroups", () => {
     expect(group?.threads.map((thread) => thread.id)).toEqual(["recent-1", "recent-2", "old"]);
   });
 
+  it("does not expose panel chats in mobile thread history", () => {
+    const environmentId = EnvironmentId.make("environment-1");
+    const project = makeProject({
+      environmentId,
+      id: ProjectId.make("project-1"),
+      title: "T3 Code",
+    });
+    const primary = makeThread({
+      environmentId,
+      id: ThreadId.make("thread-primary"),
+      projectId: project.id,
+      title: "Primary",
+      updatedAt: "2026-06-28T00:00:00.000Z",
+    });
+    const panelChat = makeThread({
+      environmentId,
+      id: ThreadId.make("thread-panel"),
+      projectId: project.id,
+      parentThreadId: primary.id,
+      title: "Panel chat",
+      updatedAt: "2026-06-29T00:00:00.000Z",
+    });
+
+    const group = buildGroups([project], [primary, panelChat])[0];
+    expect(group?.threads.map((thread) => thread.id)).toEqual([primary.id]);
+  });
+
   it("falls back to the most recent 3 threads when none are within 5 days", () => {
     const environmentId = EnvironmentId.make("environment-1");
     const project = makeProject({

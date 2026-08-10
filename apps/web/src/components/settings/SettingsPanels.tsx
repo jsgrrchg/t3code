@@ -2314,10 +2314,12 @@ export function ArchivedThreadsPanel() {
       ),
     );
     const threads = archivedSnapshots.flatMap(({ environmentId, snapshot }) =>
-      snapshot.threads.map((thread) => ({
-        ...thread,
-        environmentId,
-      })),
+      snapshot.threads
+        .filter((thread) => thread.parentThreadId == null)
+        .map((thread) => ({
+          ...thread,
+          environmentId,
+        })),
     );
 
     const archivedProjects = Array.from(projectsByEnvironmentAndId.values());

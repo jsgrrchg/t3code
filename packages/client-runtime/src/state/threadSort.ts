@@ -1,4 +1,4 @@
-import type { ProjectId } from "@t3tools/contracts";
+import { isTopLevelThread, type ProjectId } from "@t3tools/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
@@ -92,12 +92,16 @@ export function getLatestThreadForProject<
   T extends {
     readonly id: string;
     readonly projectId: ProjectId;
+    readonly parentThreadId?: string | null | undefined;
     readonly archivedAt: string | null;
   } & ThreadSortInput,
 >(threads: readonly T[], projectId: ProjectId, sortOrder: SidebarThreadSortOrder): T | null {
   return (
     sortThreads(
-      threads.filter((thread) => thread.projectId === projectId && thread.archivedAt === null),
+      threads.filter(
+        (thread) =>
+          thread.projectId === projectId && thread.archivedAt === null && isTopLevelThread(thread),
+      ),
       sortOrder,
     )[0] ?? null
   );

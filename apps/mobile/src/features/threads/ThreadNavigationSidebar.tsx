@@ -10,7 +10,7 @@ import {
 import { LegendList } from "@legendapp/list/react-native";
 import type { MenuAction } from "@react-native-menu/menu";
 import { useAtomValue } from "@effect/atom-react";
-import type { EnvironmentId } from "@t3tools/contracts";
+import { isTopLevelThread, type EnvironmentId } from "@t3tools/contracts";
 import { sortPinnedThreadsByOrderKey } from "@t3tools/client-runtime/state/thread-sort";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { LayoutChangeEvent, NativeScrollEvent, NativeSyntheticEvent } from "react-native";
@@ -330,11 +330,12 @@ function ThreadNavigationSidebarPane(
   );
   const scopedThreads = useMemo(
     () =>
-      selectedProjectRefs === null
-        ? threads
-        : threads.filter((thread) =>
-            selectedProjectRefs.has(scopedProjectKey(thread.environmentId, thread.projectId)),
-          ),
+      threads.filter(
+        (thread) =>
+          isTopLevelThread(thread) &&
+          (selectedProjectRefs === null ||
+            selectedProjectRefs.has(scopedProjectKey(thread.environmentId, thread.projectId))),
+      ),
     [selectedProjectRefs, threads],
   );
   const scopedPendingTasks = useMemo(
@@ -513,6 +514,7 @@ function ThreadNavigationSidebarPane(
         (thread) =>
           thread.pinnedAt != null &&
           thread.archivedAt === null &&
+          isTopLevelThread(thread) &&
           pinReorderEnvironmentIds.has(thread.environmentId),
       ),
     );
@@ -530,7 +532,7 @@ function ThreadNavigationSidebarPane(
         nextSnoozeWakeAt: null,
       };
     return buildThreadListV2Items({
-      threads: threads.filter((thread) => thread.archivedAt === null),
+      threads: threads.filter((thread) => thread.archivedAt === null && isTopLevelThread(thread)),
       environmentId: options.selectedEnvironmentId,
       projectRefs: selectedProjectScope === null ? null : selectedProjectScope.projectRefs,
       searchQuery: props.searchQuery,

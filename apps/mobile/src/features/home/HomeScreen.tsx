@@ -12,10 +12,11 @@ import {
   type EnvironmentThreadSearchMatch,
 } from "@t3tools/client-runtime/state/thread-search";
 import { sortPinnedThreadsByOrderKey } from "@t3tools/client-runtime/state/thread-sort";
-import type {
-  EnvironmentId,
-  SidebarProjectGroupingMode,
-  SidebarThreadSortOrder,
+import {
+  isTopLevelThread,
+  type EnvironmentId,
+  type SidebarProjectGroupingMode,
+  type SidebarThreadSortOrder,
 } from "@t3tools/contracts";
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/unstable/reactivity";
@@ -346,11 +347,12 @@ export function HomeScreen(props: HomeScreenProps) {
   );
   const scopedThreads = useMemo(
     () =>
-      selectedProjectRefKeys === null
-        ? props.threads
-        : props.threads.filter((thread) =>
-            selectedProjectRefKeys.has(scopedProjectKey(thread.environmentId, thread.projectId)),
-          ),
+      props.threads.filter(
+        (thread) =>
+          isTopLevelThread(thread) &&
+          (selectedProjectRefKeys === null ||
+            selectedProjectRefKeys.has(scopedProjectKey(thread.environmentId, thread.projectId))),
+      ),
     [props.threads, selectedProjectRefKeys],
   );
   const scopedPendingTasks = useMemo(
@@ -624,6 +626,7 @@ export function HomeScreen(props: HomeScreenProps) {
         (thread) =>
           thread.pinnedAt != null &&
           thread.archivedAt === null &&
+          isTopLevelThread(thread) &&
           pinReorderEnvironmentIds.has(thread.environmentId),
       ),
     );
@@ -643,7 +646,9 @@ export function HomeScreen(props: HomeScreenProps) {
     // Settled threads are live shells; archived threads keep their original
     // "hidden from lists" meaning.
     return buildThreadListV2Items({
-      threads: props.threads.filter((thread) => thread.archivedAt === null),
+      threads: props.threads.filter(
+        (thread) => thread.archivedAt === null && isTopLevelThread(thread),
+      ),
       environmentId: props.selectedEnvironmentId,
       projectRefs: v2ScopedProjectGroup === null ? null : v2ScopedProjectGroup.projectRefs,
       searchQuery: props.searchQuery,
@@ -1010,7 +1015,8 @@ export function HomeScreen(props: HomeScreenProps) {
   // full-page "No threads yet". Settled threads are unarchived live shells,
   // so the v1 check already covers v2.
   const hasAnyThreads =
-    props.threads.some((thread) => thread.archivedAt === null) || props.pendingTasks.length > 0;
+    props.threads.some((thread) => thread.archivedAt === null && isTopLevelThread(thread)) ||
+    props.pendingTasks.length > 0;
   const hasResults = projectGroups.length > 0;
   const selectedEnvironmentLabel =
     props.selectedEnvironmentId === null

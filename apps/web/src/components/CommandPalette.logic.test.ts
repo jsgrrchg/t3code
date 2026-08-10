@@ -288,6 +288,25 @@ describe("buildThreadActionItems", () => {
 
     expect(items.map((item) => item.value)).toEqual(["thread:thread-active"]);
   });
+
+  it("filters panel chats out of primary thread search items", () => {
+    const items = buildThreadActionItems({
+      threads: [
+        makeThread({ id: ThreadId.make("thread-primary"), title: "Primary" }),
+        makeThread({
+          id: ThreadId.make("thread-panel"),
+          parentThreadId: ThreadId.make("thread-primary"),
+          title: "Panel chat",
+        }),
+      ],
+      projectTitleById: new Map([[PROJECT_ID, "Project"]]),
+      sortOrder: "updated_at",
+      icon: null,
+      runThread: async (_thread) => undefined,
+    });
+
+    expect(items.map((item) => item.value)).toEqual(["thread:thread-primary"]);
+  });
 });
 
 describe("buildBrowseGroups", () => {

@@ -235,6 +235,13 @@ describe("sortThreads", () => {
           updatedAt: "2026-03-09T10:06:00.000Z",
           archivedAt: null,
         }),
+        makeThread({
+          id: ThreadId.make("thread-panel"),
+          parentThreadId: ThreadId.make("thread-1"),
+          createdAt: "2026-03-09T10:07:00.000Z",
+          updatedAt: "2026-03-09T10:20:00.000Z",
+          archivedAt: null,
+        }),
       ],
       PROJECT_ID,
       "updated_at",
