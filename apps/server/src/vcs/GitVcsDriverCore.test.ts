@@ -14,7 +14,7 @@ import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-import { GitCommandError, type ReviewDiffFileContentsInput } from "@t3tools/contracts";
+import { GitCommandError, GitObjectId, type ReviewDiffFileContentsInput } from "@t3tools/contracts";
 import { ServerConfig } from "../config.ts";
 import {
   makeGitVcsDriverCore,
@@ -239,6 +239,74 @@ describe("GitVcsDriver.listHistory", () => {
       assert.equal(incomplete._tag, "GitCommandError");
       assert.match(incomplete.detail, /incomplete/);
     }),
+  );
+});
+
+describe("GitVcsDriver historical commit resources", () => {
+  it.effect("reads commit metadata, patch, and validated file contents", () =>
+    Effect.gen(function* () {
+      const driver = yield* GitVcsDriver.GitVcsDriver;
+      const cwd = yield* makeTmpDir("git-commit-resource-");
+      yield* initRepoWithCommit(cwd);
+      const rootSha = GitObjectId.make(yield* git(cwd, ["rev-parse", "HEAD"]));
+
+      const rootDetail = yield* driver.getCommitDetail({ cwd, sha: rootSha });
+      assert.equal(rootDetail.subject, "initial commit");
+      assert.lengthOf(rootDetail.parentShas, 0);
+      assert.equal(rootDetail.changedFileCount, 1);
+
+      const rootDiff = yield* driver.getCommitDiff({ cwd, sha: rootSha });
+      assert.equal(rootDiff.comparison, "root");
+      assert.isNull(rootDiff.baseSha);
+      assert.include(rootDiff.diff, "README.md");
+
+      const rootContents = yield* driver.getCommitDiffFileContents({
+        cwd,
+        sha: rootSha,
+        changeType: "new",
+        oldPath: "README.md",
+        newPath: "README.md",
+      });
+      assert.equal(rootContents.oldContents, "");
+      assert.equal(rootContents.newContents, "# test\n");
+
+      yield* writeTextFile(cwd, "README.md", "# changed\n");
+      yield* git(cwd, ["add", "README.md"]);
+      yield* git(cwd, ["commit", "-m", "change readme", "-m", "Historical body"]);
+      const sha = GitObjectId.make(yield* git(cwd, ["rev-parse", "HEAD"]));
+      const detail = yield* driver.getCommitDetail({ cwd, sha });
+      assert.equal(detail.subject, "change readme");
+      assert.equal(detail.body.trim(), "Historical body");
+      assert.equal(detail.insertions, 1);
+      assert.equal(detail.deletions, 1);
+
+      const diff = yield* driver.getCommitDiff({ cwd, sha });
+      assert.equal(diff.comparison, "first-parent");
+      assert.equal(diff.baseSha, rootSha);
+      assert.include(diff.diff, "-# test");
+      assert.include(diff.diff, "+# changed");
+
+      const contents = yield* driver.getCommitDiffFileContents({
+        cwd,
+        sha,
+        changeType: "change",
+        oldPath: "README.md",
+        newPath: "README.md",
+      });
+      assert.equal(contents.oldContents, "# test\n");
+      assert.equal(contents.newContents, "# changed\n");
+
+      const invalid = yield* driver
+        .getCommitDiffFileContents({
+          cwd,
+          sha,
+          changeType: "change",
+          oldPath: "secret.txt",
+          newPath: "secret.txt",
+        })
+        .pipe(Effect.flip);
+      assert.match(invalid.detail, /does not belong/);
+    }).pipe(Effect.provide(TestLayer)),
   );
 });
 const TestLayer = GitVcsDriver.layer.pipe(

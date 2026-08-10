@@ -8,7 +8,11 @@ import {
 } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
 
-import { createEnvironmentRpcCommand, createEnvironmentRpcQueryAtomFamily } from "./runtime.ts";
+import {
+  createAtomCommandScheduler,
+  createEnvironmentRpcCommand,
+  createEnvironmentRpcQueryAtomFamily,
+} from "./runtime.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import { vcsCommandConcurrency, vcsCommandScheduler } from "./vcsCommandScheduler.ts";
 
@@ -109,8 +113,38 @@ export function appendGitHistoryPage(
 export function createGitEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
 ) {
+  const commitDiffFileScheduler = createAtomCommandScheduler();
   return {
     history: createEnvironmentRpcQueryAtomFamily(runtime, gitHistoryQueryOptions),
+    commitDetail: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:git:commit-detail",
+      tag: WS_METHODS.gitGetCommitDetail,
+      staleTimeMs: 60_000,
+      idleTtlMs: 30 * 60_000,
+    }),
+    commitDiff: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:git:commit-diff",
+      tag: WS_METHODS.gitGetCommitDiff,
+      staleTimeMs: 60_000,
+      idleTtlMs: 30 * 60_000,
+    }),
+    commitDiffFileContents: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:git:commit-diff-file-contents",
+      tag: WS_METHODS.gitGetCommitDiffFileContents,
+      scheduler: commitDiffFileScheduler,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId, input }) =>
+          JSON.stringify([
+            environmentId,
+            input.cwd,
+            input.sha,
+            input.changeType,
+            input.oldPath,
+            input.newPath,
+          ]),
+      },
+    }),
     pullRequestResolution: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:git:resolve-pull-request",
       tag: WS_METHODS.gitResolvePullRequest,

@@ -53,6 +53,9 @@ import {
   EnvironmentAuthorizationError,
   GitCommandError,
   type GitListHistoryInput,
+  type GitGetCommitDetailInput,
+  type GitGetCommitDiffInput,
+  type GitGetCommitDiffFileContentsInput,
   ThreadId,
   type TerminalAttachStreamEvent,
   type TerminalError,
@@ -1038,13 +1041,16 @@ const makeWsRpcLayer = (
           .refreshStatus(cwd)
           .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach, Effect.asVoid);
 
-      const resolveGitHistoryWorkspaceInput = Effect.fn("resolveGitHistoryWorkspaceInput")(
-        function* (input: GitListHistoryInput) {
+      const resolveGitHistoryWorkspaceContext = Effect.fn("resolveGitHistoryWorkspaceContext")(
+        function* (
+          input: Pick<GitListHistoryInput, "projectId" | "threadId" | "cwd">,
+          operation: string,
+        ) {
           const project = yield* projectionSnapshotQuery.getProjectShellById(input.projectId).pipe(
             Effect.mapError(
               (cause) =>
                 new GitCommandError({
-                  operation: "GitWorkflowService.listHistory",
+                  operation,
                   command: "project-context",
                   cwd: input.cwd,
                   detail: "Failed to resolve the selected project for Git history.",
@@ -1054,7 +1060,7 @@ const makeWsRpcLayer = (
           );
           if (Option.isNone(project)) {
             return yield* new GitCommandError({
-              operation: "GitWorkflowService.listHistory",
+              operation,
               command: "project-context",
               cwd: input.cwd,
               detail: "The selected project is no longer registered in this environment.",
@@ -1067,7 +1073,7 @@ const makeWsRpcLayer = (
               Effect.mapError(
                 (cause) =>
                   new GitCommandError({
-                    operation: "GitWorkflowService.listHistory",
+                    operation,
                     command: "thread-context",
                     cwd: input.cwd,
                     detail: "Failed to resolve the selected thread for Git history.",
@@ -1077,7 +1083,7 @@ const makeWsRpcLayer = (
             );
             if (Option.isNone(thread) || thread.value.projectId !== input.projectId) {
               return yield* new GitCommandError({
-                operation: "GitWorkflowService.listHistory",
+                operation,
                 command: "thread-context",
                 cwd: input.cwd,
                 detail: "The selected thread does not belong to the selected project.",
@@ -1086,14 +1092,68 @@ const makeWsRpcLayer = (
             cwd = thread.value.worktreePath ?? project.value.workspaceRoot;
           }
 
+          return { cwd, workspaceRoot: project.value.workspaceRoot };
+        },
+      );
+
+      const resolveGitHistoryWorkspaceInput = Effect.fn("resolveGitHistoryWorkspaceInput")(
+        function* (input: GitListHistoryInput) {
+          const context = yield* resolveGitHistoryWorkspaceContext(
+            input,
+            "GitWorkflowService.listHistory",
+          );
           return {
-            cwd,
-            workspaceRoot: project.value.workspaceRoot,
+            ...context,
             ...(input.cursor !== undefined ? { cursor: input.cursor } : {}),
             ...(input.limit !== undefined ? { limit: input.limit } : {}),
           } satisfies GitWorkflowService.GitListHistoryWorkspaceInput;
         },
       );
+
+      const resolveGitCommitDetailWorkspaceInput = Effect.fn(
+        "resolveGitCommitDetailWorkspaceInput",
+      )(function* (input: GitGetCommitDetailInput) {
+        const context = yield* resolveGitHistoryWorkspaceContext(
+          input,
+          "GitWorkflowService.getCommitDetail",
+        );
+        return {
+          ...context,
+          sha: input.sha,
+        } satisfies GitWorkflowService.GitGetCommitDetailWorkspaceInput;
+      });
+
+      const resolveGitCommitDiffWorkspaceInput = Effect.fn("resolveGitCommitDiffWorkspaceInput")(
+        function* (input: GitGetCommitDiffInput) {
+          const context = yield* resolveGitHistoryWorkspaceContext(
+            input,
+            "GitWorkflowService.getCommitDiff",
+          );
+          return {
+            ...context,
+            sha: input.sha,
+            ...(input.ignoreWhitespace !== undefined
+              ? { ignoreWhitespace: input.ignoreWhitespace }
+              : {}),
+          } satisfies GitWorkflowService.GitGetCommitDiffWorkspaceInput;
+        },
+      );
+
+      const resolveGitCommitDiffFileContentsWorkspaceInput = Effect.fn(
+        "resolveGitCommitDiffFileContentsWorkspaceInput",
+      )(function* (input: GitGetCommitDiffFileContentsInput) {
+        const context = yield* resolveGitHistoryWorkspaceContext(
+          input,
+          "GitWorkflowService.getCommitDiffFileContents",
+        );
+        return {
+          ...context,
+          sha: input.sha,
+          changeType: input.changeType,
+          oldPath: input.oldPath,
+          newPath: input.newPath,
+        } satisfies GitWorkflowService.GitGetCommitDiffFileContentsWorkspaceInput;
+      });
 
       return WsRpcGroup.of({
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
@@ -1986,6 +2046,30 @@ const makeWsRpcLayer = (
             {
               "rpc.aggregate": "git",
             },
+          ),
+        [WS_METHODS.gitGetCommitDetail]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.gitGetCommitDetail,
+            resolveGitCommitDetailWorkspaceInput(input).pipe(
+              Effect.flatMap(gitWorkflow.getCommitDetail),
+            ),
+            { "rpc.aggregate": "git" },
+          ),
+        [WS_METHODS.gitGetCommitDiff]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.gitGetCommitDiff,
+            resolveGitCommitDiffWorkspaceInput(input).pipe(
+              Effect.flatMap(gitWorkflow.getCommitDiff),
+            ),
+            { "rpc.aggregate": "git" },
+          ),
+        [WS_METHODS.gitGetCommitDiffFileContents]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.gitGetCommitDiffFileContents,
+            resolveGitCommitDiffFileContentsWorkspaceInput(input).pipe(
+              Effect.flatMap(gitWorkflow.getCommitDiffFileContents),
+            ),
+            { "rpc.aggregate": "git" },
           ),
         [WS_METHODS.vcsListRefs]: (input) =>
           observeRpcEffect(WS_METHODS.vcsListRefs, gitWorkflow.listRefs(input), {

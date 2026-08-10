@@ -59,6 +59,7 @@ const baseProps: GitHistoryPanelViewProps = {
   onRefresh: () => {},
   onLoadOlder: () => {},
   onScrollOffsetChange: () => {},
+  onOpenCommit: () => {},
 };
 
 describe("GitHistoryPanelView scroll restoration", () => {

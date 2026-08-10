@@ -4,6 +4,7 @@ import {
   DEFAULT_MODEL,
   defaultInstanceIdForDriver,
   type EnvironmentId,
+  type GitObjectId,
   type MessageId,
   type ModelSelection,
   type ProjectScript,
@@ -460,6 +461,11 @@ const FilePreviewPanel = lazy(() => import("./files/FilePreviewPanel"));
 const GitHistoryPanel = lazy(() =>
   import("./git-history/GitHistoryPanel").then((module) => ({
     default: module.GitHistoryPanel,
+  })),
+);
+const GitCommitPanel = lazy(() =>
+  import("./git-history/GitCommitPanel").then((module) => ({
+    default: module.GitCommitPanel,
   })),
 );
 const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
@@ -3372,6 +3378,13 @@ function ChatViewContent(props: ChatViewProps) {
     if (!activeThreadRef || !gitHistoryAvailability.available) return;
     useRightPanelStore.getState().open(activeThreadRef, "history");
   }, [activeThreadRef, gitHistoryAvailability.available]);
+  const openGitCommitSurface = useCallback(
+    (sha: GitObjectId) => {
+      if (!activeThreadRef || !gitHistoryAvailability.available) return;
+      useRightPanelStore.getState().openGitCommit(activeThreadRef, sha);
+    },
+    [activeThreadRef, gitHistoryAvailability.available],
+  );
   const addFilesSurface = useCallback(() => {
     if (!activeThreadRef || !activeProject) return;
     useRightPanelStore.getState().open(activeThreadRef, "files");
@@ -6568,6 +6581,7 @@ function ChatViewContent(props: ChatViewProps) {
             projectId={gitHistoryPanelTarget.projectId}
             threadId={gitHistoryPanelTarget.threadId}
             cwd={gitHistoryPanelTarget.cwd}
+            onOpenCommit={openGitCommitSurface}
           />
         </Suspense>
       ) : (
@@ -6578,6 +6592,17 @@ function ChatViewContent(props: ChatViewProps) {
           {gitHistoryAvailability.disabledReason}
         </div>
       )
+    ) : activeRightPanelSurface?.kind === "git-commit" && gitHistoryPanelTarget ? (
+      <Suspense fallback={null}>
+        <GitCommitPanel
+          environmentId={gitHistoryPanelTarget.environmentId}
+          projectId={gitHistoryPanelTarget.projectId}
+          threadId={gitHistoryPanelTarget.threadId}
+          cwd={gitHistoryPanelTarget.cwd}
+          sha={activeRightPanelSurface.sha}
+          composerDraftTarget={composerDraftTarget}
+        />
+      </Suspense>
     ) : activeRightPanelSurface?.kind === "agents" && activeAgentsThreadRef ? (
       <ThreadAgentsPanel threadRef={activeAgentsThreadRef} />
     ) : activePanelChatThreadId ? (

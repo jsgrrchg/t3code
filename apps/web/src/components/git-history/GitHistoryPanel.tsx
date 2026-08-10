@@ -16,7 +16,7 @@ import {
   type GitHistoryTarget,
 } from "@t3tools/client-runtime/state/git";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import { CloudIcon, GitBranchIcon, RefreshCwIcon, TagIcon } from "lucide-react";
+import { CloudIcon, FileDiffIcon, GitBranchIcon, RefreshCwIcon, TagIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import { Button } from "~/components/ui/button";
@@ -42,6 +42,7 @@ const SUBJECT_MIN_WIDTH = 80;
 const AUTHOR_MIN_WIDTH = 64;
 const DATE_COLUMN_WIDTH = 96;
 const SHA_COLUMN_WIDTH = 76;
+const OPEN_COMMIT_COLUMN_WIDTH = 32;
 const ROW_END_PADDING = 8;
 const HISTORY_VISIBLE_REF_LIMIT = 2;
 const SKELETON_ROW_IDS = ["one", "two", "three", "four", "five", "six", "seven"] as const;
@@ -98,6 +99,7 @@ export interface GitHistoryPanelViewProps {
   readonly onRefresh: () => void;
   readonly onLoadOlder: () => void;
   readonly onScrollOffsetChange: (offset: number) => void;
+  readonly onOpenCommit: (sha: GitHistoryCommitSummary["sha"]) => void;
 }
 
 interface GitHistoryCommitRowProps {
@@ -105,6 +107,7 @@ interface GitHistoryCommitRowProps {
   readonly graphRow: GitHistoryGraphRow;
   readonly graphLaneCount: number;
   readonly gridTemplateColumns: string;
+  readonly onOpenCommit?: (sha: GitHistoryCommitSummary["sha"]) => void;
 }
 
 export function GitHistoryShaButtonView({
@@ -230,6 +233,7 @@ export function GitHistoryCommitRow({
   graphRow,
   graphLaneCount,
   gridTemplateColumns,
+  onOpenCommit,
 }: GitHistoryCommitRowProps) {
   const subject = commit.subject || "(no subject)";
   const author = commit.authorName || "Unknown author";
@@ -289,6 +293,16 @@ export function GitHistoryCommitRow({
         {authoredDate}
       </span>
       <GitHistoryShaButton sha={commit.sha} />
+      <Button
+        aria-label={`Open commit ${commit.sha} diff in new tab`}
+        className="size-6"
+        size="icon-xs"
+        title="Open commit diff in new tab"
+        variant="ghost"
+        onClick={() => onOpenCommit?.(commit.sha)}
+      >
+        <FileDiffIcon aria-hidden="true" className="size-3.5" />
+      </Button>
     </div>
   );
 }
@@ -347,6 +361,7 @@ export function GitHistoryPanelView({
   onRefresh,
   onLoadOlder,
   onScrollOffsetChange,
+  onOpenCommit,
 }: GitHistoryPanelViewProps) {
   const listRef = useRef<LegendListRef>(null);
   const restoredScrollKeyRef = useRef<string | null>(null);
@@ -357,7 +372,7 @@ export function GitHistoryPanelView({
     [commits, layout.rows],
   );
   const graphWidth = getGitHistoryGraphWidth(layout.maxLaneCount);
-  const gridTemplateColumns = `${graphWidth}px minmax(${SUBJECT_MIN_WIDTH}px, 1fr) minmax(${AUTHOR_MIN_WIDTH}px, 0.34fr) ${DATE_COLUMN_WIDTH}px ${SHA_COLUMN_WIDTH}px`;
+  const gridTemplateColumns = `${graphWidth}px minmax(${SUBJECT_MIN_WIDTH}px, 1fr) minmax(${AUTHOR_MIN_WIDTH}px, 0.34fr) ${DATE_COLUMN_WIDTH}px ${SHA_COLUMN_WIDTH}px ${OPEN_COMMIT_COLUMN_WIDTH}px`;
   const contentStyle = {
     minWidth:
       graphWidth +
@@ -365,6 +380,7 @@ export function GitHistoryPanelView({
       AUTHOR_MIN_WIDTH +
       DATE_COLUMN_WIDTH +
       SHA_COLUMN_WIDTH +
+      OPEN_COMMIT_COLUMN_WIDTH +
       ROW_END_PADDING,
   } satisfies CSSProperties;
   const controlsPending = isInitialLoading || isRefreshing || isLoadingMore;
@@ -429,6 +445,7 @@ export function GitHistoryPanelView({
             <span>Author</span>
             <span>Date</span>
             <span>SHA</span>
+            <span />
           </div>
           {refreshError !== null ? (
             <div
@@ -456,6 +473,7 @@ export function GitHistoryPanelView({
                   graphLaneCount={layout.maxLaneCount}
                   graphRow={item.graphRow}
                   gridTemplateColumns={gridTemplateColumns}
+                  onOpenCommit={onOpenCommit}
                 />
               )}
               role="list"
@@ -519,11 +537,13 @@ export function GitHistoryPanel({
   projectId,
   threadId,
   cwd,
+  onOpenCommit,
 }: {
   readonly environmentId: EnvironmentId;
   readonly projectId: ProjectId;
   readonly threadId: ThreadId | null;
   readonly cwd: string;
+  readonly onOpenCommit: (sha: GitHistoryCommitSummary["sha"]) => void;
 }) {
   const target = useMemo<GitHistoryTarget>(
     () => ({ environmentId, projectId, threadId, cwd }),
@@ -676,6 +696,7 @@ export function GitHistoryPanel({
       onLoadOlder={loadOlder}
       onRefresh={refresh}
       onScrollOffsetChange={rememberScrollOffset}
+      onOpenCommit={onOpenCommit}
     />
   );
 }

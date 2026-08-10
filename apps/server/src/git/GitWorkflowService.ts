@@ -7,6 +7,12 @@ import {
   GitCommandError,
   type GitListHistoryInput,
   type GitListHistoryResult,
+  type GitGetCommitDetailInput,
+  type GitGetCommitDetailResult,
+  type GitGetCommitDiffInput,
+  type GitGetCommitDiffResult,
+  type GitGetCommitDiffFileContentsInput,
+  type GitGetCommitDiffFileContentsResult,
   type VcsSwitchRefInput,
   type VcsSwitchRefResult,
   type VcsCreateRefInput,
@@ -38,6 +44,18 @@ import { makeAssertWorkspaceBoundCwd } from "../workspace/WorkspaceBoundCwd.ts";
 export type GitListHistoryWorkspaceInput = Omit<GitListHistoryInput, "projectId" | "threadId"> & {
   readonly workspaceRoot: string;
 };
+export type GitGetCommitDetailWorkspaceInput = Omit<
+  GitGetCommitDetailInput,
+  "projectId" | "threadId"
+> & { readonly workspaceRoot: string };
+export type GitGetCommitDiffWorkspaceInput = Omit<
+  GitGetCommitDiffInput,
+  "projectId" | "threadId"
+> & { readonly workspaceRoot: string };
+export type GitGetCommitDiffFileContentsWorkspaceInput = Omit<
+  GitGetCommitDiffFileContentsInput,
+  "projectId" | "threadId"
+> & { readonly workspaceRoot: string };
 
 export class GitWorkflowService extends Context.Service<
   GitWorkflowService,
@@ -72,6 +90,15 @@ export class GitWorkflowService extends Context.Service<
     readonly listHistory: (
       input: GitListHistoryWorkspaceInput,
     ) => Effect.Effect<GitListHistoryResult, GitCommandError>;
+    readonly getCommitDetail: (
+      input: GitGetCommitDetailWorkspaceInput,
+    ) => Effect.Effect<GitGetCommitDetailResult, GitCommandError>;
+    readonly getCommitDiff: (
+      input: GitGetCommitDiffWorkspaceInput,
+    ) => Effect.Effect<GitGetCommitDiffResult, GitCommandError>;
+    readonly getCommitDiffFileContents: (
+      input: GitGetCommitDiffFileContentsWorkspaceInput,
+    ) => Effect.Effect<GitGetCommitDiffFileContentsResult, GitCommandError>;
     readonly createWorktree: (
       input: VcsCreateWorktreeInput,
     ) => Effect.Effect<VcsCreateWorktreeResult, GitCommandError>;
@@ -264,6 +291,38 @@ export const make = Effect.gen(function* () {
     (input: Input) =>
       ensureGit(operation, input.cwd).pipe(Effect.andThen(run(input)));
 
+  const readWorkspaceCommitResource =
+    <Input extends { readonly cwd: string; readonly workspaceRoot: string }, Output>(
+      operation: string,
+      run: (input: Omit<Input, "workspaceRoot">) => Effect.Effect<Output, GitCommandError>,
+    ) =>
+    (input: Input) =>
+      assertWorkspaceBoundCwd(input.cwd, {
+        workspaceRoot: input.workspaceRoot,
+        includeManagedWorktrees: false,
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new GitCommandError({
+              operation,
+              command: "workspace-boundary",
+              cwd: input.cwd,
+              detail:
+                cause._tag === "WorkspaceCwdCanonicalizationError"
+                  ? "Failed to resolve a path while validating the Git history workspace."
+                  : "Git history cwd must stay within the selected project or its linked Git worktrees.",
+              cause,
+            }),
+        ),
+        Effect.andThen(ensureGitCommand(operation, input.cwd)),
+        Effect.andThen(
+          Effect.suspend(() => {
+            const { workspaceRoot: _, ...repositoryInput } = input;
+            return run(repositoryInput);
+          }),
+        ),
+      );
+
   return GitWorkflowService.of({
     status: (input) =>
       detectGitRepositoryForStatus("GitWorkflowService.status", input.cwd).pipe(
@@ -336,6 +395,18 @@ export const make = Effect.gen(function* () {
           }),
         ),
       ),
+    getCommitDetail: readWorkspaceCommitResource<
+      GitGetCommitDetailWorkspaceInput,
+      GitGetCommitDetailResult
+    >("GitWorkflowService.getCommitDetail", git.getCommitDetail),
+    getCommitDiff: readWorkspaceCommitResource<
+      GitGetCommitDiffWorkspaceInput,
+      GitGetCommitDiffResult
+    >("GitWorkflowService.getCommitDiff", git.getCommitDiff),
+    getCommitDiffFileContents: readWorkspaceCommitResource<
+      GitGetCommitDiffFileContentsWorkspaceInput,
+      GitGetCommitDiffFileContentsResult
+    >("GitWorkflowService.getCommitDiffFileContents", git.getCommitDiffFileContents),
     createWorktree: (input) =>
       ensureGitCommand("GitWorkflowService.createWorktree", input.cwd).pipe(
         Effect.andThen(git.createWorktree(input)),

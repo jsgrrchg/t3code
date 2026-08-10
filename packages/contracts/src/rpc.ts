@@ -26,6 +26,12 @@ import {
   GitCommandError,
   GitListHistoryInput,
   GitListHistoryResult,
+  GitGetCommitDetailInput,
+  GitGetCommitDetailResult,
+  GitGetCommitDiffInput,
+  GitGetCommitDiffResult,
+  GitGetCommitDiffFileContentsInput,
+  GitGetCommitDiffFileContentsResult,
   VcsCreateRefInput,
   VcsCreateRefResult,
   VcsCreateWorktreeInput,
@@ -203,6 +209,9 @@ export const WS_METHODS = {
   // Git workflow methods
   gitRunStackedAction: "git.runStackedAction",
   gitListHistory: "git.listHistory",
+  gitGetCommitDetail: "git.getCommitDetail",
+  gitGetCommitDiff: "git.getCommitDiff",
+  gitGetCommitDiffFileContents: "git.getCommitDiffFileContents",
   gitResolvePullRequest: "git.resolvePullRequest",
   gitPreparePullRequestThread: "git.preparePullRequestThread",
 
@@ -552,6 +561,24 @@ export const WsGitListHistoryRpc = Rpc.make(WS_METHODS.gitListHistory, {
   error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
 });
 
+export const WsGitGetCommitDetailRpc = Rpc.make(WS_METHODS.gitGetCommitDetail, {
+  payload: GitGetCommitDetailInput,
+  success: GitGetCommitDetailResult,
+  error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
+});
+
+export const WsGitGetCommitDiffRpc = Rpc.make(WS_METHODS.gitGetCommitDiff, {
+  payload: GitGetCommitDiffInput,
+  success: GitGetCommitDiffResult,
+  error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
+});
+
+export const WsGitGetCommitDiffFileContentsRpc = Rpc.make(WS_METHODS.gitGetCommitDiffFileContents, {
+  payload: GitGetCommitDiffFileContentsInput,
+  success: GitGetCommitDiffFileContentsResult,
+  error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
+});
+
 export const WsVcsListRefsRpc = Rpc.make(WS_METHODS.vcsListRefs, {
   payload: VcsListRefsInput,
   success: VcsListRefsResult,
@@ -872,6 +899,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsGitResolvePullRequestRpc,
   WsGitPreparePullRequestThreadRpc,
   WsGitListHistoryRpc,
+  WsGitGetCommitDetailRpc,
+  WsGitGetCommitDiffRpc,
+  WsGitGetCommitDiffFileContentsRpc,
   WsVcsListRefsRpc,
   WsVcsCreateWorktreeRpc,
   WsVcsRemoveWorktreeRpc,

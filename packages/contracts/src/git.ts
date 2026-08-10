@@ -110,6 +110,26 @@ export const GitHistoryCommitSummary = Schema.Struct({
 });
 export type GitHistoryCommitSummary = typeof GitHistoryCommitSummary.Type;
 
+export const GitCommitComparisonKind = Schema.Literals(["root", "first-parent"]);
+export type GitCommitComparisonKind = typeof GitCommitComparisonKind.Type;
+
+export const GitCommitDetail = Schema.Struct({
+  sha: GitObjectId,
+  parentShas: Schema.Array(GitObjectId),
+  subject: Schema.String.check(Schema.isMaxLength(GIT_HISTORY_SUBJECT_MAX_LENGTH)),
+  body: Schema.String,
+  authorName: Schema.String.check(Schema.isMaxLength(GIT_HISTORY_AUTHOR_NAME_MAX_LENGTH)),
+  authorEmail: Schema.String.check(Schema.isMaxLength(GIT_HISTORY_AUTHOR_EMAIL_MAX_LENGTH)),
+  authoredAt: Schema.String.check(Schema.isMaxLength(GIT_HISTORY_AUTHORED_AT_MAX_LENGTH)),
+  committerName: Schema.String.check(Schema.isMaxLength(GIT_HISTORY_AUTHOR_NAME_MAX_LENGTH)),
+  committerEmail: Schema.String.check(Schema.isMaxLength(GIT_HISTORY_AUTHOR_EMAIL_MAX_LENGTH)),
+  committedAt: Schema.String.check(Schema.isMaxLength(GIT_HISTORY_AUTHORED_AT_MAX_LENGTH)),
+  changedFileCount: NonNegativeInt,
+  insertions: NonNegativeInt,
+  deletions: NonNegativeInt,
+});
+export type GitCommitDetail = typeof GitCommitDetail.Type;
+
 export const VcsRef = Schema.Struct({
   name: TrimmedNonEmptyStringSchema,
   isRemote: Schema.optional(Schema.Boolean),
@@ -144,6 +164,30 @@ export const GitListHistoryInput = Schema.Struct({
   limit: Schema.optional(PositiveInt.check(Schema.isLessThanOrEqualTo(GIT_HISTORY_MAX_LIMIT))),
 });
 export type GitListHistoryInput = typeof GitListHistoryInput.Type;
+
+const GitCommitResourceInputFields = {
+  projectId: ProjectId,
+  threadId: Schema.optional(ThreadId),
+  cwd: TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(GIT_HISTORY_CWD_MAX_LENGTH)),
+  sha: GitObjectId,
+};
+
+export const GitGetCommitDetailInput = Schema.Struct(GitCommitResourceInputFields);
+export type GitGetCommitDetailInput = typeof GitGetCommitDetailInput.Type;
+
+export const GitGetCommitDiffInput = Schema.Struct({
+  ...GitCommitResourceInputFields,
+  ignoreWhitespace: Schema.optionalKey(Schema.Boolean),
+});
+export type GitGetCommitDiffInput = typeof GitGetCommitDiffInput.Type;
+
+export const GitGetCommitDiffFileContentsInput = Schema.Struct({
+  ...GitCommitResourceInputFields,
+  changeType: Schema.Literals(["change", "rename-pure", "rename-changed", "new", "deleted"]),
+  oldPath: TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(GIT_HISTORY_CWD_MAX_LENGTH)),
+  newPath: TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(GIT_HISTORY_CWD_MAX_LENGTH)),
+});
+export type GitGetCommitDiffFileContentsInput = typeof GitGetCommitDiffFileContentsInput.Type;
 
 export const VcsStatusInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
@@ -243,6 +287,25 @@ export const GitListHistoryResult = Schema.Struct({
   totalCount: Schema.NullOr(NonNegativeInt),
 });
 export type GitListHistoryResult = typeof GitListHistoryResult.Type;
+
+export const GitGetCommitDetailResult = GitCommitDetail;
+export type GitGetCommitDetailResult = typeof GitGetCommitDetailResult.Type;
+
+export const GitGetCommitDiffResult = Schema.Struct({
+  sha: GitObjectId,
+  baseSha: Schema.NullOr(GitObjectId),
+  comparison: GitCommitComparisonKind,
+  diff: Schema.String,
+  diffHash: TrimmedNonEmptyStringSchema,
+  truncated: Schema.Boolean,
+});
+export type GitGetCommitDiffResult = typeof GitGetCommitDiffResult.Type;
+
+export const GitGetCommitDiffFileContentsResult = Schema.Struct({
+  oldContents: Schema.String,
+  newContents: Schema.String,
+});
+export type GitGetCommitDiffFileContentsResult = typeof GitGetCommitDiffFileContentsResult.Type;
 
 const VcsStatusChangeRequest = Schema.Struct({
   number: PositiveInt,

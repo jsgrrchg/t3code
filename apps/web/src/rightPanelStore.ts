@@ -5,10 +5,11 @@
  * surface descriptors and the active surface, while each feature continues to
  * own its durable resource state. Browser surfaces point at preview tab ids,
  * terminal surfaces point at terminal session ids, file surfaces point at
- * workspace paths, and diff/files/history remain singleton surfaces.
+ * workspace paths, commit surfaces point at immutable Git object ids, and
+ * diff/files/history remain singleton surfaces.
  */
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import type { ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import type { GitObjectId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
@@ -17,6 +18,7 @@ import { resolveStorage } from "./lib/storage";
 export const RIGHT_PANEL_KINDS = [
   "diff",
   "history",
+  "git-commit",
   "files",
   "file",
   "preview",
@@ -39,6 +41,7 @@ export type RightPanelSurface =
     }
   | { id: "diff"; kind: "diff"; threadId?: ThreadId | null }
   | { id: "history"; kind: "history" }
+  | { id: `git-commit:${string}`; kind: "git-commit"; sha: GitObjectId }
   | { id: "files"; kind: "files" }
   | {
       id: `file:${string}`;
@@ -51,8 +54,8 @@ export type RightPanelSurface =
   | { id: `chat:${string}`; kind: "chat"; threadId: ThreadId };
 
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
-// v11 normalizes Diff and Agents source thread ids for child-owned actions.
-const RIGHT_PANEL_STORAGE_VERSION = 11;
+// v12 adds one durable resource surface per historical commit SHA.
+const RIGHT_PANEL_STORAGE_VERSION = 12;
 
 export interface ThreadRightPanelState {
   isOpen: boolean;
@@ -62,11 +65,15 @@ export interface ThreadRightPanelState {
 
 interface RightPanelStoreState {
   byThreadKey: Record<string, ThreadRightPanelState>;
-  open: (ref: ScopedThreadRef, kind: Exclude<RightPanelKind, "file" | "terminal" | "chat">) => void;
+  open: (
+    ref: ScopedThreadRef,
+    kind: Exclude<RightPanelKind, "file" | "terminal" | "chat" | "git-commit">,
+  ) => void;
   openBrowser: (ref: ScopedThreadRef, tabId: string | null) => void;
   openFile: (ref: ScopedThreadRef, relativePath: string, line?: number) => void;
   openTerminal: (ref: ScopedThreadRef, terminalId: string) => void;
   openChat: (ref: ScopedThreadRef, threadId: ThreadId) => void;
+  openGitCommit: (ref: ScopedThreadRef, sha: GitObjectId) => void;
   openThreadDiff: (ref: ScopedThreadRef, threadId: ThreadId | null) => void;
   openThreadAgents: (ref: ScopedThreadRef, threadId: ThreadId | null) => void;
   splitTerminal: (
@@ -90,7 +97,7 @@ interface RightPanelStoreState {
   toggleVisibility: (ref: ScopedThreadRef) => void;
   toggle: (
     ref: ScopedThreadRef,
-    kind: Exclude<RightPanelKind, "file" | "terminal" | "chat">,
+    kind: Exclude<RightPanelKind, "file" | "terminal" | "chat" | "git-commit">,
   ) => void;
   removeThread: (ref: ScopedThreadRef) => void;
 }
@@ -102,7 +109,7 @@ const EMPTY_THREAD_STATE: ThreadRightPanelState = {
 };
 
 const singletonSurface = (
-  kind: Exclude<RightPanelKind, "file" | "preview" | "terminal">,
+  kind: Exclude<RightPanelKind, "file" | "preview" | "terminal" | "git-commit">,
 ): RightPanelSurface => {
   switch (kind) {
     case "diff":
@@ -146,6 +153,12 @@ const chatSurface = (threadId: ThreadId): RightPanelSurface => ({
   id: `chat:${threadId}`,
   kind: "chat",
   threadId,
+});
+
+const gitCommitSurface = (sha: GitObjectId): RightPanelSurface => ({
+  id: `git-commit:${sha}`,
+  kind: "git-commit",
+  sha,
 });
 
 const openDiffSurface = (
@@ -278,6 +291,14 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                     if (surface.kind === "history") {
                       return surface.id === "history" ? [{ id: "history", kind: "history" }] : [];
                     }
+                    if (surface.kind === "git-commit") {
+                      const sha =
+                        "sha" in surface && typeof surface.sha === "string" ? surface.sha : "";
+                      return /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(sha) &&
+                        surface.id === `git-commit:${sha}`
+                        ? [{ id: surface.id, kind: "git-commit", sha: sha as GitObjectId }]
+                        : [];
+                    }
                     if (surface.kind !== "terminal") return [surface];
                     if (
                       !("resourceId" in surface) ||
@@ -404,6 +425,12 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
         set((state) => ({
           byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) =>
             upsertSurface(current, chatSurface(threadId)),
+          ),
+        })),
+      openGitCommit: (ref, sha) =>
+        set((state) => ({
+          byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) =>
+            upsertSurface(current, gitCommitSurface(sha)),
           ),
         })),
       openThreadDiff: (ref, threadId) =>

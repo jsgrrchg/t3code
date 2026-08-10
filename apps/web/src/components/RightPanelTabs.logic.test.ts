@@ -47,7 +47,7 @@ describe("Git History right-panel availability", () => {
     });
   });
 
-  it("only returns an RPC target while History is active and available", () => {
+  it("returns an RPC target for History and commit tabs while available", () => {
     const available = { available: true, disabledReason: "" };
     const input = {
       activeSurfaceKind: "history",
@@ -59,6 +59,12 @@ describe("Git History right-panel availability", () => {
     } as const;
 
     expect(resolveGitHistoryPanelTarget(input)).toEqual({
+      environmentId: "environment-1",
+      projectId: "project-1",
+      threadId: "thread-1",
+      cwd: "/repo/worktree",
+    });
+    expect(resolveGitHistoryPanelTarget({ ...input, activeSurfaceKind: "git-commit" })).toEqual({
       environmentId: "environment-1",
       projectId: "project-1",
       threadId: "thread-1",

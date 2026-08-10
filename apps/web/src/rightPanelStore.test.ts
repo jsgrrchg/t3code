@@ -1,5 +1,5 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { type EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { type EnvironmentId, GitObjectId, ThreadId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
@@ -18,6 +18,24 @@ beforeEach(() => {
 });
 
 describe("rightPanelStore", () => {
+  it("keeps one commit diff tab per SHA and focuses the latest opened commit", () => {
+    const first = GitObjectId.make("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    const second = GitObjectId.make("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+
+    useRightPanelStore.getState().openGitCommit(refA, first);
+    useRightPanelStore.getState().openGitCommit(refA, second);
+    useRightPanelStore.getState().openGitCommit(refA, first);
+
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: `git-commit:${first}`,
+      surfaces: [
+        { id: `git-commit:${first}`, kind: "git-commit", sha: first },
+        { id: `git-commit:${second}`, kind: "git-commit", sha: second },
+      ],
+    });
+  });
+
   it("opens a durable chat surface once and focuses it", () => {
     const childId = ThreadId.make("thread-child");
     useRightPanelStore.getState().openChat(refA, childId);

@@ -68,6 +68,15 @@ you request older entries, so showing the total does not load every row at once.
 Select a commit ID to copy its full SHA. The commit ID briefly changes to **Copied** after a
 successful copy.
 
+Use the diff button beside a commit ID to open that commit in its own Right Panel tab. Commit tabs
+show metadata and the changes against the first parent, or against an empty tree for the first
+commit in a repository. You can keep several commit tabs open and switch between them. Opening the
+same commit again returns to its existing tab instead of creating a duplicate.
+
+Commit diffs support stacked and split views, line wrapping, collapsible files, and expanding
+unchanged context. Large patches are shown with a truncation notice, while binary or oversized file
+contents remain unavailable for expansion.
+
 History behaves like the other Right Panel tabs: select its tab to return to it, use the tab's close
 control to remove it, and open **History** again from the empty state or **+** menu when needed. This
 restores the loaded pages and scroll position for the current session when you switch tabs or chats

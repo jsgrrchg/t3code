@@ -407,6 +407,8 @@ function surfaceTitle(
       return "Diff";
     case "history":
       return "History";
+    case "git-commit":
+      return surface.sha.slice(0, 7);
     case "files":
       return "Files";
     case "file":
@@ -468,6 +470,8 @@ function SurfaceIcon({
       return <FileDiff className="size-3 shrink-0" />;
     case "history":
       return <GitGraph className="size-3 shrink-0" />;
+    case "git-commit":
+      return <FileDiff className="size-3 shrink-0" />;
     case "files":
       return <Files className="size-3 shrink-0" />;
     case "file":

@@ -32,6 +32,13 @@ describe("RPC authorization scopes", () => {
 
   it("allows Git history with orchestration read access", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.gitListHistory)).toBe(AuthOrchestrationReadScope);
+    expect(requiredScopeForRpcMethod(WS_METHODS.gitGetCommitDetail)).toBe(
+      AuthOrchestrationReadScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.gitGetCommitDiff)).toBe(AuthOrchestrationReadScope);
+    expect(requiredScopeForRpcMethod(WS_METHODS.gitGetCommitDiffFileContents)).toBe(
+      AuthOrchestrationReadScope,
+    );
   });
 
   it("allows relay status reads without granting relay installation access", () => {

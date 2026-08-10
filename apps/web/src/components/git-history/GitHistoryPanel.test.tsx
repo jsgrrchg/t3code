@@ -70,6 +70,7 @@ const baseProps: GitHistoryPanelViewProps = {
   onRefresh: () => {},
   onLoadOlder: () => {},
   onScrollOffsetChange: () => {},
+  onOpenCommit: () => {},
 };
 
 function renderView(overrides: Partial<GitHistoryPanelViewProps> = {}): string {
@@ -116,6 +117,7 @@ describe("GitHistoryCommitRow", () => {
     );
     expect(markup).toContain(item.sha.slice(0, 7));
     expect(markup).toContain(`aria-label="Copy full commit SHA ${item.sha}"`);
+    expect(markup).toContain(`aria-label="Open commit ${item.sha} diff in new tab"`);
     expect(markup).toContain("<button");
   });
 

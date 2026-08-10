@@ -10,6 +10,9 @@ import {
   GIT_HISTORY_REF_LABEL_MAX_LENGTH,
   GIT_HISTORY_SUBJECT_MAX_LENGTH,
   GitHistoryCommitSummary,
+  GitGetCommitDetailInput,
+  GitGetCommitDiffFileContentsInput,
+  GitGetCommitDiffResult,
   GitListHistoryInput,
   GitListHistoryResult,
   GitObjectId,
@@ -28,6 +31,11 @@ const decodeObjectId = Schema.decodeUnknownSync(GitObjectId);
 const decodeHistoryCommitSummary = Schema.decodeUnknownSync(GitHistoryCommitSummary);
 const decodeListHistoryInput = Schema.decodeUnknownSync(GitListHistoryInput);
 const decodeListHistoryResult = Schema.decodeUnknownSync(GitListHistoryResult);
+const decodeCommitDetailInput = Schema.decodeUnknownSync(GitGetCommitDetailInput);
+const decodeCommitDiffFileContentsInput = Schema.decodeUnknownSync(
+  GitGetCommitDiffFileContentsInput,
+);
+const decodeCommitDiffResult = Schema.decodeUnknownSync(GitGetCommitDiffResult);
 const encodeHistoryCommitSummary = Schema.encodeSync(GitHistoryCommitSummary);
 const encodeListHistoryInput = Schema.encodeSync(GitListHistoryInput);
 const encodeListHistoryResult = Schema.encodeSync(GitListHistoryResult);
@@ -186,6 +194,60 @@ describe("GitListHistoryResult", () => {
     const decoded = decodeListHistoryResult(input);
 
     expect(encodeListHistoryResult(decoded)).toEqual(input);
+  });
+});
+
+describe("historical commit resources", () => {
+  it("accepts only complete object IDs and bounded file requests", () => {
+    expect(
+      decodeCommitDetailInput({ projectId: "project-1", cwd: "/repo", sha: SHA_1 }),
+    ).toMatchObject({ sha: SHA_1 });
+    expect(
+      decodeCommitDiffFileContentsInput({
+        projectId: "project-1",
+        cwd: "/repo",
+        sha: SHA_1,
+        changeType: "rename-changed",
+        oldPath: "old name.ts",
+        newPath: "new name.ts",
+      }),
+    ).toMatchObject({ oldPath: "old name.ts", newPath: "new name.ts" });
+    expect(() =>
+      decodeCommitDetailInput({ projectId: "project-1", cwd: "/repo", sha: "HEAD~1" }),
+    ).toThrow();
+    expect(() =>
+      decodeCommitDiffFileContentsInput({
+        projectId: "project-1",
+        cwd: "/repo",
+        sha: SHA_1,
+        changeType: "change",
+        oldPath: "",
+        newPath: "file.ts",
+      }),
+    ).toThrow();
+  });
+
+  it("represents root and first-parent patches", () => {
+    expect(
+      decodeCommitDiffResult({
+        sha: SHA_1,
+        baseSha: null,
+        comparison: "root",
+        diff: "diff --git a/file.ts b/file.ts",
+        diffHash: "hash",
+        truncated: false,
+      }),
+    ).toMatchObject({ comparison: "root", baseSha: null });
+    expect(
+      decodeCommitDiffResult({
+        sha: SHA_1,
+        baseSha: PARENT_SHA_1,
+        comparison: "first-parent",
+        diff: "",
+        diffHash: "hash",
+        truncated: true,
+      }),
+    ).toMatchObject({ comparison: "first-parent", baseSha: PARENT_SHA_1 });
   });
 });
 

@@ -74,7 +74,7 @@ export function resolveGitHistoryPanelTarget<
   readonly threadId: ThreadId | null;
   readonly cwd: string;
 } | null {
-  return input.activeSurfaceKind === "history" &&
+  return (input.activeSurfaceKind === "history" || input.activeSurfaceKind === "git-commit") &&
     input.availability.available &&
     input.environmentId !== null &&
     input.projectId !== null &&

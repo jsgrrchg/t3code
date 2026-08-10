@@ -28,7 +28,9 @@ import {
   GitCommandError,
   GitHistoryCommitSummary,
   GitHistoryRef,
+  GitCommitDetail,
   GitObjectId,
+  type GitGetCommitDiffResult,
   type GitHistoryRef as GitHistoryRefType,
   type GitListHistoryResult,
   type ReviewDiffFileContentsInput,
@@ -60,6 +62,7 @@ const REVIEW_UNTRACKED_DIFF_MAX_OUTPUT_BYTES = 80_000;
 const REVIEW_DIFF_FILE_MAX_OUTPUT_BYTES = 1024 * 1024;
 const WORKSPACE_FILES_MAX_OUTPUT_BYTES = 120_000;
 const GIT_HISTORY_MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
+const GIT_COMMIT_DETAIL_MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 const STATUS_UPSTREAM_REFRESH_INTERVAL = Duration.seconds(15);
 const STATUS_UPSTREAM_REFRESH_TIMEOUT = Duration.seconds(5);
 
@@ -161,6 +164,7 @@ interface ExecuteGitOptions {
 
 const decodeGitHistoryCommitSummary = Schema.decodeUnknownEffect(GitHistoryCommitSummary);
 const decodeGitHistoryRef = Schema.decodeUnknownEffect(GitHistoryRef);
+const decodeGitCommitDetail = Schema.decodeUnknownEffect(GitCommitDetail);
 const decodeGitObjectId = Schema.decodeUnknownEffect(GitObjectId);
 const decodeGitHistoryTotalCount = Schema.decodeUnknownEffect(
   Schema.NumberFromString.check(Schema.isGreaterThanOrEqualTo(0)),
@@ -181,6 +185,70 @@ function malformedGitHistoryOutput(cwd: string, detail: string, cause?: unknown)
     detail,
     ...(cause === undefined ? {} : { cause }),
   });
+}
+
+function gitCommitReadError(
+  operation: string,
+  cwd: string,
+  command: string,
+  detail: string,
+  cause?: unknown,
+): GitCommandError {
+  return new GitCommandError({
+    operation,
+    command,
+    cwd,
+    detail,
+    ...(cause === undefined ? {} : { cause }),
+  });
+}
+
+function parseCommitNumstat(stdout: string): {
+  readonly changedFileCount: number;
+  readonly insertions: number;
+  readonly deletions: number;
+} {
+  const records = stdout.split("\0");
+  let changedFileCount = 0;
+  let insertions = 0;
+  let deletions = 0;
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index] ?? "";
+    if (record.length === 0) continue;
+    const firstTab = record.indexOf("\t");
+    const secondTab = firstTab === -1 ? -1 : record.indexOf("\t", firstTab + 1);
+    if (firstTab === -1 || secondTab === -1) continue;
+    const additions = record.slice(0, firstTab);
+    const removals = record.slice(firstTab + 1, secondTab);
+    const pathValue = record.slice(secondTab + 1);
+    changedFileCount += 1;
+    if (additions !== "-") insertions += Number.parseInt(additions, 10) || 0;
+    if (removals !== "-") deletions += Number.parseInt(removals, 10) || 0;
+    if (pathValue.length === 0) index += 2;
+  }
+  return { changedFileCount, insertions, deletions };
+}
+
+function parseCommitChangedPaths(stdout: string) {
+  const records = stdout.split("\0");
+  const files: Array<{
+    readonly status: string;
+    readonly oldPath: string;
+    readonly newPath: string;
+  }> = [];
+  for (let index = 0; index < records.length; ) {
+    const status = records[index++] ?? "";
+    if (status.length === 0) continue;
+    if (status.startsWith("R") || status.startsWith("C")) {
+      const oldPath = records[index++] ?? "";
+      const newPath = records[index++] ?? "";
+      if (oldPath && newPath) files.push({ status, oldPath, newPath });
+      continue;
+    }
+    const filePath = records[index++] ?? "";
+    if (filePath) files.push({ status, oldPath: filePath, newPath: filePath });
+  }
+  return files;
 }
 
 /** Builds a list-history error that attributes malformed ref data to `git for-each-ref`. */
@@ -2806,6 +2874,293 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     },
   );
 
+  const resolveCommitParents = Effect.fn("resolveCommitParents")(function* (input: {
+    readonly cwd: string;
+    readonly sha: string;
+  }) {
+    const operation = "GitVcsDriver.resolveCommitParents";
+    const result = yield* executeGit(operation, input.cwd, [
+      "rev-list",
+      "--parents",
+      "--max-count=1",
+      input.sha,
+    ]);
+    const objectIds = result.stdout.trim().split(" ").filter(Boolean);
+    if (objectIds.length === 0) {
+      return yield* gitCommitReadError(
+        operation,
+        input.cwd,
+        "git rev-list",
+        "Git did not resolve the requested commit.",
+      );
+    }
+    const decoded = yield* Effect.forEach(objectIds, (objectId) =>
+      decodeGitObjectId(objectId).pipe(
+        Effect.mapError((cause) =>
+          gitCommitReadError(
+            operation,
+            input.cwd,
+            "git rev-list",
+            "Git returned an invalid commit object ID.",
+            cause,
+          ),
+        ),
+      ),
+    );
+    return { sha: decoded[0]!, parentShas: decoded.slice(1) };
+  });
+
+  const readCommitDetail: GitVcsDriver.GitVcsDriver["Service"]["getCommitDetail"] = Effect.fn(
+    "getCommitDetail",
+  )(function* (input) {
+    const operation = "GitVcsDriver.getCommitDetail";
+    const [metadataResult, numstatResult] = yield* Effect.all(
+      [
+        executeGit(
+          `${operation}.metadata`,
+          input.cwd,
+          [
+            "show",
+            "-s",
+            "--no-color",
+            "--no-show-signature",
+            "--format=%H%x00%P%x00%s%x00%b%x00%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI%x00",
+            input.sha,
+          ],
+          {
+            timeoutMs: 15_000,
+            maxOutputBytes: GIT_COMMIT_DETAIL_MAX_OUTPUT_BYTES,
+            fallbackErrorDetail: "Failed to read commit metadata.",
+          },
+        ),
+        executeGit(
+          `${operation}.numstat`,
+          input.cwd,
+          [
+            "diff-tree",
+            "--root",
+            "--first-parent",
+            "--no-commit-id",
+            "--numstat",
+            "-z",
+            "-r",
+            "-M",
+            "-C",
+            input.sha,
+          ],
+          {
+            timeoutMs: 15_000,
+            maxOutputBytes: GIT_COMMIT_DETAIL_MAX_OUTPUT_BYTES,
+            fallbackErrorDetail: "Failed to read commit statistics.",
+          },
+        ),
+      ],
+      { concurrency: 2 },
+    );
+    if (metadataResult.stdoutTruncated || numstatResult.stdoutTruncated) {
+      return yield* gitCommitReadError(
+        operation,
+        input.cwd,
+        "git show",
+        "Commit metadata exceeded the configured response limit.",
+      );
+    }
+    const fields = metadataResult.stdout.split("\0");
+    if (fields.length < 10) {
+      return yield* gitCommitReadError(
+        operation,
+        input.cwd,
+        "git show",
+        "Git returned incomplete commit metadata.",
+      );
+    }
+    const stats = parseCommitNumstat(numstatResult.stdout);
+    return yield* decodeGitCommitDetail({
+      sha: fields[0],
+      parentShas: (fields[1] ?? "").split(" ").filter(Boolean),
+      subject: truncateGitHistoryField(fields[2] ?? "", GIT_HISTORY_SUBJECT_MAX_LENGTH),
+      body: fields[3] ?? "",
+      authorName: truncateGitHistoryField(fields[4] ?? "", GIT_HISTORY_AUTHOR_NAME_MAX_LENGTH),
+      authorEmail: truncateGitHistoryField(fields[5] ?? "", GIT_HISTORY_AUTHOR_EMAIL_MAX_LENGTH),
+      authoredAt: truncateGitHistoryField(fields[6] ?? "", GIT_HISTORY_AUTHORED_AT_MAX_LENGTH),
+      committerName: truncateGitHistoryField(fields[7] ?? "", GIT_HISTORY_AUTHOR_NAME_MAX_LENGTH),
+      committerEmail: truncateGitHistoryField(fields[8] ?? "", GIT_HISTORY_AUTHOR_EMAIL_MAX_LENGTH),
+      committedAt: truncateGitHistoryField(fields[9] ?? "", GIT_HISTORY_AUTHORED_AT_MAX_LENGTH),
+      ...stats,
+    }).pipe(
+      Effect.mapError((cause) =>
+        gitCommitReadError(
+          operation,
+          input.cwd,
+          "git show",
+          "Git returned invalid commit metadata.",
+          cause,
+        ),
+      ),
+    );
+  });
+
+  const getCommitDiff: GitVcsDriver.GitVcsDriver["Service"]["getCommitDiff"] = Effect.fn(
+    "getCommitDiff",
+  )(function* (input) {
+    const commit = yield* resolveCommitParents(input);
+    const baseSha = commit.parentShas[0] ?? null;
+    const args =
+      baseSha === null
+        ? [
+            "diff-tree",
+            "--root",
+            "--no-commit-id",
+            "--patch",
+            "-r",
+            "-M",
+            "-C",
+            "--no-color",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--minimal",
+            ...(input.ignoreWhitespace ? ["--ignore-all-space"] : []),
+            input.sha,
+            "--",
+          ]
+        : [
+            "diff",
+            "--patch",
+            "-M",
+            "-C",
+            "--no-color",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--minimal",
+            ...(input.ignoreWhitespace ? ["--ignore-all-space"] : []),
+            baseSha,
+            input.sha,
+            "--",
+          ];
+    const result = yield* executeGit("GitVcsDriver.getCommitDiff", input.cwd, args, {
+      timeoutMs: 30_000,
+      maxOutputBytes: REVIEW_DIFF_PATCH_MAX_OUTPUT_BYTES,
+      appendTruncationMarker: true,
+      fallbackErrorDetail: "Failed to read the historical commit diff.",
+    });
+    const diffHash = yield* crypto.digest("SHA-256", new TextEncoder().encode(result.stdout)).pipe(
+      Effect.map(Encoding.encodeHex),
+      Effect.mapError((cause) =>
+        gitCommitReadError(
+          "GitVcsDriver.getCommitDiff",
+          input.cwd,
+          "crypto.digest SHA-256",
+          "Failed to hash the historical commit diff.",
+          cause,
+        ),
+      ),
+    );
+    return {
+      sha: commit.sha,
+      baseSha,
+      comparison: baseSha === null ? "root" : "first-parent",
+      diff: result.stdout,
+      diffHash,
+      truncated: result.stdoutTruncated,
+    } satisfies GitGetCommitDiffResult;
+  });
+
+  const getCommitDiffFileContents: GitVcsDriver.GitVcsDriver["Service"]["getCommitDiffFileContents"] =
+    Effect.fn("getCommitDiffFileContents")(function* (input) {
+      const operation = "GitVcsDriver.getCommitDiffFileContents";
+      const commit = yield* resolveCommitParents(input);
+      const manifestResult = yield* executeGit(
+        `${operation}.manifest`,
+        input.cwd,
+        [
+          "diff-tree",
+          "--root",
+          "--first-parent",
+          "--no-commit-id",
+          "--name-status",
+          "-z",
+          "-r",
+          "-M",
+          "-C",
+          input.sha,
+        ],
+        {
+          timeoutMs: 15_000,
+          maxOutputBytes: GIT_COMMIT_DETAIL_MAX_OUTPUT_BYTES,
+          fallbackErrorDetail: "Failed to validate the historical diff file.",
+        },
+      );
+      if (manifestResult.stdoutTruncated) {
+        return yield* gitCommitReadError(
+          operation,
+          input.cwd,
+          "git diff-tree",
+          "Commit file manifest exceeded the configured response limit.",
+        );
+      }
+      const manifest = parseCommitChangedPaths(manifestResult.stdout);
+      const requestedFile = manifest.find((file) => {
+        if (input.changeType === "new") {
+          return file.status === "A" && file.newPath === input.newPath;
+        }
+        if (input.changeType === "deleted") {
+          return file.status === "D" && file.oldPath === input.oldPath;
+        }
+        return file.oldPath === input.oldPath && file.newPath === input.newPath;
+      });
+      if (!requestedFile) {
+        return yield* gitCommitReadError(
+          operation,
+          input.cwd,
+          "git diff-tree",
+          "The requested file does not belong to this commit diff.",
+        );
+      }
+
+      const readAtRevision = Effect.fn("readCommitDiffFileAtRevision")(function* (
+        revision: string,
+        relativePath: string,
+      ) {
+        const result = yield* executeGit(
+          `${operation}.read`,
+          input.cwd,
+          ["show", `${revision}:${relativePath}`],
+          { maxOutputBytes: REVIEW_DIFF_FILE_MAX_OUTPUT_BYTES },
+        );
+        if (result.stdoutTruncated) {
+          return yield* gitCommitReadError(
+            operation,
+            input.cwd,
+            "git show",
+            `Diff file '${relativePath}' exceeds the 1 MB expansion limit.`,
+          );
+        }
+        if (result.stdout.includes("\0")) {
+          return yield* gitCommitReadError(
+            operation,
+            input.cwd,
+            "git show",
+            `Cannot expand binary file '${relativePath}'.`,
+          );
+        }
+        return result.stdout;
+      });
+
+      const baseSha = commit.parentShas[0] ?? null;
+      const [oldContents, newContents] = yield* Effect.all(
+        [
+          input.changeType === "new" || baseSha === null
+            ? Effect.succeed("")
+            : readAtRevision(baseSha, input.oldPath),
+          input.changeType === "deleted"
+            ? Effect.succeed("")
+            : readAtRevision(input.sha, input.newPath),
+        ],
+        { concurrency: 2 },
+      );
+      return { oldContents, newContents };
+    });
+
   const readGitRefsSnapshot = Effect.fn("readGitRefsSnapshot")(function* (gitCommonDir: string) {
     const fetchCwd =
       path.basename(gitCommonDir) === ".git" ? path.dirname(gitCommonDir) : gitCommonDir;
@@ -3436,6 +3791,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     getReviewDiffFileContents,
     readConfigValue,
     listHistory,
+    getCommitDetail: readCommitDetail,
+    getCommitDiff,
+    getCommitDiffFileContents,
     listRefs,
     createWorktree: (input) => withListRefsInvalidation(input.cwd, createWorktree(input)),
     fetchPullRequestBranch: (input) =>

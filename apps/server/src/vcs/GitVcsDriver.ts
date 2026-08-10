@@ -13,6 +13,12 @@ import {
   GitCommandError,
   type GitListHistoryInput,
   type GitListHistoryResult,
+  type GitGetCommitDetailInput,
+  type GitGetCommitDetailResult,
+  type GitGetCommitDiffInput,
+  type GitGetCommitDiffResult,
+  type GitGetCommitDiffFileContentsInput,
+  type GitGetCommitDiffFileContentsResult,
   VcsProcessExitError,
   type VcsSwitchRefInput,
   type VcsSwitchRefResult,
@@ -35,6 +41,15 @@ import {
 import { makeGitVcsDriverCore } from "./GitVcsDriverCore.ts";
 
 export type GitListHistoryRepositoryInput = Omit<GitListHistoryInput, "projectId" | "threadId">;
+export type GitGetCommitDetailRepositoryInput = Omit<
+  GitGetCommitDetailInput,
+  "projectId" | "threadId"
+>;
+export type GitGetCommitDiffRepositoryInput = Omit<GitGetCommitDiffInput, "projectId" | "threadId">;
+export type GitGetCommitDiffFileContentsRepositoryInput = Omit<
+  GitGetCommitDiffFileContentsInput,
+  "projectId" | "threadId"
+>;
 import * as VcsDriver from "./VcsDriver.ts";
 import * as VcsProcess from "./VcsProcess.ts";
 
@@ -245,6 +260,15 @@ export class GitVcsDriver extends Context.Service<
     readonly listHistory: (
       input: GitListHistoryRepositoryInput,
     ) => Effect.Effect<GitListHistoryResult, GitCommandError>;
+    readonly getCommitDetail: (
+      input: GitGetCommitDetailRepositoryInput,
+    ) => Effect.Effect<GitGetCommitDetailResult, GitCommandError>;
+    readonly getCommitDiff: (
+      input: GitGetCommitDiffRepositoryInput,
+    ) => Effect.Effect<GitGetCommitDiffResult, GitCommandError>;
+    readonly getCommitDiffFileContents: (
+      input: GitGetCommitDiffFileContentsRepositoryInput,
+    ) => Effect.Effect<GitGetCommitDiffFileContentsResult, GitCommandError>;
     readonly pullCurrentBranch: (cwd: string) => Effect.Effect<VcsPullResult, GitCommandError>;
     readonly createWorktree: (
       input: VcsCreateWorktreeInput,
