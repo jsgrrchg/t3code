@@ -14,6 +14,10 @@ Pin a thread from its context menu to keep it in the pinned section above your a
 Pinned threads are shown independently of their project, including when you connect to more than
 one environment.
 
+In the desktop app, choose **Reveal in Finder**, **Reveal in File Explorer**, or **Reveal in Files**
+from a local thread's context menu to locate its worktree. Threads without a worktree reveal their
+project folder instead. The action is hidden for remote environments.
+
 On web and desktop, drag a pinned thread to change its position. On mobile, open the thread's menu
 and choose **Move up** or **Move down**. The order is stored by the server and appears on your
 other connected devices.

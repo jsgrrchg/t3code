@@ -63,6 +63,16 @@ export const GlassOpacity = Schema.Int.check(
 );
 export type GlassOpacity = typeof GlassOpacity.Type;
 export const DEFAULT_GLASS_OPACITY: GlassOpacity = 80;
+export const MIN_CHAT_CONTENT_MAX_WIDTH = 640;
+export const MAX_CHAT_CONTENT_MAX_WIDTH = 1024;
+export const ChatContentMaxWidth = Schema.Int.check(
+  Schema.isBetween({
+    minimum: MIN_CHAT_CONTENT_MAX_WIDTH,
+    maximum: MAX_CHAT_CONTENT_MAX_WIDTH,
+  }),
+);
+export type ChatContentMaxWidth = typeof ChatContentMaxWidth.Type;
+export const DEFAULT_CHAT_CONTENT_MAX_WIDTH: ChatContentMaxWidth = 768;
 /**
  * Font size preferences, in CSS pixels. The ranges are deliberately narrow:
  * the interface size scales every rem-based dimension in the app, so the
@@ -127,6 +137,9 @@ export const ClientSettingsSchema = Schema.Struct({
   ),
   glassOpacity: GlassOpacity.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_GLASS_OPACITY)),
+  ),
+  chatContentMaxWidth: ChatContentMaxWidth.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_CHAT_CONTENT_MAX_WIDTH)),
   ),
   fontSizeInterface: InterfaceFontSize.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_INTERFACE_FONT_SIZE)),
@@ -767,6 +780,7 @@ export const ClientSettingsPatch = Schema.Struct({
   diffIgnoreWhitespace: Schema.optionalKey(Schema.Boolean),
   environmentIdentificationMode: Schema.optionalKey(EnvironmentIdentificationMode),
   glassOpacity: Schema.optionalKey(GlassOpacity),
+  chatContentMaxWidth: Schema.optionalKey(ChatContentMaxWidth),
   fontSizeInterface: Schema.optionalKey(InterfaceFontSize),
   fontSizePrompt: Schema.optionalKey(PromptFontSize),
   fontSizeCode: Schema.optionalKey(CodeFontSize),

@@ -75,6 +75,7 @@ describe("LocalApi", () => {
 
     await expect(createLocalApi().contextMenu.show(items, { x: 4, y: 5 })).resolves.toBe("rename");
     expect(showContextMenuFallbackMock).toHaveBeenCalledWith(items, { x: 4, y: 5 });
+    expect(createLocalApi().shell.revealPath).toBeUndefined();
   });
 
   it("delegates host capabilities and persistence to the desktop bridge", async () => {
@@ -82,11 +83,13 @@ describe("LocalApi", () => {
     const pickFolder = vi.fn().mockResolvedValue("/tmp/project");
     const getClientSettings = vi.fn().mockResolvedValue(DEFAULT_CLIENT_SETTINGS);
     const setClientSettings = vi.fn().mockResolvedValue(undefined);
+    const revealPath = vi.fn().mockResolvedValue(true);
     testWindow().desktopBridge = {
       showContextMenu,
       pickFolder,
       getClientSettings,
       setClientSettings,
+      revealPath,
     } as unknown as DesktopBridge;
 
     const { createLocalApi } = await import("./localApi");
@@ -97,11 +100,24 @@ describe("LocalApi", () => {
     await expect(api.dialogs.pickFolder({ initialPath: "/tmp" })).resolves.toBe("/tmp/project");
     await expect(api.persistence.getClientSettings()).resolves.toEqual(DEFAULT_CLIENT_SETTINGS);
     await api.persistence.setClientSettings(DEFAULT_CLIENT_SETTINGS);
+    await expect(api.shell.revealPath?.("/tmp/project")).resolves.toBeUndefined();
 
     expect(showContextMenu).toHaveBeenCalledWith(items, undefined);
     expect(pickFolder).toHaveBeenCalledWith({ initialPath: "/tmp" });
     expect(getClientSettings).toHaveBeenCalledTimes(1);
     expect(setClientSettings).toHaveBeenCalledWith(DEFAULT_CLIENT_SETTINGS);
+    expect(revealPath).toHaveBeenCalledWith("/tmp/project");
+  });
+
+  it("reports desktop reveal failures through the local host facade", async () => {
+    testWindow().desktopBridge = {
+      revealPath: vi.fn().mockResolvedValue(false),
+    } as unknown as DesktopBridge;
+
+    const { createLocalApi } = await import("./localApi");
+    await expect(createLocalApi().shell.revealPath?.("/tmp/missing")).rejects.toThrow(
+      "Unable to reveal path.",
+    );
   });
 
   it("persists client settings in browser storage", async () => {

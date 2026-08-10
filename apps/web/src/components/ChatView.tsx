@@ -46,10 +46,12 @@ import {
 import { CHAT_LIST_ANCHOR_OFFSET } from "@t3tools/shared/chatList";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { truncate } from "@t3tools/shared/String";
+import { resolvePathAgainstCwd } from "@t3tools/shared/path";
 import { nextTerminalId, resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabels";
 import { Debouncer } from "@tanstack/react-pacer";
 import { useAtomValue } from "@effect/atom-react";
 import {
+  type CSSProperties,
   lazy,
   memo,
   Suspense,
@@ -120,6 +122,7 @@ import {
 } from "../types";
 import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
+import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { useMediaQuery } from "../hooks/useMediaQuery";
@@ -1793,6 +1796,7 @@ function ChatViewContent(props: ChatViewProps) {
     ? `${activeProject.environmentId}:${activeProject.workspaceRoot}`
     : null;
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
+  const chatContentMaxWidth = useClientSettings((settings) => settings.chatContentMaxWidth);
   const clientSettingsHydrated = useClientSettingsHydrated();
   const [pendingFileSurfaceIdsByProject, setPendingFileSurfaceIdsByProject] = useState<
     ReadonlyMap<string, ReadonlySet<string>>
@@ -3735,37 +3739,41 @@ function ChatViewContent(props: ChatViewProps) {
     cleanupRightPanelSurfaces(rightPanelState.surfaces);
     useRightPanelStore.getState().closeAllSurfaces(activeThreadRef);
   }, [activeThreadRef, cleanupRightPanelSurfaces, rightPanelState.surfaces]);
-  const copyRightPanelFilePath = useCallback((relativePath: string) => {
-    if (typeof window === "undefined" || !navigator.clipboard?.writeText) {
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Failed to copy path",
-          description: "Clipboard API unavailable.",
-        }),
-      );
-      return;
-    }
-
-    void navigator.clipboard.writeText(relativePath).then(
-      () => {
-        toastManager.add({
-          type: "success",
-          title: "Path copied",
-          description: relativePath,
-        });
-      },
-      (error) => {
+  const copyRightPanelFilePath = useCallback(
+    (relativePath: string) => {
+      if (!activeWorkspaceRoot) {
         toastManager.add(
           stackedThreadToast({
             type: "error",
             title: "Failed to copy path",
-            description: error instanceof Error ? error.message : "An error occurred.",
+            description: "Workspace path unavailable.",
           }),
         );
-      },
-    );
-  }, []);
+        return;
+      }
+
+      const absolutePath = resolvePathAgainstCwd(relativePath, activeWorkspaceRoot);
+      void writeTextToClipboard(absolutePath, "file path").then(
+        () => {
+          toastManager.add({
+            type: "success",
+            title: "Path copied",
+            description: absolutePath,
+          });
+        },
+        (error) => {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Failed to copy path",
+              description: error instanceof Error ? error.message : "An error occurred.",
+            }),
+          );
+        },
+      );
+    },
+    [activeWorkspaceRoot],
+  );
   useEffect(() => {
     if (!isWorkspacePresentation) return;
     return subscribePreviewAction((action) => {
@@ -5689,6 +5697,10 @@ function ChatViewContent(props: ChatViewProps) {
     useDesktopFollowUpQueueStore.getState().remove(entry.id);
   }, []);
 
+  const onReorderQueuedFollowUp = useCallback((entryId: string, overEntryId: string) => {
+    useDesktopFollowUpQueueStore.getState().reorder(entryId, overEntryId);
+  }, []);
+
   const onSteerQueuedFollowUp = useCallback(
     async (entry: DesktopQueuedMessageFollowUp) => {
       if (!activeServerThread) return;
@@ -6483,7 +6495,10 @@ function ChatViewContent(props: ChatViewProps) {
   ) : null;
 
   return (
-    <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
+    <div
+      className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"
+      style={{ "--chat-content-max-width": `${chatContentMaxWidth}px` } as CSSProperties}
+    >
       {isWorkspacePresentation && rightPanelOpen && !shouldUseRightPanelSheet
         ? panelLayoutControls
         : null}
@@ -6674,19 +6689,20 @@ function ChatViewContent(props: ChatViewProps) {
                     }
                   >
                     {activeQueuedFollowUps.length > 0 ? (
-                      <div className="mx-auto mb-2 w-full max-w-3xl">
+                      <div className="mx-auto mb-2 w-full max-w-(--chat-content-max-width)">
                         <DesktopFollowUpQueuePanel
                           entries={activeQueuedFollowUps}
                           paused={activeQueuePaused}
                           dispatchingEntryId={desktopQueueDispatchingEntryId}
                           onRemove={onRemoveQueuedFollowUp}
+                          onReorder={onReorderQueuedFollowUp}
                           onSteer={(entry) => void onSteerQueuedFollowUp(entry)}
                         />
                       </div>
                     ) : null}
                     <div
                       className={cn(
-                        "chat-composer-glass-shell relative mx-auto w-full max-w-3xl",
+                        "chat-composer-glass-shell relative mx-auto w-full max-w-(--chat-content-max-width)",
                         showComposerContextStrip && "chat-composer-glass-shell-with-context",
                       )}
                     >

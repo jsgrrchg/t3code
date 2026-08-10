@@ -7,6 +7,21 @@ import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
  */
 export const COMPOSER_MENTION_DRAG_TYPE = "application/x-t3code-composer-mention";
 
+export interface ComposerMentionDragSourceTransfer {
+  setData(format: string, data: string): void;
+}
+
+export function writeComposerMentionDragPayload(
+  transfer: ComposerMentionDragSourceTransfer,
+  mention: string | null,
+): boolean {
+  if (mention === null || mention.length === 0) {
+    return false;
+  }
+  transfer.setData(COMPOSER_MENTION_DRAG_TYPE, mention);
+  return true;
+}
+
 export function composerMentionFromTreePath(treePath: string): string | null {
   const relativePath = treePath.replace(/\/+$/, "");
   if (relativePath.length === 0) {

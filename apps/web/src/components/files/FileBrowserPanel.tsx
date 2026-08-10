@@ -5,6 +5,7 @@ import type {
 import type { EnvironmentId, ProjectEntry } from "@t3tools/contracts";
 import { FileTree, useFileTree, useFileTreeSearch } from "@pierre/trees/react";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
+import { resolvePathAgainstCwd } from "@t3tools/shared/path";
 import * as Schema from "effect/Schema";
 import { Eye, EyeOff, RotateCw } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
@@ -181,6 +182,7 @@ export default function FileBrowserPanel({
       return;
     }
     const relativePath = item.path.replace(/\/$/, "");
+    const absolutePath = resolvePathAgainstCwd(relativePath, cwd);
     const mention = serializeComposerFileLink(relativePath);
     const pointer = contextMenuPointerRef.current;
     const pointerIsFresh = pointer !== null && performance.now() - pointer.at < 1000;
@@ -191,11 +193,29 @@ export default function FileBrowserPanel({
     try {
       const clicked = await api.contextMenu.show(
         [
+          { id: "copy-path", label: "Copy path", icon: "copy" },
           { id: "copy-mention", label: "Copy mention" },
           { id: "add-to-chat", label: "Add to chat" },
         ],
         position,
       );
+      if (clicked === "copy-path") {
+        try {
+          await writeTextToClipboard(absolutePath, "file path");
+          toastManager.add({
+            type: "success",
+            title: "Path copied",
+            description: absolutePath,
+          });
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: "Failed to copy path",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          });
+        }
+        return;
+      }
       if (clicked === "copy-mention") {
         try {
           await writeTextToClipboard(mention);

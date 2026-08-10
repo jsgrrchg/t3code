@@ -21,6 +21,20 @@ export function isExplicitRelativePath(value: string): boolean {
   );
 }
 
+export function resolvePathAgainstCwd(value: string, cwd: string): string {
+  if (value.startsWith("/") || isWindowsAbsolutePath(value)) {
+    return value;
+  }
+
+  const windowsStyle = isWindowsAbsolutePath(cwd);
+  const separator = windowsStyle ? "\\" : "/";
+  const normalizedCwd = windowsStyle ? cwd.replaceAll("/", "\\") : cwd;
+  const cleanCwd = normalizedCwd.replace(windowsStyle ? /[\\/]+$/ : /\/+$/, "");
+  const relativePath = windowsStyle ? value.replaceAll("/", "\\") : value.replace(/^\/+/, "");
+
+  return `${cleanCwd}${separator}${relativePath}`;
+}
+
 function isRootPath(value: string): boolean {
   return value === "/" || value === "\\" || /^[a-zA-Z]:[/\\]?$/.test(value);
 }

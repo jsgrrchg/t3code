@@ -15,6 +15,7 @@ import {
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type DragEvent as ReactDragEvent,
   type ReactElement,
   type ReactNode,
   useCallback,
@@ -55,6 +56,8 @@ import {
   resolveRightPanelTabKeyAction,
   shouldClearRightPanelFocusOwner,
 } from "./RightPanelTabs.logic";
+import { writeComposerMentionDragPayload } from "./chat/composerMentionDrag";
+import { composerMentionFromRightPanelSurface } from "./rightPanelTabDrag";
 
 interface RightPanelTabsProps {
   mode: PreviewPanelMode;
@@ -646,6 +649,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     },
     [closeSurfaceAndRestoreFocus],
   );
+  const handleTabDragStart = useCallback(
+    (event: ReactDragEvent<HTMLButtonElement>, mention: string | null) => {
+      if (!writeComposerMentionDragPayload(event.dataTransfer, mention)) {
+        event.preventDefault();
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     const activeTab = tabListRef.current?.querySelector<HTMLElement>("[data-active-tab='true']");
@@ -741,6 +752,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                 props.terminalLabelsById,
                 props.chatTitlesById,
               );
+              const composerMention = composerMentionFromRightPanelSurface(surface);
               return (
                 <div
                   key={surface.id}
@@ -813,6 +825,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                             aria-controls="right-panel-active-surface"
                             tabIndex={active ? 0 : -1}
                             className="cursor-pointer flex min-w-0 items-center"
+                            draggable={composerMention !== null}
+                            onDragStart={(event) => handleTabDragStart(event, composerMention)}
                             onClick={() => props.onActivate(surface)}
                             onKeyDown={(event) => handleTabKeyDown(event, surface)}
                             onDoubleClick={() => {

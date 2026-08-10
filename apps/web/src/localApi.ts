@@ -7,6 +7,7 @@ import { readBrowserClientSettings, writeBrowserClientSettings } from "./clientP
 let cachedApi: LocalApi | undefined;
 
 function createBrowserLocalApi(): LocalApi {
+  const desktopBridge = window.desktopBridge;
   return {
     dialogs: {
       pickFolder: async (options) => {
@@ -32,6 +33,16 @@ function createBrowserLocalApi(): LocalApi {
 
         window.open(url, "_blank", "noopener,noreferrer");
       },
+      ...(desktopBridge
+        ? {
+            revealPath: async (path: string) => {
+              const revealed = await desktopBridge.revealPath(path);
+              if (!revealed) {
+                throw new Error("Unable to reveal path.");
+              }
+            },
+          }
+        : {}),
     },
     contextMenu: {
       show: async <T extends string>(

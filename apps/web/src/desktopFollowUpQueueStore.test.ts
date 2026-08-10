@@ -39,13 +39,13 @@ function queuedFollowUp(index: number, threadId = "thread-1"): DesktopQueuedFoll
   };
 }
 
-function queuedProviderAction(index: number): DesktopQueuedProviderAction {
+function queuedProviderAction(index: number, threadId = "thread-1"): DesktopQueuedProviderAction {
   return {
     kind: "provider-action",
     id: `action-${index}`,
     commandId: CommandId.make(`action-command-${index}`),
     environmentId: EnvironmentId.make("environment-1"),
-    threadId: ThreadId.make("thread-1"),
+    threadId: ThreadId.make(threadId),
     action: { type: "compact" },
     createdAt: `2026-08-09T00:00:1${index}.000Z`,
   };
@@ -93,6 +93,67 @@ describe("desktop follow-up queue", () => {
 
     expect(useDesktopFollowUpQueueStore.getState().entries.map((entry) => entry.id)).toEqual([
       second.id,
+    ]);
+  });
+
+  it("reorders one thread without moving interleaved entries from another thread", () => {
+    const first = queuedFollowUp(1);
+    const otherThread = queuedFollowUp(2, "thread-2");
+    const last = queuedFollowUp(3);
+    const store = useDesktopFollowUpQueueStore.getState();
+    store.enqueue(first);
+    store.enqueue(otherThread);
+    store.enqueue(last);
+
+    expect(store.reorder(last.id, first.id)).toBe(true);
+    expect(useDesktopFollowUpQueueStore.getState().entries.map((entry) => entry.id)).toEqual([
+      last.id,
+      otherThread.id,
+      first.id,
+    ]);
+
+    useDesktopFollowUpQueueStore.setState({ entries: [] });
+    reloadDesktopFollowUpQueueForTest();
+    expect(useDesktopFollowUpQueueStore.getState().entries.map((entry) => entry.id)).toEqual([
+      last.id,
+      otherThread.id,
+      first.id,
+    ]);
+  });
+
+  it("reorders messages and provider actions as one queue", () => {
+    const first = queuedFollowUp(1);
+    const action = queuedProviderAction(1);
+    const last = queuedFollowUp(2);
+    const store = useDesktopFollowUpQueueStore.getState();
+    store.enqueue(first);
+    store.enqueue(action);
+    store.enqueue(last);
+
+    expect(store.reorder(action.id, first.id)).toBe(true);
+    expect(useDesktopFollowUpQueueStore.getState().entries.map((entry) => entry.id)).toEqual([
+      action.id,
+      first.id,
+      last.id,
+    ]);
+  });
+
+  it("rejects cross-thread moves and reordering a queue with an active claim", () => {
+    const first = queuedFollowUp(1);
+    const second = queuedFollowUp(2);
+    const otherThread = queuedProviderAction(1, "thread-2");
+    const store = useDesktopFollowUpQueueStore.getState();
+    store.enqueue(first);
+    store.enqueue(second);
+    store.enqueue(otherThread);
+
+    expect(store.reorder(first.id, otherThread.id)).toBe(false);
+    expect(store.claim(first.id)).toBe(true);
+    expect(store.reorder(second.id, first.id)).toBe(false);
+    expect(useDesktopFollowUpQueueStore.getState().entries.map((entry) => entry.id)).toEqual([
+      first.id,
+      second.id,
+      otherThread.id,
     ]);
   });
 

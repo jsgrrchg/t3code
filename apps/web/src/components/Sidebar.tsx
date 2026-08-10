@@ -119,7 +119,7 @@ import {
 import { formatRelativeTimeLabel, parseTimestampDate } from "../timestampFormat";
 import type { SidebarThreadSummary } from "../types";
 import { cn } from "~/lib/utils";
-import { buildThreadActionMenuItems } from "./threadActionMenu.logic";
+import { buildThreadActionMenuItems, resolveThreadRevealPathLabel } from "./threadActionMenu.logic";
 import {
   buildBulkTitleRegenerationContextMenuItem,
   formatWorkingDurationLabel,
@@ -2614,6 +2614,28 @@ export default function Sidebar() {
     [orderedPinnedThreads, reorderPinnedThread, reorderablePinnedKeys],
   );
 
+  const threadListAutoAnimateControllerRef = useRef<ReturnType<typeof autoAnimate> | null>(null);
+  const threadListAutoAnimateResumeFrameRef = useRef<number | null>(null);
+  const suspendThreadListAutoAnimate = useCallback(() => {
+    if (threadListAutoAnimateResumeFrameRef.current !== null) {
+      cancelAnimationFrame(threadListAutoAnimateResumeFrameRef.current);
+      threadListAutoAnimateResumeFrameRef.current = null;
+    }
+    threadListAutoAnimateControllerRef.current?.disable();
+  }, []);
+  const resumeThreadListAutoAnimateAfterDrop = useCallback(() => {
+    if (threadListAutoAnimateResumeFrameRef.current !== null) {
+      cancelAnimationFrame(threadListAutoAnimateResumeFrameRef.current);
+    }
+    // dnd-kit owns the reorder transition. Re-enable lifecycle animations
+    // after React commits the optimistic DOM order so autoAnimate does not
+    // apply a second, competing transform to the dropped card.
+    threadListAutoAnimateResumeFrameRef.current = requestAnimationFrame(() => {
+      threadListAutoAnimateResumeFrameRef.current = null;
+      threadListAutoAnimateControllerRef.current?.enable();
+    });
+  }, []);
+
   const activeDndSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -2667,6 +2689,7 @@ export default function Sidebar() {
 
   const handleActiveDragEnd = useCallback(
     (event: DragEndEvent) => {
+      resumeThreadListAutoAnimateAfterDrop();
       const activeKey = String(event.active.id);
       const overKey = event.over === null ? null : String(event.over.id);
       if (overKey === null || activeKey === overKey) return;
@@ -2721,7 +2744,12 @@ export default function Sidebar() {
         }
       })();
     },
-    [orderedActiveThreads, reorderActiveThread, reorderableActiveKeys],
+    [
+      orderedActiveThreads,
+      reorderActiveThread,
+      reorderableActiveKeys,
+      resumeThreadListAutoAnimateAfterDrop,
+    ],
   );
 
   const [activeOrderResetting, setActiveOrderResetting] = useState(false);
@@ -3129,6 +3157,7 @@ export default function Sidebar() {
         const isPinned = thread.pinnedAt != null;
         // Presets resolve at menu-open time (same as the popover).
         const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
+        const revealPath = api.shell.revealPath;
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
             buildThreadActionMenuItems({
@@ -3138,6 +3167,13 @@ export default function Sidebar() {
               isSnoozed,
               canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
               isRegeneratingTitle,
+              revealPathLabel: resolveThreadRevealPathLabel({
+                hasRevealPathCapability: revealPath !== undefined,
+                threadEnvironmentId: thread.environmentId,
+                primaryEnvironmentId,
+                workspacePath: threadWorkspacePath,
+                platform: navigator.platform,
+              }),
               supports: {
                 settlement: supportsSettlement,
                 snooze: supportsSnooze,
@@ -3220,6 +3256,21 @@ export default function Sidebar() {
           case "mark-unread":
             markThreadUnread(threadKey, thread.latestTurn?.completedAt);
             return;
+          case "reveal-path": {
+            if (!threadWorkspacePath || !revealPath) return;
+            const result = await settlePromise(() => revealPath(threadWorkspacePath));
+            if (result._tag === "Failure") {
+              const error = squashAtomCommandFailure(result);
+              toastManager.add(
+                stackedThreadToast({
+                  type: "error",
+                  title: "Unable to reveal workspace",
+                  description: error instanceof Error ? error.message : "An error occurred.",
+                }),
+              );
+            }
+            return;
+          }
           case "copy-path":
             if (!threadWorkspacePath) {
               toastManager.add(
@@ -3282,6 +3333,7 @@ export default function Sidebar() {
       deleteThread,
       handleMultiSelectContextMenu,
       markThreadUnread,
+      primaryEnvironmentId,
       projectCwdByKey,
       serverConfigs,
       startThreadRename,
@@ -3357,8 +3409,19 @@ export default function Sidebar() {
   }, [shouldShowJumpHintsNow]);
 
   const attachListAutoAnimateRef = useCallback((node: HTMLUListElement | null) => {
-    if (!node) return;
-    autoAnimate(node, { duration: 150, easing: "ease-out" });
+    if (!node) {
+      threadListAutoAnimateControllerRef.current?.disable();
+      threadListAutoAnimateControllerRef.current = null;
+      if (threadListAutoAnimateResumeFrameRef.current !== null) {
+        cancelAnimationFrame(threadListAutoAnimateResumeFrameRef.current);
+        threadListAutoAnimateResumeFrameRef.current = null;
+      }
+      return;
+    }
+    threadListAutoAnimateControllerRef.current = autoAnimate(node, {
+      duration: 150,
+      easing: "ease-out",
+    });
   }, []);
 
   // New thread defaults to the project you're in (active thread's project,
@@ -3811,6 +3874,8 @@ export default function Sidebar() {
                       sensors={activeDndSensors}
                       collisionDetection={closestCenter}
                       modifiers={[restrictToVerticalAxis, restrictToFirstScrollableAncestor]}
+                      onDragStart={suspendThreadListAutoAnimate}
+                      onDragCancel={resumeThreadListAutoAnimateAfterDrop}
                       onDragEnd={handleActiveDragEnd}
                     >
                       <SortableContext

@@ -67,6 +67,7 @@ import {
   serializeTableElementToMarkdown,
 } from "../markdown-clipboard";
 import { remarkNormalizeListItemIndentation } from "../markdown-list-indentation";
+import { rehypeTagMarkdownSourceBlocks } from "../markdown-source-blocks";
 import {
   normalizeMarkdownLinkDestination,
   resolveInlineCodeFileLinkMeta,
@@ -98,6 +99,7 @@ interface ChatMarkdownProps {
   cwd: string | undefined;
   threadRef?: ScopedThreadRef | undefined;
   onTaskListChange?: ((input: { markerOffset: number; checked: boolean }) => void) | undefined;
+  annotateSourceBlocks?: boolean;
   isStreaming?: boolean;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   className?: string;
@@ -143,7 +145,11 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
   ...defaultSchema,
   attributes: {
     ...defaultSchema.attributes,
-    "*": (defaultSchema.attributes?.["*"] ?? []).filter((attribute) => attribute !== "title"),
+    "*": [
+      ...(defaultSchema.attributes?.["*"] ?? []).filter((attribute) => attribute !== "title"),
+      "dataMarkdownSourceStart",
+      "dataMarkdownSourceEnd",
+    ],
     code: [...(defaultSchema.attributes?.code ?? []), "dataCodeMeta", "dataInlineCode"],
   },
   protocols: {
@@ -169,6 +175,12 @@ const CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS = [
 
 const CHAT_MARKDOWN_REHYPE_PLUGINS = [
   rehypeRaw,
+  [rehypeSanitize, CHAT_MARKDOWN_SANITIZE_SCHEMA],
+] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
+
+const CHAT_MARKDOWN_REHYPE_PLUGINS_WITH_SOURCE_BLOCKS = [
+  rehypeRaw,
+  rehypeTagMarkdownSourceBlocks,
   [rehypeSanitize, CHAT_MARKDOWN_SANITIZE_SCHEMA],
 ] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
 
@@ -541,12 +553,16 @@ function MarkdownCodeBlock({
   language,
   fenceTitle,
   theme,
+  sourceStartLine,
+  sourceEndLine,
   children,
 }: {
   code: string;
   language: string;
   fenceTitle: string | null;
   theme: "light" | "dark";
+  sourceStartLine?: number | undefined;
+  sourceEndLine?: number | undefined;
   children: ReactNode;
 }) {
   const [copied, setCopied] = useState(false);
@@ -597,6 +613,8 @@ function MarkdownCodeBlock({
     <div
       className="chat-markdown-codeblock border border-border/70 bg-secondary leading-snug dark:border-transparent dark:bg-input/32"
       data-language={language}
+      data-markdown-source-start={sourceStartLine}
+      data-markdown-source-end={sourceEndLine}
       data-wrap={wrapped ? "true" : "false"}
     >
       <div className="chat-markdown-codeblock-header select-none">
@@ -1257,6 +1275,7 @@ function ChatMarkdown({
   cwd,
   threadRef,
   onTaskListChange,
+  annotateSourceBlocks = false,
   isStreaming = false,
   skills = EMPTY_MARKDOWN_SKILLS,
   className,
@@ -1569,6 +1588,8 @@ function ChatMarkdown({
             language={language}
             fenceTitle={fenceTitle}
             theme={resolvedTheme}
+            sourceStartLine={annotateSourceBlocks ? node?.position?.start.line : undefined}
+            sourceEndLine={annotateSourceBlocks ? node?.position?.end.line : undefined}
           >
             <RenderErrorBoundary fallback={<pre {...props}>{children}</pre>}>
               <Suspense fallback={<pre {...props}>{children}</pre>}>
@@ -1586,6 +1607,7 @@ function ChatMarkdown({
     };
   }, [
     cwd,
+    annotateSourceBlocks,
     diffThemeName,
     fileLinkParentSuffixByPath,
     inlineCodeFileLinkMetaByText,
@@ -1614,7 +1636,11 @@ function ChatMarkdown({
         remarkPlugins={
           lineBreaks ? CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS : CHAT_MARKDOWN_REMARK_PLUGINS
         }
-        rehypePlugins={CHAT_MARKDOWN_REHYPE_PLUGINS}
+        rehypePlugins={
+          annotateSourceBlocks
+            ? CHAT_MARKDOWN_REHYPE_PLUGINS_WITH_SOURCE_BLOCKS
+            : CHAT_MARKDOWN_REHYPE_PLUGINS
+        }
         components={markdownComponents}
         urlTransform={markdownUrlTransform}
       >

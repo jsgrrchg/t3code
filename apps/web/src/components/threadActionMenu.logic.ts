@@ -1,6 +1,8 @@
 import type { ContextMenuItem } from "@t3tools/contracts";
 import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled";
 
+import { revealInFileExplorerLabel } from "../fileExplorerLabel";
+
 /**
  * Ids for the per-thread action menu. Snooze presets are dispatched as
  * `snooze:<presetId>` so the union stays closed while the preset list
@@ -18,6 +20,7 @@ export type ThreadActionMenuId =
   | "rename"
   | "regenerate-title"
   | "mark-unread"
+  | "reveal-path"
   | "copy-path"
   | "copy-branch"
   | "delete";
@@ -29,6 +32,7 @@ export interface ThreadActionMenuState {
   readonly isSnoozed: boolean;
   readonly canSnoozeNow: boolean;
   readonly isRegeneratingTitle: boolean;
+  readonly revealPathLabel: string | null;
   readonly supports: {
     readonly settlement: boolean;
     readonly snooze: boolean;
@@ -36,6 +40,24 @@ export interface ThreadActionMenuState {
     readonly titleRegeneration: boolean;
   };
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
+}
+
+export function resolveThreadRevealPathLabel(input: {
+  readonly hasRevealPathCapability: boolean;
+  readonly threadEnvironmentId: string;
+  readonly primaryEnvironmentId: string | null;
+  readonly workspacePath: string | null;
+  readonly platform: string;
+}): string | null {
+  if (
+    !input.hasRevealPathCapability ||
+    input.primaryEnvironmentId === null ||
+    input.threadEnvironmentId !== input.primaryEnvironmentId ||
+    input.workspacePath === null
+  ) {
+    return null;
+  }
+  return revealInFileExplorerLabel(input.platform);
 }
 
 /**
@@ -98,6 +120,15 @@ export function buildThreadActionMenuItems(
         ]
       : []),
     { id: "mark-unread", label: "Mark unread" },
+    ...(state.revealPathLabel
+      ? [
+          {
+            id: "reveal-path" as const,
+            label: state.revealPathLabel,
+            icon: "folder-tree",
+          },
+        ]
+      : []),
     { id: "copy-path", label: "Copy path", icon: "copy" },
     ...(state.branch ? [{ id: "copy-branch" as const, label: "Copy branch", icon: "copy" }] : []),
     { id: "delete", label: "Delete", destructive: true, icon: "trash" },

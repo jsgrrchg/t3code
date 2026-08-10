@@ -111,8 +111,49 @@ interface DesktopFollowUpQueueState {
   readonly dispatchingEntryId: string | null;
   enqueue: (entry: DesktopQueuedFollowUp) => boolean;
   remove: (entryId: string) => void;
+  reorder: (entryId: string, overEntryId: string) => boolean;
   claim: (entryId: string) => boolean;
   release: (entryId: string) => void;
+}
+
+function entriesShareQueue(left: DesktopQueuedFollowUp, right: DesktopQueuedFollowUp): boolean {
+  return left.environmentId === right.environmentId && left.threadId === right.threadId;
+}
+
+function reorderEntriesWithinThread(
+  entries: ReadonlyArray<DesktopQueuedFollowUp>,
+  entryId: string,
+  overEntryId: string,
+): ReadonlyArray<DesktopQueuedFollowUp> | null {
+  if (entryId === overEntryId) return null;
+
+  const entry = entries.find((candidate) => candidate.id === entryId);
+  const overEntry = entries.find((candidate) => candidate.id === overEntryId);
+  if (!entry || !overEntry || !entriesShareQueue(entry, overEntry)) return null;
+
+  const queueIndexes: number[] = [];
+  const queueEntries: DesktopQueuedFollowUp[] = [];
+  for (const [index, candidate] of entries.entries()) {
+    if (!entriesShareQueue(candidate, entry)) continue;
+    queueIndexes.push(index);
+    queueEntries.push(candidate);
+  }
+
+  const fromIndex = queueEntries.findIndex((candidate) => candidate.id === entryId);
+  const toIndex = queueEntries.findIndex((candidate) => candidate.id === overEntryId);
+  if (fromIndex === -1 || toIndex === -1) return null;
+
+  const reorderedQueue = [...queueEntries];
+  const [movedEntry] = reorderedQueue.splice(fromIndex, 1);
+  if (!movedEntry) return null;
+  reorderedQueue.splice(toIndex, 0, movedEntry);
+
+  const nextEntries = [...entries];
+  for (const [queueIndex, globalIndex] of queueIndexes.entries()) {
+    const queuedEntry = reorderedQueue[queueIndex];
+    if (queuedEntry) nextEntries[globalIndex] = queuedEntry;
+  }
+  return nextEntries;
 }
 
 export const useDesktopFollowUpQueueStore = create<DesktopFollowUpQueueState>()((set, get) => ({
@@ -132,6 +173,22 @@ export const useDesktopFollowUpQueueStore = create<DesktopFollowUpQueueState>()(
       entries: nextEntries,
       dispatchingEntryId: state.dispatchingEntryId === entryId ? null : state.dispatchingEntryId,
     }));
+  },
+  reorder: (entryId, overEntryId) => {
+    const state = get();
+    const dispatchingEntry =
+      state.dispatchingEntryId === null
+        ? undefined
+        : state.entries.find((entry) => entry.id === state.dispatchingEntryId);
+    const movingEntry = state.entries.find((entry) => entry.id === entryId);
+    if (dispatchingEntry && movingEntry && entriesShareQueue(dispatchingEntry, movingEntry)) {
+      return false;
+    }
+
+    const nextEntries = reorderEntriesWithinThread(state.entries, entryId, overEntryId);
+    if (!nextEntries || !persistEntries(nextEntries)) return false;
+    set({ entries: nextEntries });
+    return true;
   },
   claim: (entryId) => {
     if (get().dispatchingEntryId !== null) return false;
