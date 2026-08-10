@@ -2740,13 +2740,14 @@ function ChatViewContent(props: ChatViewProps) {
     terminalUiLaunchContext?.threadId === activeThreadId ? terminalUiLaunchContext : null;
   // Default true while loading to avoid toolbar flicker.
   const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
-  const showComposerContextStrip =
-    isWorkspacePresentation &&
-    shouldShowComposerContextStrip({
-      hasActiveProject: activeProject !== null,
-      isGitRepo,
-      showEnvironmentIndicator: showComposerEnvironmentIndicator,
-    });
+  const composerContextStripAvailable = shouldShowComposerContextStrip({
+    hasActiveProject: activeProject !== null,
+    isGitRepo,
+    showEnvironmentIndicator: showComposerEnvironmentIndicator,
+  });
+  const showComposerContextStrip = isWorkspacePresentation && composerContextStripAvailable;
+  const reserveComposerContextStripSpace =
+    !isWorkspacePresentation && composerContextStripAvailable;
   const initialDiffPanelGitScope =
     gitStatusQuery.data?.hasWorkingTreeChanges === true ? "unstaged" : "branch";
   const diffPanelGitStatusResolutionKey = gitStatusQuery.data ? "resolved" : "pending";
@@ -6804,6 +6805,9 @@ function ChatViewContent(props: ChatViewProps) {
                         </div>
                       </div>
                     </div>
+                    {reserveComposerContextStripSpace ? (
+                      <div aria-hidden className="h-9 sm:h-8" />
+                    ) : null}
                     <div
                       aria-hidden
                       className="h-[calc(env(safe-area-inset-bottom)+1rem)] sm:h-[calc(env(safe-area-inset-bottom)+1.25rem)]"
