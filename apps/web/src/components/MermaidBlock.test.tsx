@@ -142,4 +142,19 @@ describe("MermaidBlock", () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(code);
     expect(renderer).toHaveBeenCalledTimes(1);
   });
+
+  it("preserves source line annotations for rendered Markdown reviews", async () => {
+    const renderer = vi.fn(async () => ({ _tag: "Success", svg: "<svg />" }) as const);
+    await render({
+      code: "flowchart LR\nA-->B",
+      theme: "light",
+      renderer,
+      sourceStartLine: 12,
+      sourceEndLine: 15,
+    });
+
+    const block = container.querySelector("[data-language='mermaid']");
+    expect(block?.getAttribute("data-markdown-source-start")).toBe("12");
+    expect(block?.getAttribute("data-markdown-source-end")).toBe("15");
+  });
 });

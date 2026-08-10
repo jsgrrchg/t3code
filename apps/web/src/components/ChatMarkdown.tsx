@@ -22,6 +22,7 @@ import React, {
   type ClipboardEvent as ReactClipboardEvent,
   type MouseEvent as ReactMouseEvent,
   isValidElement,
+  lazy,
   use,
   useCallback,
   memo,
@@ -57,6 +58,7 @@ import { useOpenInPreferredEditor } from "../editorPreferences";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 import { fnv1a32 } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
+import { shouldRenderMermaidDiagram } from "../lib/markdownDiagrams";
 import { getSyntaxHighlighterPromise } from "../lib/syntaxHighlighting";
 import { RenderErrorBoundary } from "./RenderErrorBoundary";
 import { useTheme } from "../hooks/useTheme";
@@ -100,6 +102,7 @@ interface ChatMarkdownProps {
   threadRef?: ScopedThreadRef | undefined;
   onTaskListChange?: ((input: { markerOffset: number; checked: boolean }) => void) | undefined;
   annotateSourceBlocks?: boolean;
+  renderMermaid?: boolean;
   isStreaming?: boolean;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   className?: string;
@@ -112,6 +115,10 @@ const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "d
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
 const MAX_HIGHLIGHT_CACHE_ENTRIES = 500;
 const MAX_HIGHLIGHT_CACHE_MEMORY_BYTES = 50 * 1024 * 1024;
+const LazyMermaidBlock = lazy(async () => {
+  const module = await import("./MermaidBlock");
+  return { default: module.MermaidBlock };
+});
 
 interface MarkdownActionFailureContext {
   readonly operation: string;
@@ -1276,6 +1283,7 @@ function ChatMarkdown({
   threadRef,
   onTaskListChange,
   annotateSourceBlocks = false,
+  renderMermaid = false,
   isStreaming = false,
   skills = EMPTY_MARKDOWN_SKILLS,
   className,
@@ -1582,25 +1590,51 @@ function ChatMarkdown({
 
         const language = extractFenceLanguage(codeBlock.className);
         const fenceTitle = extractFenceTitle(extractPreCodeMeta(node));
+        const sourceStartLine = annotateSourceBlocks ? node?.position?.start.line : undefined;
+        const sourceEndLine = annotateSourceBlocks ? node?.position?.end.line : undefined;
+        const sourceView = (
+          <RenderErrorBoundary fallback={<pre {...props}>{children}</pre>}>
+            <Suspense fallback={<pre {...props}>{children}</pre>}>
+              <SuspenseShikiCodeBlock
+                className={codeBlock.className}
+                code={codeBlock.code}
+                themeName={diffThemeName}
+                isStreaming={isStreaming}
+              />
+            </Suspense>
+          </RenderErrorBoundary>
+        );
+        if (
+          shouldRenderMermaidDiagram({
+            language,
+            enabled: renderMermaid,
+            isStreaming,
+          })
+        ) {
+          return (
+            <RenderErrorBoundary fallback={sourceView}>
+              <Suspense fallback={sourceView}>
+                <LazyMermaidBlock
+                  code={codeBlock.code}
+                  theme={resolvedTheme}
+                  sourceView={sourceView}
+                  sourceStartLine={sourceStartLine}
+                  sourceEndLine={sourceEndLine}
+                />
+              </Suspense>
+            </RenderErrorBoundary>
+          );
+        }
         return (
           <MarkdownCodeBlock
             code={codeBlock.code}
             language={language}
             fenceTitle={fenceTitle}
             theme={resolvedTheme}
-            sourceStartLine={annotateSourceBlocks ? node?.position?.start.line : undefined}
-            sourceEndLine={annotateSourceBlocks ? node?.position?.end.line : undefined}
+            sourceStartLine={sourceStartLine}
+            sourceEndLine={sourceEndLine}
           >
-            <RenderErrorBoundary fallback={<pre {...props}>{children}</pre>}>
-              <Suspense fallback={<pre {...props}>{children}</pre>}>
-                <SuspenseShikiCodeBlock
-                  className={codeBlock.className}
-                  code={codeBlock.code}
-                  themeName={diffThemeName}
-                  isStreaming={isStreaming}
-                />
-              </Suspense>
-            </RenderErrorBoundary>
+            {sourceView}
           </MarkdownCodeBlock>
         );
       },
@@ -1617,6 +1651,7 @@ function ChatMarkdown({
     openInPreferredEditor,
     openExternalLinkInPreview,
     openMarkdownFileInPreview,
+    renderMermaid,
     resolvedTheme,
     skills,
     text,

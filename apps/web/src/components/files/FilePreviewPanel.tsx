@@ -869,6 +869,7 @@ function RenderedMarkdownSurface({
             threadRef={threadRef}
             className="pl-7"
             annotateSourceBlocks
+            renderMermaid
             onTaskListChange={({ markerOffset, checked }) => {
               const currentContents =
                 getOptimisticProjectFileQueryData(environmentId, cwd, relativePath)?.contents ??
