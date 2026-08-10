@@ -65,3 +65,9 @@ export function resolveFocusedRightPanelSurfaceId(
 ): string | null {
   return focusOwnerSurfaceId ?? null;
 }
+
+export function shouldClearRightPanelFocusOwner(
+  relatedTargetRemainsInside: boolean | null,
+): boolean {
+  return relatedTargetRemainsInside !== true;
+}

@@ -4,6 +4,7 @@ import {
   resolvePanelChatOpenAnnouncementThreadId,
   resolveFocusTargetAfterRemoteSurfaceRemoval,
   resolveFocusedRightPanelSurfaceId,
+  shouldClearRightPanelFocusOwner,
   resolveRightPanelTabKeyAction,
 } from "./RightPanelTabs.logic";
 
@@ -93,5 +94,13 @@ describe("resolveFocusedRightPanelSurfaceId", () => {
   it("does not attribute global panel controls to the active surface", () => {
     expect(resolveFocusedRightPanelSurfaceId(undefined)).toBeNull();
     expect(resolveFocusedRightPanelSurfaceId("chat:child")).toBe("chat:child");
+  });
+});
+
+describe("shouldClearRightPanelFocusOwner", () => {
+  it("clears stale ownership for outside and null blur targets", () => {
+    expect(shouldClearRightPanelFocusOwner(false)).toBe(true);
+    expect(shouldClearRightPanelFocusOwner(null)).toBe(true);
+    expect(shouldClearRightPanelFocusOwner(true)).toBe(false);
   });
 });

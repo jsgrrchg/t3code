@@ -53,6 +53,7 @@ import {
   resolveFocusTargetAfterRemoteSurfaceRemoval,
   resolveFocusedRightPanelSurfaceId,
   resolveRightPanelTabKeyAction,
+  shouldClearRightPanelFocusOwner,
 } from "./RightPanelTabs.logic";
 
 interface RightPanelTabsProps {
@@ -699,10 +700,11 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
         );
       }}
       onBlurCapture={(event) => {
-        if (
-          event.relatedTarget instanceof Node &&
-          !event.currentTarget.contains(event.relatedTarget)
-        ) {
+        const relatedTargetRemainsInside =
+          event.relatedTarget instanceof Node
+            ? event.currentTarget.contains(event.relatedTarget)
+            : null;
+        if (shouldClearRightPanelFocusOwner(relatedTargetRemainsInside)) {
           focusedSurfaceIdRef.current = null;
         }
       }}
