@@ -56,10 +56,11 @@ import { resolveCenteredFileLineScrollTop } from "./fileLineReveal";
 import { LocalCommentAnnotation } from "./LocalCommentAnnotation";
 import { MarkdownReviewSurface } from "./MarkdownReviewSurface";
 import { projectFileCacheKey, projectFileEditorCacheKey } from "./fileContentRevision";
-import { fileBreadcrumbs } from "./filePath";
+import { fileBreadcrumbs, pathFallsWithinEntry } from "./filePath";
 import { isMarkdownPreviewFile, setMarkdownTaskChecked } from "./filePreviewMode";
 import { FileSaveCoordinator } from "./fileSaveCoordinator";
 import {
+  clearProjectFileQueryData,
   confirmProjectFileQueryData,
   getOptimisticProjectFileQueryData,
   setProjectFileQueryData,
@@ -78,6 +79,7 @@ interface FilePreviewPanelProps {
   revealLine: number | null;
   revealRequestId: number;
   onOpenFile: (relativePath: string) => void;
+  onEntryDeleted: (relativePath: string, kind: "file" | "directory") => void;
   onPendingChange: (relativePath: string, pending: boolean) => void;
 }
 
@@ -395,6 +397,7 @@ interface EditableFileSurfaceProps {
   wordWrap: boolean;
   onPostRender: FilePostRender;
   onPendingChange: (relativePath: string, pending: boolean) => void;
+  onSaveCoordinatorChange: (coordinator: FileSaveCoordinator | null) => void;
 }
 
 interface FileSelectionOverride {
@@ -407,9 +410,10 @@ function useFileSaveCoordinator({
   cwd,
   relativePath,
   onPendingChange,
+  onSaveCoordinatorChange,
 }: Pick<
   EditableFileSurfaceProps,
-  "environmentId" | "cwd" | "relativePath" | "onPendingChange"
+  "environmentId" | "cwd" | "relativePath" | "onPendingChange" | "onSaveCoordinatorChange"
 >): FileSaveCoordinator {
   const writeFile = useAtomCommand(projectEnvironment.writeFile);
   const coordinator = useMemo(
@@ -429,7 +433,13 @@ function useFileSaveCoordinator({
     [cwd, environmentId, onPendingChange, relativePath, writeFile],
   );
 
-  useEffect(() => () => coordinator.dispose(), [coordinator]);
+  useEffect(() => {
+    onSaveCoordinatorChange(coordinator);
+    return () => {
+      onSaveCoordinatorChange(null);
+      coordinator.dispose();
+    };
+  }, [coordinator, onSaveCoordinatorChange]);
   return coordinator;
 }
 
@@ -444,6 +454,7 @@ function EditableFileSurface({
   wordWrap,
   onPostRender,
   onPendingChange,
+  onSaveCoordinatorChange,
 }: EditableFileSurfaceProps) {
   const addReviewComment = useComposerDraftStore((store) => store.addReviewComment);
   const removeReviewComment = useComposerDraftStore((store) => store.removeReviewComment);
@@ -468,6 +479,7 @@ function EditableFileSurface({
     cwd,
     relativePath,
     onPendingChange,
+    onSaveCoordinatorChange,
   });
   const lineAnnotations = useMemo(() => {
     const persisted = reviewComments
@@ -687,6 +699,7 @@ function RenderedMarkdownSurface({
   contents,
   threadRef,
   onPendingChange,
+  onSaveCoordinatorChange,
 }: Omit<
   EditableFileSurfaceProps,
   "resolvedTheme" | "revealLine" | "revealRequestId" | "wordWrap" | "onPostRender"
@@ -707,6 +720,7 @@ function RenderedMarkdownSurface({
     cwd,
     relativePath,
     onPendingChange,
+    onSaveCoordinatorChange,
   });
 
   return (
@@ -772,6 +786,7 @@ export default function FilePreviewPanel({
   revealLine,
   revealRequestId,
   onOpenFile,
+  onEntryDeleted,
   onPendingChange,
 }: FilePreviewPanelProps) {
   const { resolvedTheme } = useTheme();
@@ -816,6 +831,34 @@ export default function FilePreviewPanel({
     [projectName, relativePath],
   );
   const onFilePostRender = useFileLineReveal(relativePath, revealLine, revealRequestId);
+  const saveCoordinatorRef = useRef<FileSaveCoordinator | null>(null);
+  const handleSaveCoordinatorChange = useCallback((coordinator: FileSaveCoordinator | null) => {
+    saveCoordinatorRef.current = coordinator;
+  }, []);
+  const activeFileFallsWithinEntry = useCallback(
+    (entryPath: string) => relativePath !== null && pathFallsWithinEntry(relativePath, entryPath),
+    [relativePath],
+  );
+  const handleBeforeDeleteEntry = useCallback(
+    async (entryPath: string) => {
+      if (activeFileFallsWithinEntry(entryPath)) {
+        await saveCoordinatorRef.current?.flush();
+      }
+    },
+    [activeFileFallsWithinEntry],
+  );
+  const handleEntryDeleted = useCallback(
+    (entryPath: string, kind: "file" | "directory") => {
+      if (activeFileFallsWithinEntry(entryPath)) {
+        saveCoordinatorRef.current?.discard();
+        if (relativePath !== null) {
+          clearProjectFileQueryData(environmentId, cwd, relativePath);
+        }
+      }
+      onEntryDeleted(entryPath, kind);
+    },
+    [activeFileFallsWithinEntry, cwd, environmentId, onEntryDeleted, relativePath],
+  );
 
   useEffect(() => {
     const currentCrumb = breadcrumbRef.current?.querySelector<HTMLElement>(
@@ -1012,6 +1055,7 @@ export default function FilePreviewPanel({
                 threadRef={threadRef}
                 contents={file.data.contents}
                 onPendingChange={onPendingChange}
+                onSaveCoordinatorChange={handleSaveCoordinatorChange}
               />
             ) : file.data.truncated ? (
               <Virtualizer
@@ -1052,6 +1096,7 @@ export default function FilePreviewPanel({
                 wordWrap={wordWrap}
                 onPostRender={onFilePostRender}
                 onPendingChange={onPendingChange}
+                onSaveCoordinatorChange={handleSaveCoordinatorChange}
               />
             )
           ) : null}
@@ -1073,6 +1118,8 @@ export default function FilePreviewPanel({
               selectedPath={relativePath}
               selectedPathRevealId={revealRequestId}
               onOpenFile={onOpenFile}
+              onBeforeDeleteEntry={handleBeforeDeleteEntry}
+              onEntryDeleted={handleEntryDeleted}
             />
           </aside>
         ) : null}

@@ -141,6 +141,7 @@ import {
 } from "../previewStateStore";
 import { addBrowserSurface } from "./preview/addBrowserSurface";
 import { closePreviewSession } from "./preview/closePreviewSession";
+import { pathFallsWithinEntry } from "./files/filePath";
 import { ThreadPreviewMiniPlayer } from "./preview/ThreadPreviewMiniPlayer";
 import { subscribePreviewAction } from "./preview/previewActionBus";
 import { getConfiguredPreviewUrls } from "./preview/previewEmptyStateLogic";
@@ -3263,6 +3264,20 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [activeProject, activeThreadRef],
   );
+  const handleFileEntryDeleted = useCallback(
+    (entryPath: string) => {
+      if (!activeThreadRef) return;
+      const deletedSurfaceIds = rightPanelState.surfaces.flatMap((surface) =>
+        surface.kind === "file" && pathFallsWithinEntry(surface.relativePath, entryPath)
+          ? [surface.id]
+          : [],
+      );
+      for (const surfaceId of deletedSurfaceIds) {
+        useRightPanelStore.getState().closeSurface(activeThreadRef, surfaceId);
+      }
+    },
+    [activeThreadRef, rightPanelState.surfaces],
+  );
   const togglePreviewPanel = useCallback(() => {
     if (!activeThreadRef || !isPreviewSupportedInRuntime()) return;
     if (previewPanelOpen) {
@@ -6211,6 +6226,7 @@ function ChatViewContent(props: ChatViewProps) {
           revealLine={activeFileSurface?.revealLine ?? null}
           revealRequestId={activeFileSurface?.revealRequestId ?? 0}
           onOpenFile={openFileSurface}
+          onEntryDeleted={handleFileEntryDeleted}
           onPendingChange={handleFilePendingChange}
         />
       </Suspense>

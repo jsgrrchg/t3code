@@ -14,6 +14,7 @@ export class FileSaveCoordinator<A = unknown, E = unknown> {
   private lastChangeAt = 0;
   private saving = false;
   private disposed = false;
+  private readonly idleWaiters: Array<() => void> = [];
 
   constructor(private readonly options: FileSaveCoordinatorOptions<A, E>) {}
 
@@ -29,6 +30,22 @@ export class FileSaveCoordinator<A = unknown, E = unknown> {
     this.disposed = true;
     this.clearTimer();
     if (this.latestRevision > 0) void this.persistLatest();
+  }
+
+  /** Persist the latest edit and wait until any in-flight save has settled. */
+  flush(): Promise<void> {
+    this.clearTimer();
+    if (this.latestRevision > 0 && !this.saving) void this.persistLatest();
+    if (!this.saving) return Promise.resolve();
+    return new Promise((resolve) => this.idleWaiters.push(resolve));
+  }
+
+  /** Prevent cleanup from writing a file again after it has been deleted. */
+  discard(): void {
+    this.disposed = true;
+    this.clearTimer();
+    this.latestRevision = 0;
+    this.options.onPendingChange(false);
   }
 
   private schedule(delay: number): void {
@@ -58,8 +75,13 @@ export class FileSaveCoordinator<A = unknown, E = unknown> {
     }
 
     this.saving = false;
+    if (this.latestRevision === 0) {
+      this.resolveIdleWaiters();
+      return;
+    }
     if (revision === this.latestRevision) {
       if (succeeded) this.options.onPendingChange(false);
+      this.resolveIdleWaiters();
       return;
     }
 
@@ -72,5 +94,9 @@ export class FileSaveCoordinator<A = unknown, E = unknown> {
     } else {
       this.schedule(remainingDebounce);
     }
+  }
+
+  private resolveIdleWaiters(): void {
+    for (const resolve of this.idleWaiters.splice(0)) resolve();
   }
 }

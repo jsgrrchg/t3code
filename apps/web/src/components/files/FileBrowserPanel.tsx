@@ -3,6 +3,10 @@ import type {
   ContextMenuOpenContext as TreeContextMenuOpenContext,
 } from "@pierre/trees";
 import type { EnvironmentId, ProjectEntry } from "@t3tools/contracts";
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
 import { FileTree, useFileTree, useFileTreeSearch } from "@pierre/trees/react";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { resolvePathAgainstCwd } from "@t3tools/shared/path";
@@ -22,6 +26,8 @@ import { useTheme } from "~/hooks/useTheme";
 import { cn } from "~/lib/utils";
 import { readLocalApi } from "~/localApi";
 import { T3_PIERRE_ICONS } from "~/pierre-icons";
+import { projectEnvironment } from "~/state/projects";
+import { useAtomCommand } from "~/state/use-atom-command";
 
 import { createFileTreeDragMentionController } from "./fileTreeDragMention";
 import { useProjectEntriesQuery } from "./projectFilesQueryState";
@@ -35,6 +41,8 @@ interface FileBrowserPanelProps {
   /** Bumped when the same path should be revealed again (e.g. re-opened from search). */
   selectedPathRevealId: number;
   onOpenFile: (relativePath: string) => void;
+  onBeforeDeleteEntry: (relativePath: string, kind: ProjectEntry["kind"]) => Promise<void>;
+  onEntryDeleted: (relativePath: string, kind: ProjectEntry["kind"]) => void;
 }
 
 const TREE_UNSAFE_CSS = `
@@ -137,6 +145,8 @@ export default function FileBrowserPanel({
   selectedPath,
   selectedPathRevealId,
   onOpenFile,
+  onBeforeDeleteEntry,
+  onEntryDeleted,
 }: FileBrowserPanelProps) {
   const { resolvedTheme } = useTheme();
   const composerRef = useComposerHandleContext();
@@ -148,6 +158,7 @@ export default function FileBrowserPanel({
     Schema.Boolean,
   );
   const entriesQuery = useProjectEntriesQuery(environmentId, cwd, includeIgnored);
+  const deleteEntry = useAtomCommand(projectEnvironment.deleteEntry);
   const entries = entriesQuery.data?.entries ?? [];
   const entryKinds = useMemo(
     () => new Map(entries.map((entry) => [entry.path, entry.kind] as const)),
@@ -182,6 +193,11 @@ export default function FileBrowserPanel({
       return;
     }
     const relativePath = item.path.replace(/\/$/, "");
+    const kind = entryKindsRef.current.get(relativePath);
+    if (!kind) {
+      context.close();
+      return;
+    }
     const absolutePath = resolvePathAgainstCwd(relativePath, cwd);
     const mention = serializeComposerFileLink(relativePath);
     const pointer = contextMenuPointerRef.current;
@@ -196,6 +212,7 @@ export default function FileBrowserPanel({
           { id: "copy-path", label: "Copy path", icon: "copy" },
           { id: "copy-mention", label: "Copy mention" },
           { id: "add-to-chat", label: "Add to chat" },
+          { id: "delete", label: "Delete", destructive: true, icon: "trash" },
         ],
         position,
       );
@@ -245,6 +262,37 @@ export default function FileBrowserPanel({
             type: "error",
             title: "Unable to add to chat",
             description: "The chat isn't ready to accept input right now.",
+          });
+        }
+        return;
+      }
+      if (clicked === "delete") {
+        const confirmed = await api.dialogs.confirm(
+          kind === "directory"
+            ? `Delete folder "${relativePath}" and all of its contents? This cannot be undone.`
+            : `Delete file "${relativePath}"? This cannot be undone.`,
+        );
+        if (!confirmed) return;
+
+        await onBeforeDeleteEntry(relativePath, kind);
+        const result = await deleteEntry({
+          environmentId,
+          input: { cwd, relativePath, kind },
+        });
+        if (result._tag === "Success") {
+          onEntryDeleted(relativePath, kind);
+          entriesQuery.refresh();
+          toastManager.add({
+            type: "success",
+            title: kind === "directory" ? "Folder deleted" : "File deleted",
+            description: relativePath,
+          });
+        } else if (!isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          toastManager.add({
+            type: "error",
+            title: kind === "directory" ? "Failed to delete folder" : "Failed to delete file",
+            description: error instanceof Error ? error.message : "An unexpected error occurred.",
           });
         }
       }
