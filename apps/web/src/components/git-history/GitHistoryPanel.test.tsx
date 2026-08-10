@@ -65,8 +65,11 @@ const baseProps: GitHistoryPanelViewProps = {
   refreshError: null,
   isLoadingMore: false,
   loadMoreError: null,
+  scrollKey: "history-target",
+  initialScrollOffset: null,
   onRefresh: () => {},
   onLoadOlder: () => {},
+  onScrollOffsetChange: () => {},
 };
 
 function renderView(overrides: Partial<GitHistoryPanelViewProps> = {}): string {

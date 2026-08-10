@@ -1,4 +1,4 @@
-import { LegendList } from "@legendapp/list/react";
+import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import {
   GIT_HISTORY_DEFAULT_LIMIT,
   type EnvironmentId,
@@ -28,6 +28,12 @@ import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
 import { parseTimestampDate } from "~/timestampFormat";
 
 import { GitHistoryGraphCell, getGitHistoryGraphWidth } from "./GitHistoryGraphCell";
+import {
+  getGitHistorySession,
+  gitHistorySessionKey,
+  rememberGitHistoryScroll,
+  rememberGitHistorySession,
+} from "./gitHistorySessionState";
 import { layoutGitHistoryGraph, type GitHistoryGraphRow } from "./gitHistoryGraphLayout";
 
 const HISTORY_ROW_HEIGHT = 34;
@@ -58,15 +64,13 @@ interface HistoryPanelLocalState {
   readonly isLoadingMore: boolean;
 }
 
-function targetKey(target: GitHistoryTarget): string {
-  return JSON.stringify([target.environmentId, target.projectId, target.threadId, target.cwd]);
-}
-
 function createLocalState(target: GitHistoryTarget): HistoryPanelLocalState {
+  const key = gitHistorySessionKey(target);
+  const remembered = getGitHistorySession(key);
   return {
-    targetKey: targetKey(target),
-    history: createEmptyGitHistoryAccumulation(target),
-    appliedFirstPage: null,
+    targetKey: key,
+    history: remembered?.history ?? createEmptyGitHistoryAccumulation(target),
+    appliedFirstPage: remembered?.appliedFirstPage ?? null,
     loadMoreError: null,
     isLoadingMore: false,
   };
@@ -89,8 +93,11 @@ export interface GitHistoryPanelViewProps {
   readonly refreshError: string | null;
   readonly isLoadingMore: boolean;
   readonly loadMoreError: string | null;
+  readonly scrollKey: string;
+  readonly initialScrollOffset: number | null;
   readonly onRefresh: () => void;
   readonly onLoadOlder: () => void;
+  readonly onScrollOffsetChange: (offset: number) => void;
 }
 
 interface GitHistoryCommitRowProps {
@@ -335,9 +342,15 @@ export function GitHistoryPanelView({
   refreshError,
   isLoadingMore,
   loadMoreError,
+  scrollKey,
+  initialScrollOffset,
   onRefresh,
   onLoadOlder,
+  onScrollOffsetChange,
 }: GitHistoryPanelViewProps) {
+  const listRef = useRef<LegendListRef>(null);
+  const restoredScrollKeyRef = useRef<string | null>(null);
+  const latestScrollOffsetRef = useRef(initialScrollOffset ?? 0);
   const layout = useMemo(() => layoutGitHistoryGraph(commits, { headSha }), [commits, headSha]);
   const rows = useMemo(
     () => commits.map((commit, index) => ({ commit, graphRow: layout.rows[index]! })),
@@ -361,6 +374,33 @@ export function GitHistoryPanelView({
       : commits.length > 0
         ? `${commits.length.toLocaleString()}${nextCursor === null ? "" : "+"} commit${commits.length === 1 ? "" : "s"}`
         : "History";
+
+  const rememberCurrentScroll = useCallback(() => {
+    const scrollOffset = listRef.current?.getState().scroll;
+    if (typeof scrollOffset === "number" && Number.isFinite(scrollOffset)) {
+      latestScrollOffsetRef.current = Math.max(0, scrollOffset);
+    }
+    onScrollOffsetChange(latestScrollOffsetRef.current);
+  }, [onScrollOffsetChange]);
+
+  useEffect(() => {
+    latestScrollOffsetRef.current = initialScrollOffset ?? 0;
+    return rememberCurrentScroll;
+  }, [initialScrollOffset, rememberCurrentScroll, scrollKey]);
+
+  useEffect(() => {
+    if (commits.length === 0 || restoredScrollKeyRef.current === scrollKey) return;
+    if (initialScrollOffset === null) {
+      restoredScrollKeyRef.current = scrollKey;
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      restoredScrollKeyRef.current = scrollKey;
+      latestScrollOffsetRef.current = initialScrollOffset;
+      void listRef.current?.scrollToOffset({ offset: initialScrollOffset, animated: false });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [commits.length, initialScrollOffset, scrollKey]);
 
   let content;
   if (isInitialLoading) {
@@ -403,11 +443,13 @@ export function GitHistoryPanelView({
           ) : null}
           <div className="min-h-0 flex-1">
             <LegendList<(typeof rows)[number]>
+              ref={listRef}
               className="h-full min-h-0 overscroll-y-contain"
               data={rows}
               drawDistance={HISTORY_OVERSCAN_PX}
               estimatedItemSize={HISTORY_ROW_HEIGHT}
               keyExtractor={(item) => item.commit.sha}
+              onScroll={rememberCurrentScroll}
               renderItem={({ item }) => (
                 <GitHistoryCommitRow
                   commit={item.commit}
@@ -487,7 +529,7 @@ export function GitHistoryPanel({
     () => ({ environmentId, projectId, threadId, cwd }),
     [cwd, environmentId, projectId, threadId],
   );
-  const currentTargetKey = targetKey(target);
+  const currentTargetKey = gitHistorySessionKey(target);
   const firstPage = useEnvironmentQuery(
     gitEnvironment.history({
       environmentId,
@@ -518,6 +560,11 @@ export function GitHistoryPanel({
     firstPage.data !== null && scopedState.appliedFirstPage !== firstPage.data
       ? replaceGitHistoryPage(target, firstPage.data)
       : scopedState.history;
+  const appliedFirstPage =
+    firstPage.data !== null && scopedState.appliedFirstPage !== firstPage.data
+      ? firstPage.data
+      : scopedState.appliedFirstPage;
+  const initialScrollOffset = getGitHistorySession(currentTargetKey)?.scrollOffset ?? null;
 
   useEffect(() => {
     setLocalState((current) => {
@@ -532,6 +579,15 @@ export function GitHistoryPanel({
       };
     });
   }, [currentTargetKey, firstPage.data, target]);
+
+  useEffect(() => {
+    rememberGitHistorySession(currentTargetKey, visibleHistory, appliedFirstPage);
+  }, [appliedFirstPage, currentTargetKey, visibleHistory]);
+
+  const rememberScrollOffset = useCallback(
+    (offset: number) => rememberGitHistoryScroll(currentTargetKey, offset),
+    [currentTargetKey],
+  );
 
   const refresh = useCallback(() => {
     setLocalState((current) => {
@@ -613,10 +669,13 @@ export function GitHistoryPanel({
       isRefreshing={hasVisibleCommits && firstPage.isPending}
       loadMoreError={scopedState.loadMoreError}
       nextCursor={visibleHistory.nextCursor}
+      scrollKey={currentTargetKey}
+      initialScrollOffset={initialScrollOffset}
       totalCount={visibleHistory.totalCount}
       refreshError={hasVisibleCommits ? firstPage.error : null}
       onLoadOlder={loadOlder}
       onRefresh={refresh}
+      onScrollOffsetChange={rememberScrollOffset}
     />
   );
 }

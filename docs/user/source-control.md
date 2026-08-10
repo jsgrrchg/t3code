@@ -70,7 +70,9 @@ successful copy.
 
 History behaves like the other Right Panel tabs: select its tab to return to it, use the tab's close
 control to remove it, and open **History** again from the empty state or **+** menu when needed. This
-first version does not add a Command Palette action, keyboard shortcut, or desktop menu item.
+restores the loaded pages and scroll position for the current session when you switch tabs or chats
+and return. This first version does not add a Command Palette action, keyboard shortcut, or desktop
+menu item.
 
 ## Getting Started
 
