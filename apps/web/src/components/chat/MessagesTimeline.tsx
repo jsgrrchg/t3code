@@ -589,7 +589,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       return null;
     }
     return (
-      <div className="flex h-full items-center justify-center">
+      <div
+        className="flex h-full items-center justify-center"
+        style={
+          contentInsetEndAdjustment > 0 ? { paddingBottom: contentInsetEndAdjustment } : undefined
+        }
+      >
         <p className="text-placeholder text-sm">Send a message to start the conversation.</p>
       </div>
     );

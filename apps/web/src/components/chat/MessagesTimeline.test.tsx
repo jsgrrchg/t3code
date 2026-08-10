@@ -226,6 +226,15 @@ function buildUserTimelineEntry(text: string) {
 }
 
 describe("MessagesTimeline", () => {
+  it("centers the empty placeholder above the composer inset", () => {
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline {...buildProps()} contentInsetEndAdjustment={180} timelineEntries={[]} />,
+    );
+
+    expect(markup).toContain('style="padding-bottom:180px"');
+    expect(markup).toContain("Send a message to start the conversation.");
+  });
+
   it("uses the larger leading inset only when the top fade is enabled", () => {
     const timelineEntries = [buildUserTimelineEntry("Hello")];
 
