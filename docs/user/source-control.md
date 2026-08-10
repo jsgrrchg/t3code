@@ -58,6 +58,9 @@ graph, subjects, authors, author dates, and commit IDs. History is read-only and
 remote refs, and tags already known by the Git repository on the server. Opening it does not fetch
 from a remote or change the working tree.
 
+Select a commit ID to copy its full SHA. The commit ID briefly changes to **Copied** after a
+successful copy.
+
 History behaves like the other Right Panel tabs: select its tab to return to it, use the tab's close
 control to remove it, and open **History** again from the empty state or **+** menu when needed. This
 first version does not add a Command Palette action, keyboard shortcut, or desktop menu item.

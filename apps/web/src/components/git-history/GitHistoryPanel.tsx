@@ -19,6 +19,7 @@ import { RefreshCwIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import { Button } from "~/components/ui/button";
+import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { gitEnvironment } from "~/state/git";
 import { useEnvironmentQuery } from "~/state/query";
 import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
@@ -95,6 +96,46 @@ interface GitHistoryCommitRowProps {
   readonly gridTemplateColumns: string;
 }
 
+export function GitHistoryShaButtonView({
+  sha,
+  isCopied,
+  onCopy,
+}: {
+  readonly sha: string;
+  readonly isCopied: boolean;
+  readonly onCopy: (sha: string) => void;
+}) {
+  return (
+    <button
+      aria-label={isCopied ? `Copied commit SHA ${sha}` : `Copy full commit SHA ${sha}`}
+      aria-live="polite"
+      className="h-6 w-[68px] cursor-pointer rounded-sm text-left font-mono text-[11px] tabular-nums text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[copied=true]:text-primary"
+      data-copied={isCopied}
+      data-history-sha="true"
+      onClick={() => onCopy(sha)}
+      title={isCopied ? "Copied" : `Copy full SHA ${sha}`}
+      type="button"
+    >
+      {isCopied ? "Copied" : sha.slice(0, 7)}
+    </button>
+  );
+}
+
+function GitHistoryShaButton({ sha }: { readonly sha: string }) {
+  const { copyToClipboard, isCopied } = useCopyToClipboard({
+    target: "commit SHA",
+    timeout: 1_200,
+  });
+
+  return (
+    <GitHistoryShaButtonView
+      isCopied={isCopied}
+      onCopy={(value) => copyToClipboard(value)}
+      sha={sha}
+    />
+  );
+}
+
 export function GitHistoryCommitRow({
   commit,
   graphRow,
@@ -145,12 +186,7 @@ export function GitHistoryCommitRow({
       >
         {authoredDate}
       </span>
-      <span
-        className="w-[76px] shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground"
-        data-history-sha="true"
-      >
-        {commit.sha.slice(0, 7)}
-      </span>
+      <GitHistoryShaButton sha={commit.sha} />
     </div>
   );
 }

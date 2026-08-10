@@ -29,6 +29,7 @@ vi.mock("@legendapp/list/react", () => ({
 import {
   GitHistoryCommitRow,
   GitHistoryPanelView,
+  GitHistoryShaButtonView,
   type GitHistoryPanelViewProps,
 } from "./GitHistoryPanel";
 import { layoutGitHistoryGraph } from "./gitHistoryGraphLayout";
@@ -108,6 +109,8 @@ describe("GitHistoryCommitRow", () => {
       }).format(new Date(item.authoredAt)),
     );
     expect(markup).toContain(item.sha.slice(0, 7));
+    expect(markup).toContain(`aria-label="Copy full commit SHA ${item.sha}"`);
+    expect(markup).toContain("<button");
   });
 
   it("announces full metadata and HEAD while keeping the graph decorative", () => {
@@ -128,7 +131,7 @@ describe("GitHistoryCommitRow", () => {
     expect(markup).toContain(HEAD_SHA);
     expect(markup).toContain('aria-hidden="true"');
     expect(markup).toContain('role="listitem"');
-    expect(markup).not.toContain("<button");
+    expect(markup.match(/<button/g)).toHaveLength(1);
     expect(markup.match(/<circle/g)).toHaveLength(2);
   });
 
@@ -166,6 +169,30 @@ describe("GitHistoryCommitRow", () => {
     );
 
     expect(markup).toContain('data-history-date="true">—</span>');
+  });
+});
+
+describe("GitHistoryShaButtonView", () => {
+  it("copies the full SHA while displaying its short form", () => {
+    const onCopy = vi.fn();
+    const button = GitHistoryShaButtonView({ sha: HEAD_SHA, isCopied: false, onCopy });
+    const markup = renderToStaticMarkup(button);
+
+    button.props.onClick();
+
+    expect(onCopy).toHaveBeenCalledWith(HEAD_SHA);
+    expect(markup).toContain(`>${HEAD_SHA.slice(0, 7)}</button>`);
+  });
+
+  it("replaces the short SHA with copied feedback", () => {
+    const markup = renderToStaticMarkup(
+      <GitHistoryShaButtonView sha={HEAD_SHA} isCopied={true} onCopy={() => {}} />,
+    );
+
+    expect(markup).toContain('data-copied="true"');
+    expect(markup).toContain(`aria-label="Copied commit SHA ${HEAD_SHA}"`);
+    expect(markup).toContain(">Copied</button>");
+    expect(markup).not.toContain(`>${HEAD_SHA.slice(0, 7)}</button>`);
   });
 });
 
