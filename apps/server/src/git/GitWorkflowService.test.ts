@@ -1,13 +1,21 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, expect, it, vi } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 
 import { VcsRepositoryDetectionError } from "@t3tools/contracts";
 
+import * as ServerConfig from "../config.ts";
 import * as GitManager from "./GitManager.ts";
 import * as GitWorkflowService from "./GitWorkflowService.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
+
+const WorkflowServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
+  prefix: "t3-git-workflow-test-",
+});
 
 function makeLayer(input: {
   readonly detect: VcsDriverRegistry.VcsDriverRegistry["Service"]["detect"];
@@ -20,6 +28,8 @@ function makeLayer(input: {
     ),
     Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
     Layer.provide(Layer.mock(GitManager.GitManager)({})),
+    Layer.provide(WorkflowServerConfigLayer),
+    Layer.provideMerge(NodeServices.layer),
   );
 }
 
@@ -100,6 +110,8 @@ describe("GitWorkflowService", () => {
           status,
         }),
       ),
+      Layer.provide(WorkflowServerConfigLayer),
+      Layer.provideMerge(NodeServices.layer),
     );
 
     return Effect.gen(function* () {
@@ -189,4 +201,112 @@ describe("GitWorkflowService", () => {
       ),
     );
   });
+
+  it.effect("lists history for Git workspaces and managed worktrees only", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspaceRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-git-history-workspace-",
+      });
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-git-history-base-",
+      });
+      const outsideRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-git-history-outside-",
+      });
+      const config = yield* ServerConfig.ServerConfig.pipe(
+        Effect.provide(ServerConfig.layerTest(workspaceRoot, baseDir)),
+      );
+      const managedWorktree = path.join(config.worktreesDir, "repo", "feature");
+      yield* fileSystem.makeDirectory(managedWorktree, { recursive: true });
+      const resolveCalls: string[] = [];
+      const listHistoryCalls: string[] = [];
+      const gitHandle = { kind: "git" } as VcsDriverRegistry.VcsDriverHandle;
+      const layer = GitWorkflowService.layer.pipe(
+        Layer.provide(
+          Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({
+            resolve: ({ cwd }) =>
+              Effect.sync(() => {
+                resolveCalls.push(cwd);
+                return gitHandle;
+              }),
+          }),
+        ),
+        Layer.provide(
+          Layer.mock(GitVcsDriver.GitVcsDriver)({
+            listHistory: ({ cwd }) =>
+              Effect.sync(() => {
+                listHistoryCalls.push(cwd);
+                return { commits: [], headSha: null, nextCursor: null };
+              }),
+          }),
+        ),
+        Layer.provide(Layer.mock(GitManager.GitManager)({})),
+        Layer.provide(ServerConfig.layer(config)),
+        Layer.provideMerge(NodeServices.layer),
+      );
+
+      const [workspaceResult, worktreeResult] = yield* Effect.gen(function* () {
+        const workflow = yield* GitWorkflowService.GitWorkflowService;
+        const workspace = yield* workflow.listHistory({ cwd: workspaceRoot });
+        const worktree = yield* workflow.listHistory({ cwd: managedWorktree });
+        const outsideError = yield* workflow.listHistory({ cwd: outsideRoot }).pipe(Effect.flip);
+        assert.equal(outsideError._tag, "GitCommandError");
+        assert.match(outsideError.detail, /configured workspace or managed worktrees root/);
+        return [workspace, worktree] as const;
+      }).pipe(Effect.provide(layer));
+
+      assert.deepStrictEqual(workspaceResult, { commits: [], headSha: null, nextCursor: null });
+      assert.deepStrictEqual(worktreeResult, { commits: [], headSha: null, nextCursor: null });
+      assert.deepStrictEqual(resolveCalls, [workspaceRoot, managedWorktree]);
+      assert.deepStrictEqual(listHistoryCalls, [workspaceRoot, managedWorktree]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("rejects non-Git VCS drivers before listing history", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const workspaceRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-git-history-jj-workspace-",
+      });
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-git-history-jj-base-",
+      });
+      const config = yield* ServerConfig.ServerConfig.pipe(
+        Effect.provide(ServerConfig.layerTest(workspaceRoot, baseDir)),
+      );
+      const listHistory = vi.fn();
+      let resolvedKind: "jj" | "unknown" = "jj";
+      const layer = GitWorkflowService.layer.pipe(
+        Layer.provide(
+          Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({
+            resolve: () =>
+              Effect.succeed({ kind: resolvedKind } as VcsDriverRegistry.VcsDriverHandle),
+          }),
+        ),
+        Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({ listHistory })),
+        Layer.provide(Layer.mock(GitManager.GitManager)({})),
+        Layer.provide(ServerConfig.layer(config)),
+        Layer.provideMerge(NodeServices.layer),
+      );
+
+      const [jjError, unknownError] = yield* Effect.gen(function* () {
+        const workflow = yield* GitWorkflowService.GitWorkflowService;
+        const jj = yield* workflow.listHistory({ cwd: workspaceRoot }).pipe(Effect.flip);
+        resolvedKind = "unknown";
+        const unknown = yield* workflow.listHistory({ cwd: workspaceRoot }).pipe(Effect.flip);
+        return [jj, unknown] as const;
+      }).pipe(Effect.provide(layer));
+
+      for (const error of [jjError, unknownError]) {
+        expect(error).toMatchObject({
+          _tag: "GitCommandError",
+          operation: "GitWorkflowService.listHistory",
+          command: "vcs-route",
+        });
+      }
+      expect(listHistory).not.toHaveBeenCalled();
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
 });

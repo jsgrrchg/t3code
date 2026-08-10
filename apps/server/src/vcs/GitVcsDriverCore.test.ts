@@ -16,11 +16,152 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { GitCommandError, type ReviewDiffFileContentsInput } from "@t3tools/contracts";
 import { ServerConfig } from "../config.ts";
-import { makeGitVcsDriverCore, splitNullSeparatedGitStdoutPaths } from "./GitVcsDriverCore.ts";
+import {
+  makeGitVcsDriverCore,
+  parseGitHistoryLogOutput,
+  splitNullSeparatedGitStdoutPaths,
+} from "./GitVcsDriverCore.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
 
 const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-git-vcs-driver-test-",
+});
+
+describe("GitVcsDriver.listHistory", () => {
+  it.effect("returns an empty page for a Git repository without commits", () =>
+    Effect.gen(function* () {
+      const driver = yield* GitVcsDriver.GitVcsDriver;
+      const cwd = yield* makeTmpDir("git-history-empty-");
+      yield* driver.initRepo({ cwd });
+
+      const result = yield* driver.listHistory({ cwd });
+
+      assert.deepStrictEqual(result, {
+        commits: [],
+        headSha: null,
+        nextCursor: null,
+      });
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect("lists only commits reachable from public heads, remotes, tags, and HEAD", () =>
+    Effect.gen(function* () {
+      const driver = yield* GitVcsDriver.GitVcsDriver;
+      const cwd = yield* makeTmpDir("git-history-public-refs-");
+      yield* initRepoWithCommit(cwd);
+      const tree = yield* git(cwd, ["write-tree"]);
+      const makeRootCommit = (subject: string) => git(cwd, ["commit-tree", tree, "-m", subject]);
+      const branchSha = yield* makeRootCommit("secondary branch root");
+      const remoteSha = yield* makeRootCommit("remote branch root");
+      const tagSha = yield* makeRootCommit("tagged root");
+      const checkpointSha = yield* makeRootCommit("internal checkpoint root");
+      yield* git(cwd, ["update-ref", "refs/heads/secondary", branchSha]);
+      yield* git(cwd, ["update-ref", "refs/remotes/origin/history", remoteSha]);
+      yield* git(cwd, ["update-ref", "refs/tags/history-v1", tagSha]);
+      yield* git(cwd, ["update-ref", "refs/t3/checkpoints/test/turn/1", checkpointSha]);
+
+      const attached = yield* driver.listHistory({ cwd });
+      const attachedShas = new Set(attached.commits.map((commit) => commit.sha));
+      assert.isTrue(attachedShas.has(branchSha));
+      assert.isTrue(attachedShas.has(remoteSha));
+      assert.isTrue(attachedShas.has(tagSha));
+      assert.isFalse(attachedShas.has(checkpointSha));
+
+      yield* git(cwd, ["checkout", "--detach", branchSha]);
+      const detached = yield* driver.listHistory({ cwd });
+      assert.equal(detached.headSha, branchSha);
+      assert.isTrue(detached.commits.some((commit) => commit.sha === branchSha));
+      assert.isFalse(detached.commits.some((commit) => commit.sha === checkpointSha));
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect("keeps topological parent data across paginated octopus history", () =>
+    Effect.gen(function* () {
+      const driver = yield* GitVcsDriver.GitVcsDriver;
+      const cwd = yield* makeTmpDir("git-history-octopus-");
+      const { initialBranch } = yield* initRepoWithCommit(cwd);
+
+      yield* git(cwd, ["checkout", "-b", "branch-a"]);
+      yield* writeTextFile(cwd, "a.txt", "a\n");
+      yield* git(cwd, ["add", "."]);
+      yield* git(cwd, ["commit", "-m", "branch a"]);
+
+      yield* git(cwd, ["checkout", initialBranch]);
+      yield* git(cwd, ["checkout", "-b", "branch-b"]);
+      yield* writeTextFile(cwd, "b.txt", "b\n");
+      yield* git(cwd, ["add", "."]);
+      yield* git(cwd, ["commit", "-m", "branch b"]);
+
+      yield* git(cwd, ["checkout", initialBranch]);
+      yield* git(cwd, ["merge", "--no-ff", "branch-a", "branch-b", "-m", "octopus merge"]);
+      const mergeSha = yield* git(cwd, ["rev-parse", "HEAD"]);
+
+      const firstPage = yield* driver.listHistory({ cwd, limit: 2 });
+      assert.equal(firstPage.commits[0]?.sha, mergeSha);
+      assert.lengthOf(firstPage.commits[0]?.parentShas ?? [], 3);
+      assert.equal(firstPage.nextCursor, 2);
+
+      const secondPage = yield* driver.listHistory({
+        cwd,
+        cursor: firstPage.nextCursor ?? 0,
+        limit: 2,
+      });
+      const allLoadedShas = [...firstPage.commits, ...secondPage.commits].map(
+        (commit) => commit.sha,
+      );
+      assert.equal(new Set(allLoadedShas).size, allLoadedShas.length);
+      for (const parentSha of firstPage.commits[0]?.parentShas ?? []) {
+        const parentIndex = allLoadedShas.indexOf(parentSha);
+        if (parentIndex >= 0) {
+          assert.isAbove(parentIndex, 0);
+        }
+      }
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect("preserves Unicode and truncates oversized presentation metadata", () =>
+    Effect.gen(function* () {
+      const driver = yield* GitVcsDriver.GitVcsDriver;
+      const cwd = yield* makeTmpDir("git-history-unicode-");
+      yield* initRepoWithCommit(cwd);
+      const unicodeSubject = "historial con caminos 🌿";
+      yield* git(cwd, [
+        "commit",
+        "--allow-empty",
+        "--author",
+        "José 李 <jose@example.com>",
+        "-m",
+        unicodeSubject,
+      ]);
+      yield* git(cwd, ["commit", "--allow-empty", "-m", "x".repeat(5_000)]);
+
+      const result = yield* driver.listHistory({ cwd });
+      assert.equal(result.commits[0]?.subject.length, 4_096);
+      const unicodeCommit = result.commits.find((commit) => commit.subject === unicodeSubject);
+      assert.equal(unicodeCommit?.authorName, "José 李");
+      assert.equal(unicodeCommit?.authorEmail, "jose@example.com");
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect("rejects truncated and incomplete Git log records", () =>
+    Effect.gen(function* () {
+      const truncated = yield* parseGitHistoryLogOutput({
+        cwd: "/repo",
+        stdout: "",
+        stdoutTruncated: true,
+      }).pipe(Effect.flip);
+      assert.equal(truncated._tag, "GitCommandError");
+      assert.match(truncated.detail, /exceeded/);
+
+      const incomplete = yield* parseGitHistoryLogOutput({
+        cwd: "/repo",
+        stdout: "0123456789abcdef0123456789abcdef01234567\0",
+        stdoutTruncated: false,
+      }).pipe(Effect.flip);
+      assert.equal(incomplete._tag, "GitCommandError");
+      assert.match(incomplete.detail, /incomplete/);
+    }),
+  );
 });
 const TestLayer = GitVcsDriver.layer.pipe(
   Layer.provide(ServerConfigLayer),

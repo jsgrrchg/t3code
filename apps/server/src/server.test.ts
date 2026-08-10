@@ -5287,6 +5287,21 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 nextCursor: null,
                 totalCount: 1,
               }),
+            listHistory: () =>
+              Effect.succeed({
+                commits: [
+                  {
+                    sha: "0123456789abcdef0123456789abcdef01234567",
+                    parentShas: [],
+                    subject: "initial commit",
+                    authorName: "Test",
+                    authorEmail: "test@example.com",
+                    authoredAt: "2026-08-10T00:00:00Z",
+                  },
+                ],
+                headSha: "0123456789abcdef0123456789abcdef01234567",
+                nextCursor: null,
+              }),
             createWorktree: () =>
               Effect.succeed({
                 worktree: { path: "/tmp/wt", refName: "feature/demo" },
@@ -5399,6 +5414,11 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ),
       );
       assert.equal(prepared.branch, "feature/demo");
+
+      const history = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.gitListHistory]({ cwd: "/tmp/repo" })),
+      );
+      assert.equal(history.commits[0]?.subject, "initial commit");
 
       const refs = yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) => client[WS_METHODS.vcsListRefs]({ cwd: "/tmp/repo" })),

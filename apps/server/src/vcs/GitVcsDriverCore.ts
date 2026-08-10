@@ -20,7 +20,16 @@ import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import {
+  GIT_HISTORY_AUTHOR_EMAIL_MAX_LENGTH,
+  GIT_HISTORY_AUTHOR_NAME_MAX_LENGTH,
+  GIT_HISTORY_AUTHORED_AT_MAX_LENGTH,
+  GIT_HISTORY_DEFAULT_LIMIT,
+  GIT_HISTORY_SUBJECT_MAX_LENGTH,
   GitCommandError,
+  GitHistoryCommitSummary,
+  GitObjectId,
+  type GitListHistoryInput,
+  type GitListHistoryResult,
   type ReviewDiffFileContentsInput,
   type ReviewDiffPreviewInput,
   type ReviewDiffPreviewSource,
@@ -49,6 +58,7 @@ const REVIEW_DIFF_PATCH_MAX_OUTPUT_BYTES = 120_000;
 const REVIEW_UNTRACKED_DIFF_MAX_OUTPUT_BYTES = 80_000;
 const REVIEW_DIFF_FILE_MAX_OUTPUT_BYTES = 1024 * 1024;
 const WORKSPACE_FILES_MAX_OUTPUT_BYTES = 120_000;
+const GIT_HISTORY_MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 const STATUS_UPSTREAM_REFRESH_INTERVAL = Duration.seconds(15);
 const STATUS_UPSTREAM_REFRESH_TIMEOUT = Duration.seconds(5);
 
@@ -147,6 +157,91 @@ interface ExecuteGitOptions {
   appendTruncationMarker?: boolean | undefined;
   progress?: GitVcsDriver.ExecuteGitProgress | undefined;
 }
+
+const decodeGitHistoryCommitSummary = Schema.decodeUnknownEffect(GitHistoryCommitSummary);
+const decodeGitObjectId = Schema.decodeUnknownEffect(GitObjectId);
+
+function truncateGitHistoryField(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  const truncated = value.slice(0, maxLength);
+  const finalCodeUnit = truncated.charCodeAt(truncated.length - 1);
+  return finalCodeUnit >= 0xd800 && finalCodeUnit <= 0xdbff ? truncated.slice(0, -1) : truncated;
+}
+
+function malformedGitHistoryOutput(cwd: string, detail: string, cause?: unknown): GitCommandError {
+  return new GitCommandError({
+    operation: "GitVcsDriver.listHistory",
+    command: "git log",
+    cwd,
+    detail,
+    ...(cause === undefined ? {} : { cause }),
+  });
+}
+
+export const parseGitHistoryLogOutput = Effect.fn("parseGitHistoryLogOutput")(function* (input: {
+  readonly cwd: string;
+  readonly stdout: string;
+  readonly stdoutTruncated: boolean;
+}) {
+  if (input.stdoutTruncated) {
+    return yield* malformedGitHistoryOutput(
+      input.cwd,
+      "Git history output exceeded the configured response limit.",
+    );
+  }
+
+  const fields = input.stdout.split("\0");
+  const tail = fields.pop() ?? "";
+  if ((tail !== "" && tail !== "\n" && tail !== "\r\n") || fields.length % 6 !== 0) {
+    return yield* malformedGitHistoryOutput(
+      input.cwd,
+      "Git history output ended with an incomplete commit record.",
+    );
+  }
+
+  const commits: GitListHistoryResult["commits"][number][] = [];
+  for (let index = 0; index < fields.length; index += 6) {
+    const rawSha = fields[index] ?? "";
+    const sha =
+      index === 0
+        ? rawSha
+        : rawSha.startsWith("\r\n")
+          ? rawSha.slice(2)
+          : rawSha.startsWith("\n")
+            ? rawSha.slice(1)
+            : "";
+    const parentShasRaw = fields[index + 1] ?? "";
+    const candidate = {
+      sha,
+      parentShas: parentShasRaw.length === 0 ? [] : parentShasRaw.split(" "),
+      subject: truncateGitHistoryField(fields[index + 2] ?? "", GIT_HISTORY_SUBJECT_MAX_LENGTH),
+      authorName: truncateGitHistoryField(
+        fields[index + 3] ?? "",
+        GIT_HISTORY_AUTHOR_NAME_MAX_LENGTH,
+      ),
+      authorEmail: truncateGitHistoryField(
+        fields[index + 4] ?? "",
+        GIT_HISTORY_AUTHOR_EMAIL_MAX_LENGTH,
+      ),
+      authoredAt: truncateGitHistoryField(
+        fields[index + 5] ?? "",
+        GIT_HISTORY_AUTHORED_AT_MAX_LENGTH,
+      ),
+    };
+    const commit = yield* decodeGitHistoryCommitSummary(candidate).pipe(
+      Effect.mapError((cause) =>
+        malformedGitHistoryOutput(
+          input.cwd,
+          "Git history output contained an invalid commit record.",
+          cause,
+        ),
+      ),
+    );
+    commits.push(commit);
+  }
+
+  return commits;
+});
 
 function parseBranchAb(value: string): { ahead: number; behind: number } {
   const match = value.match(/^\+(\d+)\s+-(\d+)$/);
@@ -2438,6 +2533,78 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       Effect.map((trimmed) => (trimmed.length > 0 ? trimmed : null)),
     );
 
+  const listHistory: GitVcsDriver.GitVcsDriver["Service"]["listHistory"] = Effect.fn("listHistory")(
+    function* (input: GitListHistoryInput) {
+      const cursor = input.cursor ?? 0;
+      const limit = input.limit ?? GIT_HISTORY_DEFAULT_LIMIT;
+      const headResult = yield* executeGit(
+        "GitVcsDriver.listHistory.head",
+        input.cwd,
+        ["rev-parse", "--verify", "HEAD^{commit}"],
+        {
+          allowNonZeroExit: true,
+          timeoutMs: 5_000,
+          maxOutputBytes: 1_024,
+        },
+      );
+      if (headResult.stdoutTruncated) {
+        return yield* malformedGitHistoryOutput(
+          input.cwd,
+          "Git HEAD output exceeded the configured response limit.",
+        );
+      }
+      const headSha =
+        headResult.exitCode === 0
+          ? yield* decodeGitObjectId(headResult.stdout.trim()).pipe(
+              Effect.mapError((cause) =>
+                malformedGitHistoryOutput(
+                  input.cwd,
+                  "Git returned an invalid HEAD object ID.",
+                  cause,
+                ),
+              ),
+            )
+          : null;
+      const result = yield* executeGit(
+        "GitVcsDriver.listHistory.log",
+        input.cwd,
+        [
+          "log",
+          "--topo-order",
+          "--no-color",
+          "--no-decorate",
+          "--no-show-signature",
+          "--no-patch",
+          `--skip=${cursor}`,
+          `--max-count=${limit + 1}`,
+          "--format=%H%x00%P%x00%s%x00%an%x00%ae%x00%aI%x00",
+          ...(headSha === null ? [] : ["HEAD"]),
+          "--branches",
+          "--remotes",
+          "--tags",
+        ],
+        {
+          timeoutMs: 30_000,
+          maxOutputBytes: GIT_HISTORY_MAX_OUTPUT_BYTES,
+          fallbackErrorDetail: "Git history enumeration failed.",
+        },
+      );
+      const parsedCommits = yield* parseGitHistoryLogOutput({
+        cwd: input.cwd,
+        stdout: result.stdout,
+        stdoutTruncated: result.stdoutTruncated,
+      });
+      const hasNextPage = parsedCommits.length > limit;
+      const commits = parsedCommits.slice(0, limit);
+
+      return {
+        commits,
+        headSha,
+        nextCursor: hasNextPage ? cursor + commits.length : null,
+      } satisfies GitListHistoryResult;
+    },
+  );
+
   const readGitRefsSnapshot = Effect.fn("readGitRefsSnapshot")(function* (gitCommonDir: string) {
     const fetchCwd =
       path.basename(gitCommonDir) === ".git" ? path.dirname(gitCommonDir) : gitCommonDir;
@@ -3067,6 +3234,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     getReviewDiffPreview,
     getReviewDiffFileContents,
     readConfigValue,
+    listHistory,
     listRefs,
     createWorktree: (input) => withListRefsInvalidation(input.cwd, createWorktree(input)),
     fetchPullRequestBranch: (input) =>

@@ -5,6 +5,8 @@ import * as Layer from "effect/Layer";
 import {
   GitManagerError,
   GitCommandError,
+  type GitListHistoryInput,
+  type GitListHistoryResult,
   type VcsSwitchRefInput,
   type VcsSwitchRefResult,
   type VcsCreateRefInput,
@@ -31,6 +33,7 @@ import {
 import * as GitManager from "./GitManager.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
+import { makeAssertWorkspaceBoundCwd } from "../workspace/WorkspaceBoundCwd.ts";
 
 export class GitWorkflowService extends Context.Service<
   GitWorkflowService,
@@ -62,6 +65,9 @@ export class GitWorkflowService extends Context.Service<
     readonly listRefs: (
       input: VcsListRefsInput,
     ) => Effect.Effect<VcsListRefsResult, GitCommandError>;
+    readonly listHistory: (
+      input: GitListHistoryInput,
+    ) => Effect.Effect<GitListHistoryResult, GitCommandError>;
     readonly createWorktree: (
       input: VcsCreateWorktreeInput,
     ) => Effect.Effect<VcsCreateWorktreeResult, GitCommandError>;
@@ -138,6 +144,7 @@ export const make = Effect.gen(function* () {
   const registry = yield* VcsDriverRegistry.VcsDriverRegistry;
   const git = yield* GitVcsDriver.GitVcsDriver;
   const gitManager = yield* GitManager.GitManager;
+  const assertWorkspaceBoundCwd = yield* makeAssertWorkspaceBoundCwd();
 
   const ensureGit = Effect.fn("GitWorkflowService.ensureGit")(function* (
     operation: string,
@@ -298,6 +305,24 @@ export const make = Effect.gen(function* () {
         Effect.flatMap((isGitRepository) =>
           isGitRepository ? git.listRefs(input) : Effect.succeed(nonRepositoryListRefs()),
         ),
+      ),
+    listHistory: (input) =>
+      assertWorkspaceBoundCwd(input.cwd).pipe(
+        Effect.mapError(
+          (cause) =>
+            new GitCommandError({
+              operation: "GitWorkflowService.listHistory",
+              command: "workspace-boundary",
+              cwd: input.cwd,
+              detail:
+                cause._tag === "WorkspaceCwdCanonicalizationError"
+                  ? "Failed to resolve a path while validating the Git history workspace."
+                  : "Git history cwd must stay within the configured workspace or managed worktrees root.",
+              cause,
+            }),
+        ),
+        Effect.andThen(ensureGitCommand("GitWorkflowService.listHistory", input.cwd)),
+        Effect.andThen(Effect.suspend(() => git.listHistory(input))),
       ),
     createWorktree: (input) =>
       ensureGitCommand("GitWorkflowService.createWorktree", input.cwd).pipe(
