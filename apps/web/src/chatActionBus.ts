@@ -1,7 +1,7 @@
 "use client";
 
 /** Actions owned by the currently mounted chat view but triggered globally. */
-export type ChatAction = "interrupt-active-turn";
+export type ChatAction = "interrupt-active-turn" | "new-panel-chat";
 
 const EVENT_NAME = "t3code:chat-action";
 
@@ -18,7 +18,9 @@ export function subscribeChatAction(listener: (action: ChatAction) => boolean): 
   if (typeof window === "undefined") return () => {};
   const handler = (event: Event) => {
     const detail = (event as CustomEvent<ChatAction>).detail;
-    if (detail === "interrupt-active-turn" && listener(detail)) event.preventDefault();
+    if ((detail === "interrupt-active-turn" || detail === "new-panel-chat") && listener(detail)) {
+      event.preventDefault();
+    }
   };
   window.addEventListener(EVENT_NAME, handler);
   return () => window.removeEventListener(EVENT_NAME, handler);

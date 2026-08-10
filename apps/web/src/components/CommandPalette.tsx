@@ -68,7 +68,7 @@ import { sourceControlEnvironment } from "../state/sourceControl";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
-import { useProjects, useThreadShells } from "../state/entities";
+import { useProjects, useServerConfigs, useThreadShells } from "../state/entities";
 import { useThreadSearch } from "../state/queries";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
@@ -83,6 +83,7 @@ import {
   resolveProjectPathForDispatch,
 } from "../lib/projectPaths";
 import { onOpenCommandPalette } from "../commandPaletteBus";
+import { dispatchChatAction } from "../chatActionBus";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
@@ -581,6 +582,7 @@ function OpenCommandPaletteDialog(props: {
   const projects = useProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const threads = useThreadShells();
+  const serverConfigs = useServerConfigs();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { theme, themeHalves, resolvedTheme } = useTheme();
   const providers = useAtomValue(primaryServerProvidersAtom);
@@ -825,6 +827,10 @@ function OpenCommandPaletteDialog(props: {
   const currentProjectEnvironmentId =
     activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null;
   const currentProjectId = activeThread?.projectId ?? activeDraftThread?.projectId ?? null;
+  const canCreatePanelChat =
+    activeThread != null &&
+    activeThread.parentThreadId == null &&
+    serverConfigs.get(activeThread.environmentId)?.environment.capabilities.panelChats === true;
   const currentProjectCwd = currentProjectId
     ? (projectCwdById.get(currentProjectId) ?? null)
     : null;
@@ -1368,6 +1374,20 @@ function OpenCommandPaletteDialog(props: {
   ]);
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
+
+  actionItems.push({
+    kind: "action",
+    value: "action:new-panel-chat",
+    searchTerms: ["new panel chat", "right panel", "sidebar chat", "auxiliary chat"],
+    title: "New right-panel chat",
+    description: "Start a focused chat alongside the current thread.",
+    icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
+    disabled: !canCreatePanelChat,
+    shortcutCommand: "rightPanel.newChat",
+    run: async () => {
+      dispatchChatAction("new-panel-chat");
+    },
+  });
 
   if (projects.length > 0) {
     const activeProjectTitle =

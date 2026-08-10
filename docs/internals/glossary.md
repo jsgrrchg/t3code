@@ -34,6 +34,13 @@ A Git worktree used as an isolated workspace for a thread. If a thread has a `wo
 
 The main durable unit of conversation and workspace history. In [the orchestration contracts][1], a thread holds messages, activities, checkpoints, and session-related state. See [projector.ts][4].
 
+#### Panel chat
+
+A durable child thread shown as a surface in the right panel. Its `parentThreadId` identifies a
+top-level thread, while its transcript, execution, checkpoints, and title use the normal thread
+model. Panel chats are excluded from primary navigation; the server owns their durable state and
+each client owns its open tabs. See [panel-chats.md][25].
+
 #### Turn
 
 A single user-to-assistant work cycle inside a thread. It starts with user input and ends when the session leaves `running` status, which [projector.ts][4] treats as the authoritative completion signal (`settledTurnStateForSessionStatus`). Checkpoint and diff work may settle afterward without changing when the turn ended. See [the contracts][1] and [ProviderRuntimeIngestion.ts][5].
@@ -154,6 +161,7 @@ The file patch and changed-file summary for one turn. It is usually computed in 
 - [Provider architecture][16]
 - [Permission modes][18]
 - [Workspace layout][2]
+- [Right-panel chat architecture][25]
 
 [1]: ../../packages/contracts/src/orchestration.ts
 [2]: ./workspace-layout.md
@@ -178,4 +186,5 @@ The file patch and changed-file summary for one turn. It is usually computed in 
 [21]: ../../apps/server/src/persistence/Services/ProjectionCheckpoints.ts
 [22]: ../../apps/server/src/checkpointing/Utils.ts
 [23]: ../../apps/server/src/checkpointing/Diffs.ts
+[25]: ./panel-chats.md
 [24]: ./overview.md

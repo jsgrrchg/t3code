@@ -44,6 +44,9 @@ in the background.
 
 `filePicker.toggle` opens file search for the active project and defaults to `mod+p`.
 `projectSearch.toggle` searches inside the active project's files and defaults to `mod+shift+f`.
+`rightPanel.newChat` creates a chat beside the current top-level thread and defaults to
+`mod+alt+n`. The command is unavailable when the connected server does not support right-panel
+chats. See [right-panel chats](./right-panel-chats.md).
 Repeating either shortcut closes that search, and switching shortcuts replaces the open search.
 `themeEditor.toggle` opens or closes the floating theme editor and defaults to
 `mod+alt+shift+t`. Select a color label to spotlight the elements that use it; select the label

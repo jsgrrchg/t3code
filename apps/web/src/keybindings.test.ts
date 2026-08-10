@@ -88,6 +88,7 @@ const DEFAULT_BINDINGS = compile([
   { shortcut: modShortcut("b"), command: "sidebar.toggle" },
   { shortcut: modShortcut("j"), command: "terminal.toggle" },
   { shortcut: modShortcut("b", { altKey: true }), command: "rightPanel.toggle" },
+  { shortcut: modShortcut("n", { altKey: true }), command: "rightPanel.newChat" },
   {
     shortcut: modShortcut("d"),
     command: "terminal.split",
@@ -744,6 +745,14 @@ describe("resolveShortcutCommand", () => {
         { platform: "MacIntel" },
       ),
       "rightPanel.toggle",
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(
+        event({ key: "˜", code: "KeyN", metaKey: true, altKey: true }),
+        DEFAULT_BINDINGS,
+        { platform: "MacIntel" },
+      ),
+      "rightPanel.newChat",
     );
   });
 });

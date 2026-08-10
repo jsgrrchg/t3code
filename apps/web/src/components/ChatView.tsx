@@ -3295,16 +3295,20 @@ function ChatViewContent(props: ChatViewProps) {
     if (!activeThreadRef) return;
     useRightPanelStore.getState().open(activeThreadRef, "agents");
   }, [activeThreadRef]);
+  const canAddPanelChat =
+    isWorkspacePresentation &&
+    activeThreadRef !== null &&
+    activeThread != null &&
+    isServerThread &&
+    activeThread.parentThreadId == null &&
+    serverConfig?.environment.capabilities.panelChats === true;
   const panelChatCreateInFlightRef = useRef(false);
   const addPanelChatSurface = useCallback(async () => {
     if (
       panelChatCreateInFlightRef.current ||
-      !isWorkspacePresentation ||
+      !canAddPanelChat ||
       !activeThreadRef ||
-      !activeThread ||
-      !isServerThread ||
-      activeThread.parentThreadId != null ||
-      serverConfig?.environment.capabilities.panelChats !== true
+      !activeThread
     ) {
       return;
     }
@@ -3336,14 +3340,7 @@ function ChatViewContent(props: ChatViewProps) {
     }
 
     useRightPanelStore.getState().openChat(activeThreadRef, nextThreadId);
-  }, [
-    activeThread,
-    activeThreadRef,
-    createThread,
-    isServerThread,
-    isWorkspacePresentation,
-    serverConfig?.environment.capabilities.panelChats,
-  ]);
+  }, [activeThread, activeThreadRef, canAddPanelChat, createThread]);
   const openPanelChatSurface = useCallback(
     (threadId: string) => {
       if (!activeThreadRef) return;
@@ -5596,11 +5593,24 @@ function ChatViewContent(props: ChatViewProps) {
   useEffect(() => {
     if (!isWorkspacePresentation) return;
     return subscribeChatAction((action) => {
-      if (action !== "interrupt-active-turn" || !canInterruptActiveTurn) return false;
-      void onInterrupt();
-      return true;
+      if (action === "new-panel-chat") {
+        if (!canAddPanelChat) return false;
+        void addPanelChatSurface();
+        return true;
+      }
+      if (action === "interrupt-active-turn" && canInterruptActiveTurn) {
+        void onInterrupt();
+        return true;
+      }
+      return false;
     });
-  }, [canInterruptActiveTurn, isWorkspacePresentation, onInterrupt]);
+  }, [
+    addPanelChatSurface,
+    canAddPanelChat,
+    canInterruptActiveTurn,
+    isWorkspacePresentation,
+    onInterrupt,
+  ]);
 
   const onRemoveQueuedFollowUp = useCallback((entry: (typeof activeQueuedFollowUps)[number]) => {
     useDesktopFollowUpQueueStore.getState().remove(entry.id);

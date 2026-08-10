@@ -1,7 +1,18 @@
 import type { ContextMenuItem, PreviewSessionSnapshot } from "@t3tools/contracts";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
-import { Bot, FileDiff, Files, Globe2, MessageSquare, Plus, TerminalSquare, X } from "lucide-react";
 import {
+  Bot,
+  FileDiff,
+  Files,
+  Globe2,
+  MessageSquare,
+  MoreHorizontal,
+  Plus,
+  TerminalSquare,
+  X,
+} from "lucide-react";
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactElement,
   type ReactNode,
@@ -374,8 +385,10 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   const ownsDesktopTitleBar = isElectron && props.mode === "inline";
   const { resolvedTheme } = useTheme();
   const tabListRef = useRef<HTMLDivElement>(null);
+  const tabButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const [renamingChatId, setRenamingChatId] = useState<string | null>(null);
   const [renamingChatTitle, setRenamingChatTitle] = useState("");
+  const [announcement, setAnnouncement] = useState("");
   const panelChatById = useMemo(
     () => new Map(props.panelChats.map((chat) => [chat.threadId, chat] as const)),
     [props.panelChats],
@@ -391,6 +404,10 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     () => props.panelChats.filter((chat) => !openedChatIds.has(chat.threadId)),
     [openedChatIds, props.panelChats],
   );
+  const previousChatSurfaceIdsRef = useRef(openedChatIds);
+  const focusTab = useCallback((surfaceId: string) => {
+    window.requestAnimationFrame(() => tabButtonRefs.current.get(surfaceId)?.focus());
+  }, []);
   const beginChatRename = useCallback(
     (threadId: string) => {
       const chat = panelChatById.get(threadId);
@@ -402,12 +419,66 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   );
   const commitChatRename = useCallback(() => {
     if (!renamingChatId) return;
+    const renamedSurfaceId = `chat:${renamingChatId}`;
     const trimmed = renamingChatTitle.trim();
     const originalTitle = panelChatById.get(renamingChatId)?.title;
     setRenamingChatId(null);
+    focusTab(renamedSurfaceId);
     if (!trimmed || trimmed === originalTitle) return;
     props.onRenameChat(renamingChatId, trimmed);
-  }, [panelChatById, props, renamingChatId, renamingChatTitle]);
+    setAnnouncement(`Panel chat renamed to ${trimmed}.`);
+  }, [focusTab, panelChatById, props, renamingChatId, renamingChatTitle]);
+  const cancelChatRename = useCallback(() => {
+    if (!renamingChatId) return;
+    const renamedSurfaceId = `chat:${renamingChatId}`;
+    setRenamingChatId(null);
+    focusTab(renamedSurfaceId);
+  }, [focusTab, renamingChatId]);
+
+  const closeSurfaceAndRestoreFocus = useCallback(
+    (surface: RightPanelSurface) => {
+      const surfaceIndex = props.surfaces.findIndex((entry) => entry.id === surface.id);
+      const focusTarget =
+        props.surfaces[surfaceIndex + 1] ?? props.surfaces[surfaceIndex - 1] ?? null;
+      props.onCloseSurface(surface);
+      if (focusTarget) focusTab(focusTarget.id);
+    },
+    [focusTab, props],
+  );
+
+  const handleTabKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLButtonElement>, surface: RightPanelSurface) => {
+      const surfaceIndex = props.surfaces.findIndex((entry) => entry.id === surface.id);
+      if (surfaceIndex < 0) return;
+
+      if (event.key === "F2" && surface.kind === "chat") {
+        event.preventDefault();
+        beginChatRename(surface.threadId);
+        return;
+      }
+      if (event.key === "Delete") {
+        event.preventDefault();
+        closeSurfaceAndRestoreFocus(surface);
+        return;
+      }
+
+      let target: RightPanelSurface | undefined;
+      if (event.key === "ArrowLeft") {
+        target = props.surfaces[(surfaceIndex - 1 + props.surfaces.length) % props.surfaces.length];
+      } else if (event.key === "ArrowRight") {
+        target = props.surfaces[(surfaceIndex + 1) % props.surfaces.length];
+      } else if (event.key === "Home") {
+        target = props.surfaces[0];
+      } else if (event.key === "End") {
+        target = props.surfaces.at(-1);
+      }
+      if (!target) return;
+      event.preventDefault();
+      props.onActivate(target);
+      focusTab(target.id);
+    },
+    [beginChatRename, closeSurfaceAndRestoreFocus, focusTab, props],
+  );
 
   const handleTabContextMenu = useCallback(
     async (event: ReactMouseEvent, surface: RightPanelSurface) => {
@@ -505,6 +576,18 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     activeTab?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [props.activeSurfaceId]);
 
+  useEffect(() => {
+    const previousIds = previousChatSurfaceIdsRef.current;
+    const openedChat = props.surfaces.find(
+      (surface) => surface.kind === "chat" && !previousIds.has(surface.threadId),
+    );
+    previousChatSurfaceIdsRef.current = openedChatIds;
+    if (!openedChat || openedChat.kind !== "chat") return;
+    setAnnouncement(
+      `${props.chatTitlesById.get(openedChat.threadId) ?? "Panel chat"} opened in the right panel.`,
+    );
+  }, [openedChatIds, props.chatTitlesById, props.surfaces]);
+
   return (
     <PreviewPanelShell
       mode={props.mode}
@@ -527,7 +610,11 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           className={cn("min-w-0 flex-1 rounded-none", ownsDesktopTitleBar && "drag-region")}
           data-right-panel-tab-list
         >
-          <div className="flex h-full w-max min-w-full items-center gap-1">
+          <div
+            className="flex h-full w-max min-w-full items-center gap-1"
+            role="tablist"
+            aria-label="Right panel surfaces"
+          >
             {props.surfaces.map((surface) => {
               const active = surface.id === props.activeSurfaceId;
               const pending = props.pendingSurfaceIds.has(surface.id);
@@ -541,6 +628,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
               return (
                 <div
                   key={surface.id}
+                  role="presentation"
                   data-active-tab={active}
                   onMouseDown={handleTabMouseDown}
                   onAuxClick={(event) => handleTabAuxClick(event, surface)}
@@ -556,7 +644,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     type="button"
                     className="cursor-pointer group/close relative flex size-4 shrink-0 items-center justify-center rounded-sm hover:bg-muted"
                     aria-label={`Close ${title}`}
-                    onClick={() => props.onCloseSurface(surface)}
+                    onClick={() => closeSurfaceAndRestoreFocus(surface)}
                   >
                     <span className="relative flex size-3 items-center justify-center group-hover/tab:hidden group-focus-visible/close:hidden">
                       <SurfaceIcon
@@ -587,7 +675,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                           commitChatRename();
                         } else if (event.key === "Escape") {
                           event.preventDefault();
-                          setRenamingChatId(null);
+                          cancelChatRename();
                         }
                       }}
                       className="h-5 min-w-16 max-w-28 rounded border border-border bg-background px-1 text-xs outline-none focus:ring-1 focus:ring-ring"
@@ -598,8 +686,18 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                         render={
                           <button
                             type="button"
+                            ref={(element) => {
+                              if (element) tabButtonRefs.current.set(surface.id, element);
+                              else tabButtonRefs.current.delete(surface.id);
+                            }}
+                            id={`right-panel-tab-${encodeURIComponent(surface.id)}`}
+                            role="tab"
+                            aria-selected={active}
+                            aria-controls="right-panel-active-surface"
+                            tabIndex={active ? 0 : -1}
                             className="cursor-pointer flex min-w-0 items-center"
                             onClick={() => props.onActivate(surface)}
+                            onKeyDown={(event) => handleTabKeyDown(event, surface)}
                             onDoubleClick={() => {
                               if (surface.kind === "chat") beginChatRename(surface.threadId);
                             }}
@@ -620,6 +718,30 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                       title={chat.needsAttention ? "Needs attention" : "Running"}
                       aria-label={chat.needsAttention ? "Needs attention" : "Running"}
                     />
+                  ) : null}
+                  {surface.kind === "chat" ? (
+                    <Menu>
+                      <MenuTrigger
+                        className="cursor-pointer inline-flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover/tab:opacity-100"
+                        aria-label={`Manage ${title}`}
+                      >
+                        <MoreHorizontal className="size-3" />
+                      </MenuTrigger>
+                      <MenuPopup align="start" side="bottom" sideOffset={6} className="min-w-44">
+                        <MenuItem onClick={() => beginChatRename(surface.threadId)}>
+                          Rename
+                        </MenuItem>
+                        <MenuItem
+                          disabled={!props.chatTitleRegenerationAvailable}
+                          onClick={() => props.onRegenerateChatTitle(surface.threadId)}
+                        >
+                          Regenerate title
+                        </MenuItem>
+                        <MenuItem onClick={() => props.onDeleteChat(surface.threadId)}>
+                          Delete chat
+                        </MenuItem>
+                      </MenuPopup>
+                    </Menu>
                   ) : null}
                 </div>
               );
@@ -698,7 +820,17 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
         </ScrollArea>
         {props.layoutControls}
       </div>
-      <div className="flex min-h-0 flex-1 flex-col" data-right-panel-surface-content>
+      <div
+        id="right-panel-active-surface"
+        className="flex min-h-0 flex-1 flex-col"
+        data-right-panel-surface-content
+        role={props.activeSurfaceId === null ? undefined : "tabpanel"}
+        aria-labelledby={
+          props.activeSurfaceId === null
+            ? undefined
+            : `right-panel-tab-${encodeURIComponent(props.activeSurfaceId)}`
+        }
+      >
         {props.activeSurfaceId === null ? (
           <RightPanelEmptyState
             onAddBrowser={props.onAddBrowser}
@@ -719,6 +851,9 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           props.children
         )}
       </div>
+      <span className="sr-only" role="status" aria-live="polite">
+        {announcement}
+      </span>
     </PreviewPanelShell>
   );
 }

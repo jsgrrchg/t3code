@@ -94,6 +94,14 @@ function ChatRouteGlobalShortcuts() {
         return;
       }
 
+      if (command === "rightPanel.newChat") {
+        const handled = dispatchChatAction("new-panel-chat");
+        if (!handled) return;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
       if (command === "chat.newLocal") {
         event.preventDefault();
         event.stopPropagation();
