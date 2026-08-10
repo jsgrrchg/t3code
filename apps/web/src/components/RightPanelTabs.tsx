@@ -7,6 +7,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -16,7 +17,15 @@ import type { RightPanelSurface } from "~/rightPanelStore";
 import { cn } from "~/lib/utils";
 import { readLocalApi } from "~/localApi";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "~/components/ui/menu";
+import {
+  Menu,
+  MenuItem,
+  MenuPopup,
+  MenuSub,
+  MenuSubPopup,
+  MenuSubTrigger,
+  MenuTrigger,
+} from "~/components/ui/menu";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { faviconUrlForOrigin } from "~/lib/favicon";
 import { useTheme } from "~/hooks/useTheme";
@@ -46,14 +55,27 @@ interface RightPanelTabsProps {
   onAddFiles: () => void;
   onAddAgents: () => void;
   onAddChat: () => void;
+  onOpenChat: (threadId: string) => void;
+  onRenameChat: (threadId: string, title: string) => void;
+  onRegenerateChatTitle: (threadId: string) => void;
+  onDeleteChat: (threadId: string) => void;
   browserAvailable: boolean;
   diffAvailable: boolean;
   filesAvailable: boolean;
   chatAvailable: boolean;
   chatTitlesById: ReadonlyMap<string, string>;
+  panelChats: ReadonlyArray<PanelChatTabMetadata>;
+  chatTitleRegenerationAvailable: boolean;
   /** Running + waiting subagents; badges the Agents card in the empty state. */
   liveAgentCount: number;
   children: ReactNode;
+}
+
+export interface PanelChatTabMetadata {
+  readonly threadId: string;
+  readonly title: string;
+  readonly running: boolean;
+  readonly needsAttention: boolean;
 }
 
 const SURFACE_DISABLED_REASONS = {
@@ -62,7 +84,15 @@ const SURFACE_DISABLED_REASONS = {
   diff: "Diff is only available for server threads in Git repositories.",
 } as const;
 
-type TabContextMenuAction = "copy-path" | "close" | "close-others" | "close-to-right" | "close-all";
+type TabContextMenuAction =
+  | "copy-path"
+  | "rename-chat"
+  | "regenerate-chat-title"
+  | "delete-chat"
+  | "close"
+  | "close-others"
+  | "close-to-right"
+  | "close-all";
 
 function DisabledReasonTooltip(props: { reason: string; trigger: ReactElement }) {
   return (
@@ -103,6 +133,8 @@ function RightPanelEmptyState(props: {
   diffAvailable: boolean;
   filesAvailable: boolean;
   chatAvailable: boolean;
+  panelChats: ReadonlyArray<PanelChatTabMetadata>;
+  onOpenChat: (threadId: string) => void;
   liveAgentCount: number;
 }) {
   const actions = [
@@ -227,6 +259,24 @@ function RightPanelEmptyState(props: {
             );
           })}
         </div>
+        {props.chatAvailable && props.panelChats.length > 0 ? (
+          <div className="mt-5">
+            <p className="mb-2 text-xs font-medium text-muted-foreground">Open a panel chat</p>
+            <div className="flex max-h-40 flex-col gap-1 overflow-y-auto">
+              {props.panelChats.map((chat) => (
+                <button
+                  key={chat.threadId}
+                  type="button"
+                  onClick={() => props.onOpenChat(chat.threadId)}
+                  className="flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-accent"
+                >
+                  <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1 truncate">{chat.title}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -324,6 +374,40 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   const ownsDesktopTitleBar = isElectron && props.mode === "inline";
   const { resolvedTheme } = useTheme();
   const tabListRef = useRef<HTMLDivElement>(null);
+  const [renamingChatId, setRenamingChatId] = useState<string | null>(null);
+  const [renamingChatTitle, setRenamingChatTitle] = useState("");
+  const panelChatById = useMemo(
+    () => new Map(props.panelChats.map((chat) => [chat.threadId, chat] as const)),
+    [props.panelChats],
+  );
+  const openedChatIds = useMemo(
+    () =>
+      new Set<string>(
+        props.surfaces.flatMap((surface) => (surface.kind === "chat" ? [surface.threadId] : [])),
+      ),
+    [props.surfaces],
+  );
+  const closedPanelChats = useMemo(
+    () => props.panelChats.filter((chat) => !openedChatIds.has(chat.threadId)),
+    [openedChatIds, props.panelChats],
+  );
+  const beginChatRename = useCallback(
+    (threadId: string) => {
+      const chat = panelChatById.get(threadId);
+      if (!chat) return;
+      setRenamingChatId(threadId);
+      setRenamingChatTitle(chat.title);
+    },
+    [panelChatById],
+  );
+  const commitChatRename = useCallback(() => {
+    if (!renamingChatId) return;
+    const trimmed = renamingChatTitle.trim();
+    const originalTitle = panelChatById.get(renamingChatId)?.title;
+    setRenamingChatId(null);
+    if (!trimmed || trimmed === originalTitle) return;
+    props.onRenameChat(renamingChatId, trimmed);
+  }, [panelChatById, props, renamingChatId, renamingChatTitle]);
 
   const handleTabContextMenu = useCallback(
     async (event: ReactMouseEvent, surface: RightPanelSurface) => {
@@ -339,6 +423,17 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       const items: ContextMenuItem<TabContextMenuAction>[] = [];
       if (surface.kind === "file") {
         items.push({ id: "copy-path", label: "Copy path" });
+      }
+      if (surface.kind === "chat") {
+        items.push(
+          { id: "rename-chat", label: "Rename" },
+          {
+            id: "regenerate-chat-title",
+            label: "Regenerate title",
+            disabled: !props.chatTitleRegenerationAvailable,
+          },
+          { id: "delete-chat", label: "Delete chat" },
+        );
       }
       items.push(
         { id: "close", label: "Close" },
@@ -364,6 +459,15 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
         case "copy-path":
           if (surface.kind === "file") props.onCopyFilePath(surface.relativePath);
           break;
+        case "rename-chat":
+          if (surface.kind === "chat") beginChatRename(surface.threadId);
+          break;
+        case "regenerate-chat-title":
+          if (surface.kind === "chat") props.onRegenerateChatTitle(surface.threadId);
+          break;
+        case "delete-chat":
+          if (surface.kind === "chat") props.onDeleteChat(surface.threadId);
+          break;
         case "close":
           props.onCloseSurface(surface);
           break;
@@ -380,7 +484,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           break;
       }
     },
-    [props],
+    [beginChatRename, props],
   );
   const handleTabMouseDown = useCallback((event: ReactMouseEvent) => {
     if (event.button !== 1) return;
@@ -427,6 +531,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             {props.surfaces.map((surface) => {
               const active = surface.id === props.activeSurfaceId;
               const pending = props.pendingSurfaceIds.has(surface.id);
+              const chat = surface.kind === "chat" ? panelChatById.get(surface.threadId) : null;
               const title = surfaceTitle(
                 surface,
                 props.previewSessions,
@@ -468,20 +573,54 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     </span>
                     <X className="hidden size-3 group-hover/tab:block group-focus-visible/close:block" />
                   </button>
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <button
-                          type="button"
-                          className="cursor-pointer flex min-w-0 items-center"
-                          onClick={() => props.onActivate(surface)}
-                        >
-                          <span className="truncate">{title}</span>
-                        </button>
-                      }
+                  {surface.kind === "chat" && renamingChatId === surface.threadId ? (
+                    <input
+                      autoFocus
+                      aria-label="Rename panel chat"
+                      value={renamingChatTitle}
+                      onChange={(event) => setRenamingChatTitle(event.target.value)}
+                      onBlur={commitChatRename}
+                      onClick={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          commitChatRename();
+                        } else if (event.key === "Escape") {
+                          event.preventDefault();
+                          setRenamingChatId(null);
+                        }
+                      }}
+                      className="h-5 min-w-16 max-w-28 rounded border border-border bg-background px-1 text-xs outline-none focus:ring-1 focus:ring-ring"
                     />
-                    <TooltipPopup>{title}</TooltipPopup>
-                  </Tooltip>
+                  ) : (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            className="cursor-pointer flex min-w-0 items-center"
+                            onClick={() => props.onActivate(surface)}
+                            onDoubleClick={() => {
+                              if (surface.kind === "chat") beginChatRename(surface.threadId);
+                            }}
+                          >
+                            <span className="truncate">{title}</span>
+                          </button>
+                        }
+                      />
+                      <TooltipPopup>{title}</TooltipPopup>
+                    </Tooltip>
+                  )}
+                  {chat?.running || chat?.needsAttention ? (
+                    <span
+                      className={cn(
+                        "ml-1 size-1.5 shrink-0 rounded-full",
+                        chat.needsAttention ? "bg-warning" : "bg-info",
+                      )}
+                      title={chat.needsAttention ? "Needs attention" : "Running"}
+                      aria-label={chat.needsAttention ? "Needs attention" : "Running"}
+                    />
+                  ) : null}
                 </div>
               );
             })}
@@ -527,10 +666,30 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     Agents
                   </SurfaceMenuItem>
                   {props.chatAvailable ? (
-                    <SurfaceMenuItem available onClick={props.onAddChat}>
-                      <MessageSquare />
-                      Chat
-                    </SurfaceMenuItem>
+                    <>
+                      <SurfaceMenuItem available onClick={props.onAddChat}>
+                        <MessageSquare />
+                        New chat
+                      </SurfaceMenuItem>
+                      {closedPanelChats.length > 0 ? (
+                        <MenuSub>
+                          <MenuSubTrigger>
+                            <MessageSquare />
+                            Open chat
+                          </MenuSubTrigger>
+                          <MenuSubPopup className="min-w-56">
+                            {closedPanelChats.map((chat) => (
+                              <MenuItem
+                                key={chat.threadId}
+                                onClick={() => props.onOpenChat(chat.threadId)}
+                              >
+                                <span className="truncate">{chat.title}</span>
+                              </MenuItem>
+                            ))}
+                          </MenuSubPopup>
+                        </MenuSub>
+                      ) : null}
+                    </>
                   ) : null}
                 </MenuPopup>
               </Menu>
@@ -552,6 +711,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             diffAvailable={props.diffAvailable}
             filesAvailable={props.filesAvailable}
             chatAvailable={props.chatAvailable}
+            panelChats={closedPanelChats}
+            onOpenChat={props.onOpenChat}
             liveAgentCount={props.liveAgentCount}
           />
         ) : (

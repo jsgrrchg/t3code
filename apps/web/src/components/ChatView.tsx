@@ -145,7 +145,7 @@ import {
   selectThreadPreviewMiniPlayer,
   usePreviewMiniPlayerStore,
 } from "../previewMiniPlayerStore";
-import { RightPanelTabs } from "./RightPanelTabs";
+import { RightPanelTabs, type PanelChatTabMetadata } from "./RightPanelTabs";
 import { AgentsPanel } from "./AgentsPanel";
 import {
   deriveAgentPanelModel,
@@ -1590,6 +1590,19 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const panelChatTitlesById = useMemo(
     () => new Map(panelChatShells.map((thread) => [thread.id, thread.title] as const)),
+    [panelChatShells],
+  );
+  const panelChatTabMetadata = useMemo<ReadonlyArray<PanelChatTabMetadata>>(
+    () =>
+      panelChatShells.map((thread) => ({
+        threadId: thread.id,
+        title: thread.title,
+        running:
+          thread.session?.status === "starting" ||
+          thread.session?.status === "running" ||
+          thread.latestTurn?.state === "running",
+        needsAttention: thread.hasPendingApprovals || thread.hasPendingUserInput,
+      })),
     [panelChatShells],
   );
   const [timelineAnchor, setTimelineAnchor] = useState<{
@@ -3331,6 +3344,95 @@ function ChatViewContent(props: ChatViewProps) {
     isWorkspacePresentation,
     serverConfig?.environment.capabilities.panelChats,
   ]);
+  const openPanelChatSurface = useCallback(
+    (threadId: string) => {
+      if (!activeThreadRef) return;
+      const panelChat = panelChatShells.find((thread) => thread.id === threadId);
+      if (!panelChat) return;
+      useRightPanelStore.getState().openChat(activeThreadRef, panelChat.id);
+    },
+    [activeThreadRef, panelChatShells],
+  );
+  const renamePanelChat = useCallback(
+    (threadId: string, title: string) => {
+      const panelChat = panelChatShells.find((thread) => thread.id === threadId);
+      if (!panelChat) return;
+      void updateThreadMetadata({
+        environmentId: panelChat.environmentId,
+        input: { threadId: panelChat.id, title },
+      }).then((result) => {
+        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Failed to rename panel chat",
+              description: chatActionErrorMessage(squashAtomCommandFailure(result)),
+            }),
+          );
+        }
+      });
+    },
+    [panelChatShells, updateThreadMetadata],
+  );
+  const regeneratePanelChatTitle = useCallback(
+    (threadId: string) => {
+      const panelChat = panelChatShells.find((thread) => thread.id === threadId);
+      if (!panelChat) return;
+      void updateThreadMetadata({
+        environmentId: panelChat.environmentId,
+        input: { threadId: panelChat.id, regenerateTitle: true },
+      }).then((result) => {
+        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Failed to regenerate panel chat title",
+              description: chatActionErrorMessage(squashAtomCommandFailure(result)),
+            }),
+          );
+        }
+      });
+    },
+    [panelChatShells, updateThreadMetadata],
+  );
+  const deletePanelChat = useCallback(
+    (threadId: string) => {
+      const panelChat = panelChatShells.find((thread) => thread.id === threadId);
+      if (!panelChat || !activeThreadRef) return;
+      void (async () => {
+        const api = readLocalApi();
+        const confirmationMessage = [
+          `Delete panel chat "${panelChat.title}"?`,
+          "This permanently clears its conversation history.",
+        ].join("\n");
+        if (api) {
+          const confirmed = await settlePromise(() => api.dialogs.confirm(confirmationMessage));
+          if (confirmed._tag === "Failure" || !confirmed.value) return;
+        } else if (!globalThis.confirm(confirmationMessage)) {
+          return;
+        }
+
+        const result = await deleteThread({
+          environmentId: panelChat.environmentId,
+          input: { threadId: panelChat.id },
+        });
+        if (result._tag === "Failure") {
+          if (!isAtomCommandInterrupted(result)) {
+            toastManager.add(
+              stackedThreadToast({
+                type: "error",
+                title: "Failed to delete panel chat",
+                description: chatActionErrorMessage(squashAtomCommandFailure(result)),
+              }),
+            );
+          }
+          return;
+        }
+        useRightPanelStore.getState().closeSurface(activeThreadRef, `chat:${panelChat.id}`);
+      })();
+    },
+    [activeThreadRef, deleteThread, panelChatShells],
+  );
   const openFileSurface = useCallback(
     (relativePath: string) => {
       if (!activeThreadRef || !activeProject) return;
@@ -6722,6 +6824,10 @@ function ChatViewContent(props: ChatViewProps) {
           onAddFiles={addFilesSurface}
           onAddAgents={addAgentsSurface}
           onAddChat={() => void addPanelChatSurface()}
+          onOpenChat={openPanelChatSurface}
+          onRenameChat={renamePanelChat}
+          onRegenerateChatTitle={regeneratePanelChatTitle}
+          onDeleteChat={deletePanelChat}
           browserAvailable={isPreviewSupportedInRuntime()}
           diffAvailable={isServerThread && isGitRepo}
           filesAvailable={activeProject !== null}
@@ -6732,6 +6838,10 @@ function ChatViewContent(props: ChatViewProps) {
             serverConfig?.environment.capabilities.panelChats === true
           }
           chatTitlesById={panelChatTitlesById}
+          panelChats={panelChatTabMetadata}
+          chatTitleRegenerationAvailable={
+            serverConfig?.environment.capabilities.threadTitleRegeneration === true
+          }
           liveAgentCount={agentPanelModel.liveCount}
         >
           {rightPanelContent}
@@ -6759,6 +6869,10 @@ function ChatViewContent(props: ChatViewProps) {
             onAddFiles={addFilesSurface}
             onAddAgents={addAgentsSurface}
             onAddChat={() => void addPanelChatSurface()}
+            onOpenChat={openPanelChatSurface}
+            onRenameChat={renamePanelChat}
+            onRegenerateChatTitle={regeneratePanelChatTitle}
+            onDeleteChat={deletePanelChat}
             browserAvailable={isPreviewSupportedInRuntime()}
             diffAvailable={isServerThread && isGitRepo}
             filesAvailable={activeProject !== null}
@@ -6769,6 +6883,10 @@ function ChatViewContent(props: ChatViewProps) {
               serverConfig?.environment.capabilities.panelChats === true
             }
             chatTitlesById={panelChatTitlesById}
+            panelChats={panelChatTabMetadata}
+            chatTitleRegenerationAvailable={
+              serverConfig?.environment.capabilities.threadTitleRegeneration === true
+            }
             liveAgentCount={agentPanelModel.liveCount}
           >
             {rightPanelContent}
