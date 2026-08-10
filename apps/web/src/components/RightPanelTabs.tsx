@@ -3,6 +3,7 @@ import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import { Bot, FileDiff, Files, Globe2, Plus, TerminalSquare, X } from "lucide-react";
 import {
   type MouseEvent as ReactMouseEvent,
+  type DragEvent as ReactDragEvent,
   type ReactElement,
   type ReactNode,
   useCallback,
@@ -24,6 +25,8 @@ import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 
 import { PreviewPanelShell, type PreviewPanelMode } from "./preview/PreviewPanelShell";
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
+import { writeComposerMentionDragPayload } from "./chat/composerMentionDrag";
+import { composerMentionFromRightPanelSurface } from "./rightPanelTabDrag";
 
 interface RightPanelTabsProps {
   mode: PreviewPanelMode;
@@ -372,6 +375,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     },
     [props],
   );
+  const handleTabDragStart = useCallback(
+    (event: ReactDragEvent<HTMLButtonElement>, mention: string | null) => {
+      if (!writeComposerMentionDragPayload(event.dataTransfer, mention)) {
+        event.preventDefault();
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     const activeTab = tabListRef.current?.querySelector<HTMLElement>("[data-active-tab='true']");
@@ -405,6 +416,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
               const active = surface.id === props.activeSurfaceId;
               const pending = props.pendingSurfaceIds.has(surface.id);
               const title = surfaceTitle(surface, props.previewSessions, props.terminalLabelsById);
+              const composerMention = composerMentionFromRightPanelSurface(surface);
               return (
                 <div
                   key={surface.id}
@@ -446,6 +458,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                         <button
                           type="button"
                           className="cursor-pointer flex min-w-0 items-center"
+                          draggable={composerMention !== null}
+                          onDragStart={(event) => handleTabDragStart(event, composerMention)}
                           onClick={() => props.onActivate(surface)}
                         >
                           <span className="truncate">{title}</span>

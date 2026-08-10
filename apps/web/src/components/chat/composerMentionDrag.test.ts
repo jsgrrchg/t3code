@@ -6,6 +6,7 @@ import {
   composerMentionFromTreePath,
   dataTransferHasComposerMention,
   makeComposerMentionDragHandlers,
+  writeComposerMentionDragPayload,
 } from "./composerMentionDrag.ts";
 
 const makeDragEvent = (options?: { mention?: string; types?: ReadonlyArray<string> }) => {
@@ -61,6 +62,26 @@ describe("dataTransferHasComposerMention", () => {
     expect(dataTransferHasComposerMention([COMPOSER_MENTION_DRAG_TYPE, "text/plain"])).toBe(true);
     expect(dataTransferHasComposerMention(["Files"])).toBe(false);
     expect(dataTransferHasComposerMention([])).toBe(false);
+  });
+});
+
+describe("writeComposerMentionDragPayload", () => {
+  it("writes a composer mention for drag sources", () => {
+    const data = new Map<string, string>();
+    const written = writeComposerMentionDragPayload(
+      { setData: (format, value) => void data.set(format, value) },
+      "[index.md](docs/index.md)",
+    );
+    expect(written).toBe(true);
+    expect(data.get(COMPOSER_MENTION_DRAG_TYPE)).toBe("[index.md](docs/index.md)");
+  });
+
+  it("rejects empty payloads", () => {
+    const data = new Map<string, string>();
+    const transfer = { setData: (format: string, value: string) => void data.set(format, value) };
+    expect(writeComposerMentionDragPayload(transfer, null)).toBe(false);
+    expect(writeComposerMentionDragPayload(transfer, "")).toBe(false);
+    expect(data.size).toBe(0);
   });
 });
 

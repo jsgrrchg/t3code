@@ -10,6 +10,9 @@ like any other project file. Turn the option off to return to the filtered tree.
 Ignored files are also available when searching for a file from **Open file** or typing `@` in the
 composer. They stay out of the default Files tree, but appear when their path matches the search.
 
+Drag a file from the Files tree, or drag the label of an open file tab, onto the composer to add it
+as file context.
+
 ## Comment on a file
 
 In source view, select one or more lines to add a comment. In a rendered Markdown preview, hover a
