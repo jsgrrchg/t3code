@@ -1,4 +1,5 @@
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
+import { executeAtomQuery, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type {
   EnvironmentId,
   ProjectListEntriesResult,
@@ -12,7 +13,6 @@ import { useCallback } from "react";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { projectEnvironment } from "~/state/projects";
 import { useProjectPathSearch } from "~/state/queries";
-import { executeAtomQuery } from "@t3tools/client-runtime/state/runtime";
 
 const EMPTY_PROJECT_FILE_PATH = "";
 const EMPTY_PROJECT_FILE_QUERY_ATOM = Atom.make(
@@ -20,6 +20,12 @@ const EMPTY_PROJECT_FILE_QUERY_ATOM = Atom.make(
 ).pipe(Atom.withLabel("project-file-query:empty"));
 function optimisticFileAtom(environmentId: EnvironmentId, cwd: string, relativePath: string) {
   return projectEnvironment.optimisticFile({ environmentId, cwd, relativePath });
+}
+
+export function isDirectProjectChildPath(path: string, directory: string): boolean {
+  if (!directory) return !path.includes("/");
+  const prefix = `${directory}/`;
+  return path.startsWith(prefix) && !path.slice(prefix.length).includes("/");
 }
 
 interface ProjectQueryState<A> {
@@ -38,6 +44,73 @@ export function getProjectEntriesQueryAtom(
     environmentId,
     input: { cwd, ...(includeIgnored ? { includeIgnored: true } : {}) },
   });
+}
+
+export function getProjectDirectoryQueryAtom(
+  environmentId: EnvironmentId,
+  cwd: string,
+  directory: string,
+  includeIgnored = false,
+  cursor?: string,
+) {
+  return projectEnvironment.listEntries({
+    environmentId,
+    input: {
+      cwd,
+      directory: directory || ".",
+      ...(includeIgnored ? { includeIgnored: true } : {}),
+      ...(cursor ? { cursor } : {}),
+    },
+  });
+}
+
+export async function loadProjectDirectoryEntries(
+  environmentId: EnvironmentId,
+  cwd: string,
+  directory: string,
+  includeIgnored: boolean,
+  options?: { readonly refresh?: boolean },
+): Promise<ReadonlyArray<ProjectListEntriesResult["entries"][number]>> {
+  const entries: ProjectListEntriesResult["entries"][number][] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+  let complete = false;
+
+  while (!complete) {
+    const atom = getProjectDirectoryQueryAtom(
+      environmentId,
+      cwd,
+      directory,
+      includeIgnored,
+      cursor,
+    );
+    if (options?.refresh) appAtomRegistry.refresh(atom);
+    const result = await executeAtomQuery(appAtomRegistry, atom, {
+      reportDefect: false,
+      reportFailure: false,
+    });
+    if (result._tag !== "Success") {
+      throw squashAtomCommandFailure(result);
+    }
+    if (result.value.entries.some((entry) => !isDirectProjectChildPath(entry.path, directory))) {
+      throw new Error("The connected T3 server does not support directory-scoped file listings.");
+    }
+    entries.push(...result.value.entries);
+    const nextCursor = result.value.nextCursor;
+    if (!nextCursor) {
+      if (result.value.truncated) {
+        throw new Error(`Directory listing for "${directory || "."}" was truncated.`);
+      }
+      complete = true;
+      continue;
+    }
+    if (seenCursors.has(nextCursor)) {
+      throw new Error(`Directory listing for "${directory || "."}" repeated its cursor.`);
+    }
+    seenCursors.add(nextCursor);
+    cursor = nextCursor;
+  }
+  return entries;
 }
 
 export function getProjectFileQueryAtom(

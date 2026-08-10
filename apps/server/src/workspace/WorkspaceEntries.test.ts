@@ -122,6 +122,90 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceEntries", (it) => {
         expect(result.truncated).toBe(false);
       }),
     );
+
+    it.effect("lists direct directory children and applies Git ignore rules", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-directory-list-", git: true });
+        yield* writeTextFile(cwd, ".gitignore", "ignored/\n");
+        yield* writeTextFile(cwd, ".git/info/exclude", "local-only.txt\n");
+        yield* writeTextFile(cwd, "src/nested/index.ts");
+        yield* writeTextFile(cwd, "ignored/secret.txt");
+        yield* writeTextFile(cwd, "local-only.txt");
+        yield* writeTextFile(cwd, "README.md");
+
+        const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
+        const visibleRoot = yield* workspaceEntries.list({ cwd, directory: "." });
+        const completeRoot = yield* workspaceEntries.list({
+          cwd,
+          directory: ".",
+          includeIgnored: true,
+        });
+        const src = yield* workspaceEntries.list({ cwd, directory: "src" });
+
+        expect(visibleRoot.entries).toEqual(
+          expect.arrayContaining([
+            { path: ".gitignore", kind: "file" },
+            { path: "README.md", kind: "file" },
+            { path: "src", kind: "directory" },
+          ]),
+        );
+        expect(visibleRoot.entries).not.toContainEqual({ path: "ignored", kind: "directory" });
+        expect(visibleRoot.entries).not.toContainEqual({ path: "local-only.txt", kind: "file" });
+        expect(completeRoot.entries).toContainEqual({ path: "ignored", kind: "directory" });
+        expect(completeRoot.entries).toContainEqual({ path: "local-only.txt", kind: "file" });
+        expect(src.entries).toEqual([{ path: "src/nested", kind: "directory" }]);
+        expect(src.truncated).toBe(false);
+      }),
+    );
+
+    it.effect("paginates a flat directory without dropping entries", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-directory-page-" });
+        yield* Effect.tryPromise(() =>
+          Promise.all(
+            Array.from({ length: 1_002 }, (_, index) =>
+              NodeFSP.writeFile(`${cwd}/file-${index.toString().padStart(4, "0")}.txt`, ""),
+            ),
+          ),
+        );
+
+        const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
+        const first = yield* workspaceEntries.list({
+          cwd,
+          directory: ".",
+          includeIgnored: true,
+        });
+        const second = yield* workspaceEntries.list({
+          cwd,
+          directory: ".",
+          cursor: first.nextCursor,
+          includeIgnored: true,
+        });
+
+        expect(first.entries).toHaveLength(1_000);
+        expect(first.truncated).toBe(true);
+        expect(first.nextCursor).toBe("file-0999.txt");
+        expect(second.entries).toEqual([
+          { path: "file-1000.txt", kind: "file" },
+          { path: "file-1001.txt", kind: "file" },
+        ]);
+        expect(second.truncated).toBe(false);
+        expect(second.nextCursor).toBeUndefined();
+      }),
+    );
+
+    it.effect("rejects directory traversal outside the workspace", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir();
+        const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
+
+        const error = yield* workspaceEntries
+          .list({ cwd, directory: "../outside" })
+          .pipe(Effect.flip);
+
+        expect(error._tag).toBe("WorkspacePathOutsideRootError");
+      }),
+    );
   });
 
   describe("search", () => {

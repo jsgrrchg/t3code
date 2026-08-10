@@ -7,12 +7,12 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { FileTree, useFileTree, useFileTreeSearch } from "@pierre/trees/react";
+import { FileTree, useFileTree } from "@pierre/trees/react";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { resolvePathAgainstCwd } from "@t3tools/shared/path";
 import * as Schema from "effect/Schema";
 import { Eye, EyeOff, RotateCw } from "lucide-react";
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "~/components/ui/button";
 import { InputGroup, InputGroupInput } from "~/components/ui/input-group";
@@ -27,10 +27,11 @@ import { cn } from "~/lib/utils";
 import { readLocalApi } from "~/localApi";
 import { T3_PIERRE_ICONS } from "~/pierre-icons";
 import { projectEnvironment } from "~/state/projects";
+import { useProjectPathSearch } from "~/state/queries";
 import { useAtomCommand } from "~/state/use-atom-command";
 
 import { createFileTreeDragMentionController } from "./fileTreeDragMention";
-import { useProjectEntriesQuery } from "./projectFilesQueryState";
+import { loadProjectDirectoryEntries } from "./projectFilesQueryState";
 
 interface FileBrowserPanelProps {
   environmentId: EnvironmentId;
@@ -58,6 +59,7 @@ const TREE_UNSAFE_CSS = `
 `;
 
 const INCLUDE_IGNORED_STORAGE_KEY = "t3code.fileBrowser.includeIgnored";
+const FILE_TREE_SEARCH_LIMIT = 200;
 
 function treePath(entry: ProjectEntry): string {
   return entry.kind === "directory" ? `${entry.path}/` : entry.path;
@@ -157,16 +159,31 @@ export default function FileBrowserPanel({
     false,
     Schema.Boolean,
   );
-  const entriesQuery = useProjectEntriesQuery(environmentId, cwd, includeIgnored);
   const deleteEntry = useAtomCommand(projectEnvironment.deleteEntry);
-  const entries = entriesQuery.data?.entries ?? [];
-  const entryKinds = useMemo(
-    () => new Map(entries.map((entry) => [entry.path, entry.kind] as const)),
-    [entries],
+  const [searchValue, setSearchValue] = useState("");
+  const normalizedSearchValue = searchValue.trim();
+  const searchActive = normalizedSearchValue.length > 0;
+  const pathSearch = useProjectPathSearch(
+    {
+      environmentId,
+      cwd,
+      query: searchValue,
+      includeIgnored,
+    },
+    FILE_TREE_SEARCH_LIMIT,
   );
-  const entryKindsRef = useRef<ReadonlyMap<string, ProjectEntry["kind"]>>(entryKinds);
-  const treePaths = useMemo(() => entries.map(treePath), [entries]);
-  const previousTreePathsRef = useRef<readonly string[]>([]);
+  const [treeRevision, setTreeRevision] = useState(0);
+  const [rootError, setRootError] = useState<string | null>(null);
+  const [pendingDirectoryCount, setPendingDirectoryCount] = useState(0);
+  const loadedEntryKindsRef = useRef(new Map<string, ProjectEntry["kind"]>());
+  const entryKindsRef = useRef<ReadonlyMap<string, ProjectEntry["kind"]>>(new Map());
+  const loadedDirectoriesRef = useRef(new Set<string>());
+  const loadingDirectoriesRef = useRef(new Map<string, Promise<void>>());
+  const treeGenerationRef = useRef(0);
+  const searchActiveRef = useRef(searchActive);
+  const previousSearchActiveRef = useRef(false);
+  searchActiveRef.current = searchActive;
+  const refreshTreeRef = useRef<() => void>(() => undefined);
   const syncingSelectionRef = useRef(false);
   const treeSelectionPathRef = useRef<string | null>(null);
   const handledRevealRef = useRef<{ path: string; revealId: number } | null>(null);
@@ -281,7 +298,7 @@ export default function FileBrowserPanel({
         });
         if (result._tag === "Success") {
           onEntryDeleted(relativePath, kind);
-          entriesQuery.refresh();
+          refreshTreeRef.current();
           toastManager.add({
             type: "success",
             title: kind === "directory" ? "Folder deleted" : "File deleted",
@@ -327,7 +344,7 @@ export default function FileBrowserPanel({
     dragAndDrop: { canDrop: () => false },
     density: "compact",
     fileTreeSearchMode: "hide-non-matches",
-    flattenEmptyDirectories: true,
+    flattenEmptyDirectories: false,
     initialExpansion: 1,
     icons: T3_PIERRE_ICONS,
     onSelectionChange: (selectedPaths) => {
@@ -352,21 +369,163 @@ export default function FileBrowserPanel({
     search: false,
     unsafeCSS: TREE_UNSAFE_CSS,
   });
-  const search = useFileTreeSearch(model);
-  const handleSearchValueChange = (value: string) => {
-    if (value.trim().length === 0) {
-      search.close();
-      return;
-    }
-    search.setValue(value);
-  };
+  const loadDirectory = useCallback(
+    (directory: string, refresh = false): Promise<void> => {
+      if (!refresh && loadedDirectoriesRef.current.has(directory)) return Promise.resolve();
+      const existing = loadingDirectoriesRef.current.get(directory);
+      if (existing) return existing;
+      const generation = treeGenerationRef.current;
+      setPendingDirectoryCount((count) => count + 1);
+      const request = loadProjectDirectoryEntries(environmentId, cwd, directory, includeIgnored, {
+        refresh,
+      })
+        .then((entries) => {
+          if (treeGenerationRef.current !== generation) return;
+          const additions: ProjectEntry[] = [];
+          for (const entry of entries) {
+            if (loadedEntryKindsRef.current.has(entry.path)) continue;
+            loadedEntryKindsRef.current.set(entry.path, entry.kind);
+            additions.push(entry);
+          }
+          loadedDirectoriesRef.current.add(directory);
+          if (!searchActiveRef.current && additions.length > 0) {
+            entryKindsRef.current = loadedEntryKindsRef.current;
+            model.batch(
+              additions.map((entry) => ({ type: "add" as const, path: treePath(entry) })),
+            );
+          }
+          if (directory.length === 0) setRootError(null);
+          setTreeRevision((revision) => revision + 1);
+        })
+        .catch((error: unknown) => {
+          if (treeGenerationRef.current !== generation) return;
+          const message = error instanceof Error ? error.message : "Failed to load directory.";
+          if (directory.length === 0) {
+            setRootError(message);
+          } else {
+            toastManager.add({
+              type: "error",
+              title: "Failed to load folder",
+              description: message,
+            });
+          }
+        })
+        .finally(() => {
+          if (treeGenerationRef.current === generation) {
+            loadingDirectoriesRef.current.delete(directory);
+            setPendingDirectoryCount((count) => Math.max(0, count - 1));
+          }
+        });
+      loadingDirectoriesRef.current.set(directory, request);
+      return request;
+    },
+    [cwd, environmentId, includeIgnored, model],
+  );
+
+  const refreshTree = useCallback(() => {
+    treeGenerationRef.current += 1;
+    loadedEntryKindsRef.current = new Map();
+    entryKindsRef.current = loadedEntryKindsRef.current;
+    loadedDirectoriesRef.current = new Set();
+    loadingDirectoriesRef.current = new Map();
+    setPendingDirectoryCount(0);
+    setRootError(null);
+    if (!searchActiveRef.current) model.resetPaths([]);
+    setTreeRevision((revision) => revision + 1);
+    void loadDirectory("", true);
+  }, [loadDirectory, model]);
+  const refreshFiles = useCallback(() => {
+    refreshTree();
+    if (searchActive) pathSearch.refresh();
+  }, [pathSearch.refresh, refreshTree, searchActive]);
+  refreshTreeRef.current = refreshFiles;
 
   useEffect(() => {
-    if (previousTreePathsRef.current === treePaths) return;
-    entryKindsRef.current = entryKinds;
-    previousTreePathsRef.current = treePaths;
-    model.resetPaths(treePaths);
-  }, [entryKinds, model, treePaths]);
+    refreshTree();
+    return () => {
+      treeGenerationRef.current += 1;
+    };
+  }, [refreshTree]);
+
+  const loadDirectoryRef = useRef(loadDirectory);
+  useEffect(() => {
+    loadDirectoryRef.current = loadDirectory;
+  }, [loadDirectory]);
+  useEffect(
+    () =>
+      model.subscribe(() => {
+        if (searchActiveRef.current) return;
+        for (const [path, kind] of loadedEntryKindsRef.current) {
+          if (
+            kind !== "directory" ||
+            loadedDirectoriesRef.current.has(path) ||
+            loadingDirectoriesRef.current.has(path)
+          ) {
+            continue;
+          }
+          const item = model.getItem(`${path}/`) ?? model.getItem(path);
+          if (item && "isExpanded" in item && item.isExpanded()) {
+            void loadDirectoryRef.current(path);
+          }
+        }
+      }),
+    [model],
+  );
+
+  useEffect(() => {
+    const previousSearchActive = previousSearchActiveRef.current;
+    previousSearchActiveRef.current = searchActive;
+    if (!searchActive) {
+      if (!previousSearchActive) return;
+      entryKindsRef.current = loadedEntryKindsRef.current;
+      model.resetPaths(
+        [...loadedEntryKindsRef.current].map(([path, kind]) => treePath({ path, kind })),
+      );
+      setTreeRevision((revision) => revision + 1);
+      return;
+    }
+    if (pathSearch.isPending || pathSearch.searchedQuery !== normalizedSearchValue) return;
+    const searchKinds = new Map<string, ProjectEntry["kind"]>();
+    for (const entry of pathSearch.entries) {
+      searchKinds.set(entry.path, entry.kind);
+      let parentPath = entry.path.slice(0, entry.path.lastIndexOf("/"));
+      while (parentPath) {
+        searchKinds.set(parentPath, "directory");
+        parentPath = parentPath.slice(0, parentPath.lastIndexOf("/"));
+      }
+    }
+    entryKindsRef.current = searchKinds;
+    model.resetPaths([...searchKinds].map(([path, kind]) => treePath({ path, kind })));
+    setTreeRevision((revision) => revision + 1);
+  }, [
+    model,
+    normalizedSearchValue,
+    pathSearch.entries,
+    pathSearch.isPending,
+    pathSearch.searchedQuery,
+    searchActive,
+  ]);
+
+  useEffect(() => {
+    if (!selectedPath || searchActive || entryKindsRef.current.has(selectedPath)) return;
+    let cancelled = false;
+    void (async () => {
+      await loadDirectory("");
+      if (cancelled) return;
+      const segments = selectedPath.split("/");
+      let parentPath = "";
+      for (const segment of segments.slice(0, -1)) {
+        parentPath = parentPath ? `${parentPath}/${segment}` : segment;
+        await loadDirectory(parentPath);
+        if (cancelled) return;
+        const item = model.getItem(`${parentPath}/`) ?? model.getItem(parentPath);
+        if (item && "expand" in item) item.expand();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [loadDirectory, model, searchActive, selectedPath, treeRevision]);
 
   useEffect(() => {
     if (!selectedPath) {
@@ -383,7 +542,7 @@ export default function FileBrowserPanel({
     ) {
       return;
     }
-    if (entryKinds.get(selectedPath) !== "file") return;
+    if (entryKindsRef.current.get(selectedPath) !== "file") return;
     const selectedItem = model.getItem(selectedPath);
     if (!selectedItem) return;
 
@@ -423,7 +582,7 @@ export default function FileBrowserPanel({
     queueMicrotask(() => {
       syncingSelectionRef.current = false;
     });
-  }, [entryKinds, model, selectedPath, selectedPathRevealId, treePaths]);
+  }, [model, selectedPath, selectedPathRevealId, treeRevision]);
 
   // Tag tree drags with the composer mention payload. The row is read from
   // the composed event path (the tree's shadow root is open), so this does
@@ -457,31 +616,43 @@ export default function FileBrowserPanel({
       data-file-browser-panel={`${environmentId}:${cwd}`}
     >
       <div className="surface-subheader gap-1 px-2" data-surface-subheader>
-        <RefreshFilesButton isPending={entriesQuery.isPending} onRefresh={entriesQuery.refresh} />
+        <RefreshFilesButton
+          isPending={pendingDirectoryCount > 0 || pathSearch.isPending}
+          onRefresh={refreshFiles}
+        />
         <FileSearchField
           name="project-files-search"
           ariaLabel={`Search ${projectName} files`}
-          value={search.value}
-          onValueChange={handleSearchValueChange}
-          onClose={search.close}
+          value={searchValue}
+          onValueChange={setSearchValue}
+          onClose={() => setSearchValue("")}
         />
         <ShowIgnoredFilesButton
           includeIgnored={includeIgnored}
           onIncludeIgnoredChange={setIncludeIgnored}
         />
       </div>
-      {entriesQuery.error && entriesQuery.data === null ? (
-        <div className="p-4 text-xs leading-relaxed text-destructive">{entriesQuery.error}</div>
+      {rootError || (searchActive && pathSearch.error) ? (
+        <div className="p-4 text-xs leading-relaxed text-destructive">
+          {rootError ?? pathSearch.error}
+        </div>
       ) : (
-        <FileTree
-          model={model}
-          aria-label={`${projectName} files`}
-          className="min-h-0 flex-1 overflow-hidden"
-          style={{
-            colorScheme: resolvedTheme,
-            ["--trees-fg-override" as string]: "var(--foreground)",
-          }}
-        />
+        <>
+          {searchActive && pathSearch.truncated ? (
+            <div className="px-3 py-1 text-[11px] text-muted-foreground">
+              Showing the first {FILE_TREE_SEARCH_LIMIT} matches
+            </div>
+          ) : null}
+          <FileTree
+            model={model}
+            aria-label={`${projectName} files`}
+            className="min-h-0 flex-1 overflow-hidden"
+            style={{
+              colorScheme: resolvedTheme,
+              ["--trees-fg-override" as string]: "var(--foreground)",
+            }}
+          />
+        </>
       )}
     </div>
   );

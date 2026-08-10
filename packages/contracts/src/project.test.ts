@@ -33,6 +33,22 @@ describe("project search inputs", () => {
     );
   });
 
+  it("accepts a paginated directory listing target", () => {
+    expect(
+      decodeListEntriesInput({
+        cwd: "/workspace",
+        directory: "src/components",
+        cursor: "Composer.tsx",
+        includeIgnored: true,
+      }),
+    ).toEqual({
+      cwd: "/workspace",
+      directory: "src/components",
+      cursor: "Composer.tsx",
+      includeIgnored: true,
+    });
+  });
+
   it("allows an empty entries query for bounded frecency browsing", () => {
     const decoded = decodeSearchEntriesInput({
       cwd: "/workspace",
