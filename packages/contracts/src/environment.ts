@@ -70,6 +70,8 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   threadTitleRegeneration: Schema.optionalKey(Schema.Boolean),
   /** Server persists child threads owned by a primary thread's Right Panel. */
   panelChats: Schema.optionalKey(Schema.Boolean),
+  /** Server can list the repository's public Git commit graph. */
+  gitHistory: Schema.optionalKey(Schema.Boolean),
   /** The update path clients should offer for this server. Absent on
       servers that must be relaunched manually (dev checkouts, Windows
       foreground runs, pre-update servers). */

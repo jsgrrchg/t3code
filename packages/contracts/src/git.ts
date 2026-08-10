@@ -5,6 +5,13 @@ import { VcsDriverKind } from "./vcs.ts";
 
 const TrimmedNonEmptyStringSchema = TrimmedNonEmptyString;
 const GIT_LIST_BRANCHES_MAX_LIMIT = 200;
+export const GIT_HISTORY_DEFAULT_LIMIT = 100;
+export const GIT_HISTORY_MAX_LIMIT = 200;
+export const GIT_HISTORY_CWD_MAX_LENGTH = 4_096;
+export const GIT_HISTORY_SUBJECT_MAX_LENGTH = 4_096;
+export const GIT_HISTORY_AUTHOR_NAME_MAX_LENGTH = 1_024;
+export const GIT_HISTORY_AUTHOR_EMAIL_MAX_LENGTH = 1_024;
+export const GIT_HISTORY_AUTHORED_AT_MAX_LENGTH = 64;
 
 // Domain Types
 
@@ -73,6 +80,21 @@ const GitRunStackedActionToast = Schema.Struct({
 });
 export type GitRunStackedActionToast = typeof GitRunStackedActionToast.Type;
 
+export const GitObjectId = Schema.String.check(
+  Schema.isPattern(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i),
+);
+export type GitObjectId = typeof GitObjectId.Type;
+
+export const GitHistoryCommitSummary = Schema.Struct({
+  sha: GitObjectId,
+  parentShas: Schema.Array(GitObjectId),
+  subject: Schema.String.check(Schema.isMaxLength(GIT_HISTORY_SUBJECT_MAX_LENGTH)),
+  authorName: Schema.String.check(Schema.isMaxLength(GIT_HISTORY_AUTHOR_NAME_MAX_LENGTH)),
+  authorEmail: Schema.String.check(Schema.isMaxLength(GIT_HISTORY_AUTHOR_EMAIL_MAX_LENGTH)),
+  authoredAt: Schema.String.check(Schema.isMaxLength(GIT_HISTORY_AUTHORED_AT_MAX_LENGTH)),
+});
+export type GitHistoryCommitSummary = typeof GitHistoryCommitSummary.Type;
+
 export const VcsRef = Schema.Struct({
   name: TrimmedNonEmptyStringSchema,
   isRemote: Schema.optional(Schema.Boolean),
@@ -98,6 +120,13 @@ const GitResolvedPullRequest = Schema.Struct({
 export type GitResolvedPullRequest = typeof GitResolvedPullRequest.Type;
 
 // RPC Inputs
+
+export const GitListHistoryInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(GIT_HISTORY_CWD_MAX_LENGTH)),
+  cursor: Schema.optional(NonNegativeInt),
+  limit: Schema.optional(PositiveInt.check(Schema.isLessThanOrEqualTo(GIT_HISTORY_MAX_LIMIT))),
+});
+export type GitListHistoryInput = typeof GitListHistoryInput.Type;
 
 export const VcsStatusInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
@@ -189,6 +218,13 @@ export const VcsInitInput = Schema.Struct({
 export type VcsInitInput = typeof VcsInitInput.Type;
 
 // RPC Results
+
+export const GitListHistoryResult = Schema.Struct({
+  commits: Schema.Array(GitHistoryCommitSummary).check(Schema.isMaxLength(GIT_HISTORY_MAX_LIMIT)),
+  headSha: Schema.NullOr(GitObjectId),
+  nextCursor: Schema.NullOr(NonNegativeInt),
+});
+export type GitListHistoryResult = typeof GitListHistoryResult.Type;
 
 const VcsStatusChangeRequest = Schema.Struct({
   number: PositiveInt,
