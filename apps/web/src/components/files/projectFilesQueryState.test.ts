@@ -5,8 +5,10 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import {
   clearProjectFileQueryData,
   confirmProjectFileQueryData,
+  getProjectDirectoryQueryAtom,
   getProjectEntriesQueryAtom,
   getOptimisticProjectFileQueryData,
+  isDirectProjectChildPath,
   resolveProjectFileQueryData,
   setProjectFileQueryData,
 } from "./projectFilesQueryState";
@@ -57,5 +59,28 @@ describe("project files queries", () => {
     expect(getProjectEntriesQueryAtom(environmentId, "/repo", false)).toBe(visible);
     expect(getProjectEntriesQueryAtom(environmentId, "/repo", true)).toBe(withIgnored);
     expect(withIgnored).not.toBe(visible);
+  });
+
+  it("keys directory listing pages independently", () => {
+    const root = getProjectDirectoryQueryAtom(environmentId, "/repo", "", true);
+    const src = getProjectDirectoryQueryAtom(environmentId, "/repo", "src", true);
+    const srcNext = getProjectDirectoryQueryAtom(
+      environmentId,
+      "/repo",
+      "src",
+      true,
+      "Composer.tsx",
+    );
+
+    expect(getProjectDirectoryQueryAtom(environmentId, "/repo", "", true)).toBe(root);
+    expect(src).not.toBe(root);
+    expect(srcNext).not.toBe(src);
+  });
+
+  it("distinguishes direct children from deeper descendants", () => {
+    expect(isDirectProjectChildPath("README.md", "")).toBe(true);
+    expect(isDirectProjectChildPath("src/index.ts", "")).toBe(false);
+    expect(isDirectProjectChildPath("src/index.ts", "src")).toBe(true);
+    expect(isDirectProjectChildPath("src/components/Button.tsx", "src")).toBe(false);
   });
 });

@@ -11,6 +11,8 @@ const PROJECT_SEARCH_CONTENTS_MAX_LIMIT = 500;
 const PROJECT_WRITE_FILE_PATH_MAX_LENGTH = 512;
 const PROJECT_READ_FILE_PATH_MAX_LENGTH = 512;
 const PROJECT_DELETE_ENTRY_PATH_MAX_LENGTH = 512;
+const PROJECT_LIST_DIRECTORY_PATH_MAX_LENGTH = 512;
+const PROJECT_LIST_DIRECTORY_CURSOR_MAX_LENGTH = 512;
 
 export const ProjectEntryKind = Schema.Literals(["file", "directory"]);
 export type ProjectEntryKind = typeof ProjectEntryKind.Type;
@@ -75,12 +77,27 @@ export type ProjectSearchContentsResult = typeof ProjectSearchContentsResult.Typ
 export const ProjectListEntriesInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   includeIgnored: Schema.optional(Schema.Boolean),
+  directory: Schema.optional(
+    TrimmedNonEmptyString.check(Schema.isMaxLength(PROJECT_LIST_DIRECTORY_PATH_MAX_LENGTH)),
+  ),
+  cursor: Schema.optional(
+    Schema.String.check(
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(PROJECT_LIST_DIRECTORY_CURSOR_MAX_LENGTH),
+    ),
+  ),
 });
 export type ProjectListEntriesInput = typeof ProjectListEntriesInput.Type;
 
 export const ProjectListEntriesResult = Schema.Struct({
   entries: Schema.Array(ProjectEntry),
   truncated: Schema.Boolean,
+  nextCursor: Schema.optional(
+    Schema.String.check(
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(PROJECT_LIST_DIRECTORY_CURSOR_MAX_LENGTH),
+    ),
+  ),
 });
 export type ProjectListEntriesResult = typeof ProjectListEntriesResult.Type;
 
@@ -89,6 +106,8 @@ export const ProjectEntriesFailure = Schema.Literals([
   "workspace_root_create_failed",
   "workspace_root_stat_failed",
   "workspace_root_not_directory",
+  "workspace_path_outside_root",
+  "read_directory_failed",
   "search_index_create_failed",
   "search_index_scan_timed_out",
   "search_index_search_failed",

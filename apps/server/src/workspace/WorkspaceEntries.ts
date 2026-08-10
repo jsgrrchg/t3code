@@ -37,6 +37,7 @@ import * as VcsProcess from "../vcs/VcsProcess.ts";
 const WORKSPACE_IGNORED_FILES_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const WORKSPACE_IGNORED_FILES_CACHE_CAPACITY = 16;
 const WORKSPACE_IGNORED_FILES_CACHE_TTL = "3 seconds";
+const WORKSPACE_DIRECTORY_PAGE_SIZE = 1_000;
 const WORKSPACE_GIT_HARDENED_CONFIG_ARGS = [
   "-c",
   "core.fsmonitor=false",
@@ -51,6 +52,12 @@ function parentProjectPath(input: string): string | undefined {
 
 function projectEntryName(entry: ProjectEntry): string {
   return entry.path.slice(entry.path.lastIndexOf("/") + 1);
+}
+
+function compareProjectEntryNames(left: ProjectEntry, right: ProjectEntry): number {
+  const leftName = projectEntryName(left);
+  const rightName = projectEntryName(right);
+  return leftName < rightName ? -1 : leftName > rightName ? 1 : 0;
 }
 
 function scoreProjectEntry(entry: ProjectEntry, query: string): number | null {
@@ -226,6 +233,8 @@ export const WorkspaceEntriesError = Schema.Union([
   WorkspacePaths.WorkspaceRootCreateFailedError,
   WorkspacePaths.WorkspaceRootStatFailedError,
   WorkspacePaths.WorkspaceRootNotDirectoryError,
+  WorkspacePaths.WorkspacePathOutsideRootError,
+  WorkspaceEntriesReadDirectoryError,
   WorkspaceSearchIndex.WorkspaceSearchIndexCreateFailed,
   WorkspaceSearchIndex.WorkspaceSearchIndexScanTimedOut,
   WorkspaceSearchIndex.WorkspaceSearchIndexSearchFailed,
@@ -353,6 +362,81 @@ export const make = Effect.gen(function* () {
     cwd: string,
   ): Effect.fn.Return<string, WorkspaceEntriesError> {
     return yield* workspacePaths.normalizeWorkspaceRoot(cwd);
+  });
+
+  const filterVisibleDirectoryEntries = Effect.fn("WorkspaceEntries.filterVisibleDirectoryEntries")(
+    function* (cwd: string, entries: ReadonlyArray<ProjectEntry>) {
+      if (entries.length === 0) return entries;
+      const result = yield* vcsProcess
+        .run({
+          operation: "WorkspaceEntries.filterVisibleDirectoryEntries",
+          command: "git",
+          cwd,
+          args: [
+            ...WORKSPACE_GIT_HARDENED_CONFIG_ARGS,
+            "check-ignore",
+            "--no-index",
+            "-z",
+            "--stdin",
+          ],
+          stdin: `${entries.map((entry) => entry.path).join("\0")}\0`,
+          allowNonZeroExit: true,
+          timeoutMs: 20_000,
+          maxOutputBytes: 1024 * 1024,
+        })
+        .pipe(Effect.orElseSucceed(() => null));
+      if (result === null || (result.exitCode !== 0 && result.exitCode !== 1)) return entries;
+      const ignoredPaths = new Set(result.stdout.split("\0").filter(Boolean));
+      return entries.filter((entry) => !ignoredPaths.has(entry.path));
+    },
+  );
+
+  const listDirectory = Effect.fn("WorkspaceEntries.listDirectory")(function* (
+    normalizedCwd: string,
+    input: ProjectListEntriesInput & { readonly directory: string },
+  ) {
+    const target =
+      input.directory === "."
+        ? { absolutePath: normalizedCwd, relativePath: "" }
+        : yield* workspacePaths.resolveRelativePathWithinRoot({
+            workspaceRoot: normalizedCwd,
+            relativePath: input.directory,
+          });
+    const dirents = yield* Effect.tryPromise({
+      try: () => NodeFSP.readdir(target.absolutePath, { withFileTypes: true }),
+      catch: (cause) =>
+        new WorkspaceEntriesReadDirectoryError({
+          cwd: normalizedCwd,
+          partialPath: input.directory,
+          parentPath: target.absolutePath,
+          cause,
+        }),
+    });
+    const sortedEntries = dirents
+      .flatMap((dirent): ProjectEntry[] => {
+        if (dirent.name === ".git") return [];
+        if (!dirent.isDirectory() && !dirent.isFile() && !dirent.isSymbolicLink()) return [];
+        const projectPath = target.relativePath
+          ? `${target.relativePath}/${dirent.name}`
+          : dirent.name;
+        return [{ path: projectPath, kind: dirent.isDirectory() ? "directory" : "file" }];
+      })
+      .toSorted(compareProjectEntryNames);
+    const visibleEntries = input.includeIgnored
+      ? sortedEntries
+      : yield* filterVisibleDirectoryEntries(normalizedCwd, sortedEntries);
+    const cursor = input.cursor;
+    const startIndex = cursor
+      ? visibleEntries.findIndex((entry) => projectEntryName(entry) > cursor)
+      : 0;
+    const pageStart = startIndex === -1 ? visibleEntries.length : startIndex;
+    const entries = visibleEntries.slice(pageStart, pageStart + WORKSPACE_DIRECTORY_PAGE_SIZE);
+    const hasMore = pageStart + entries.length < visibleEntries.length;
+    return {
+      entries,
+      truncated: hasMore,
+      ...(hasMore && entries.length > 0 ? { nextCursor: projectEntryName(entries.at(-1)!) } : {}),
+    };
   });
 
   const refresh: WorkspaceEntries["Service"]["refresh"] = Effect.fn("WorkspaceEntries.refresh")(
@@ -490,6 +574,12 @@ export const make = Effect.gen(function* () {
   const list: WorkspaceEntries["Service"]["list"] = Effect.fn("WorkspaceEntries.list")(
     function* (input) {
       const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd);
+      if (input.directory !== undefined) {
+        return yield* listDirectory(normalizedCwd, {
+          ...input,
+          directory: input.directory,
+        });
+      }
       return yield* Effect.gen(function* () {
         const searchIndex = yield* WorkspaceSearchIndex.WorkspaceSearchIndex;
         const visible = yield* searchIndex.list();
