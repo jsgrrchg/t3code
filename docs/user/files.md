@@ -13,6 +13,9 @@ composer. They stay out of the default Files tree, but appear when their path ma
 Drag a file from the Files tree, or drag the label of an open file tab, onto the composer to add it
 as file context.
 
+Open file tabs remember their source, rendered Markdown, or image scroll position for the current
+session when you switch tabs or chats and return.
+
 Right-click a file or folder and choose **Delete** to remove it from the project. Deleting a folder
 also deletes everything inside it. T3 Code asks for confirmation because deleted workspace entries
 are not moved to the system trash.

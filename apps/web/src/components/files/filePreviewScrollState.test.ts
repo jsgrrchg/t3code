@@ -5,6 +5,8 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   createFilePreviewScrollMemory,
   filePreviewScrollKey,
+  resolveFilePreviewRevealRequestId,
+  shouldRestoreFilePreviewScroll,
   type FilePreviewScrollMode,
 } from "./filePreviewScrollState";
 
@@ -70,5 +72,22 @@ describe("file preview scroll state", () => {
     expect(memory.get(first)).not.toBeNull();
     expect(memory.get(third)).not.toBeNull();
     expect(memory.size).toBe(2);
+  });
+
+  it("lets a new line reveal win and restores an already consumed reveal", () => {
+    const remembered = {
+      position: { top: 420, left: 32 },
+      revealRequestId: 7,
+    };
+
+    expect(shouldRestoreFilePreviewScroll(remembered, 8)).toBe(false);
+    expect(shouldRestoreFilePreviewScroll(remembered, 7)).toBe(true);
+    expect(shouldRestoreFilePreviewScroll(remembered)).toBe(true);
+    expect(shouldRestoreFilePreviewScroll(null, 7)).toBe(false);
+
+    expect(resolveFilePreviewRevealRequestId(remembered, 8, 8)).toBe(7);
+    expect(resolveFilePreviewRevealRequestId({ ...remembered, revealRequestId: 8 }, 8, 8)).toBe(8);
+    expect(resolveFilePreviewRevealRequestId(null, 8, 8)).toBeNull();
+    expect(resolveFilePreviewRevealRequestId(remembered, 9)).toBe(9);
   });
 });

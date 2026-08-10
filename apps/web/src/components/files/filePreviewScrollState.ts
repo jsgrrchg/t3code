@@ -85,3 +85,25 @@ export function getRememberedFilePreviewScroll(key: string): FilePreviewScrollEn
 export function rememberFilePreviewScroll(key: string, entry: FilePreviewScrollEntry): void {
   filePreviewScrollMemory.set(key, entry);
 }
+
+export function shouldRestoreFilePreviewScroll(
+  entry: FilePreviewScrollEntry | null,
+  revealRequestId?: number,
+): entry is FilePreviewScrollEntry {
+  return (
+    entry !== null && (revealRequestId === undefined || entry.revealRequestId === revealRequestId)
+  );
+}
+
+export function resolveFilePreviewRevealRequestId(
+  entry: FilePreviewScrollEntry | null,
+  revealRequestId: number | null,
+  restoreForRevealRequestId?: number,
+): number | null {
+  if (restoreForRevealRequestId === undefined) return revealRequestId;
+  // A source reveal is only consumed after useFileLineReveal writes it into
+  // the cache. Preserve the previous marker if this mount ended before that.
+  return entry?.revealRequestId === restoreForRevealRequestId
+    ? restoreForRevealRequestId
+    : (entry?.revealRequestId ?? null);
+}

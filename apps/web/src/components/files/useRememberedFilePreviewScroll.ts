@@ -3,6 +3,8 @@ import { useLayoutEffect, type RefObject } from "react";
 import {
   getRememberedFilePreviewScroll,
   rememberFilePreviewScroll,
+  resolveFilePreviewRevealRequestId,
+  shouldRestoreFilePreviewScroll,
 } from "./filePreviewScrollState";
 
 interface UseRememberedFilePreviewScrollOptions {
@@ -10,7 +12,9 @@ interface UseRememberedFilePreviewScrollOptions {
   readonly rootRef: RefObject<HTMLElement | null>;
   readonly viewportSelector?: string;
   readonly revealRequestId?: number | null;
+  readonly restoreForRevealRequestId?: number;
   readonly restore?: boolean;
+  readonly enabled?: boolean;
 }
 
 function readPosition(element: HTMLElement) {
@@ -22,9 +26,12 @@ export function useRememberedFilePreviewScroll({
   rootRef,
   viewportSelector,
   revealRequestId = null,
+  restoreForRevealRequestId,
   restore = true,
+  enabled = true,
 }: UseRememberedFilePreviewScrollOptions): void {
   useLayoutEffect(() => {
+    if (!enabled) return;
     const root = rootRef.current;
     const viewport = viewportSelector ? root?.querySelector<HTMLElement>(viewportSelector) : root;
     if (!viewport) return;
@@ -32,7 +39,10 @@ export function useRememberedFilePreviewScroll({
     let latestPosition = readPosition(viewport);
     let restoreFrame: number | null = null;
     let userInteracted = false;
-    const remembered = restore ? getRememberedFilePreviewScroll(scrollKey) : null;
+    const rememberedEntry = restore ? getRememberedFilePreviewScroll(scrollKey) : null;
+    const remembered = shouldRestoreFilePreviewScroll(rememberedEntry, restoreForRevealRequestId)
+      ? rememberedEntry
+      : null;
 
     const cancelRestore = () => {
       userInteracted = true;
@@ -70,10 +80,24 @@ export function useRememberedFilePreviewScroll({
       viewport.removeEventListener("touchstart", cancelRestore);
       viewport.removeEventListener("pointerdown", cancelRestore);
       window.removeEventListener("keydown", cancelRestore, true);
+      latestPosition = readPosition(viewport);
+      const currentEntry = getRememberedFilePreviewScroll(scrollKey);
       rememberFilePreviewScroll(scrollKey, {
         position: latestPosition,
-        revealRequestId,
+        revealRequestId: resolveFilePreviewRevealRequestId(
+          currentEntry,
+          revealRequestId,
+          restoreForRevealRequestId,
+        ),
       });
     };
-  }, [restore, revealRequestId, rootRef, scrollKey, viewportSelector]);
+  }, [
+    enabled,
+    restore,
+    restoreForRevealRequestId,
+    revealRequestId,
+    rootRef,
+    scrollKey,
+    viewportSelector,
+  ]);
 }
