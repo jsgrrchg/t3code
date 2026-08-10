@@ -51,6 +51,7 @@ import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 import {
   resolvePanelChatOpenAnnouncementThreadId,
   resolveFocusTargetAfterRemoteSurfaceRemoval,
+  resolveFocusedRightPanelSurfaceId,
   resolveRightPanelTabKeyAction,
 } from "./RightPanelTabs.logic";
 
@@ -693,8 +694,9 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
         const focusOwner = (event.target as HTMLElement).closest<HTMLElement>(
           "[data-right-panel-focus-surface-id]",
         );
-        focusedSurfaceIdRef.current =
-          focusOwner?.dataset.rightPanelFocusSurfaceId ?? props.activeSurfaceId;
+        focusedSurfaceIdRef.current = resolveFocusedRightPanelSurfaceId(
+          focusOwner?.dataset.rightPanelFocusSurfaceId,
+        );
       }}
       onBlurCapture={(event) => {
         if (

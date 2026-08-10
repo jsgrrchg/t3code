@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   resolvePanelChatOpenAnnouncementThreadId,
   resolveFocusTargetAfterRemoteSurfaceRemoval,
+  resolveFocusedRightPanelSurfaceId,
   resolveRightPanelTabKeyAction,
 } from "./RightPanelTabs.logic";
 
@@ -85,5 +86,12 @@ describe("resolveFocusTargetAfterRemoteSurfaceRemoval", () => {
         activeSurfaceId: "diff",
       }),
     ).toBeNull();
+  });
+});
+
+describe("resolveFocusedRightPanelSurfaceId", () => {
+  it("does not attribute global panel controls to the active surface", () => {
+    expect(resolveFocusedRightPanelSurfaceId(undefined)).toBeNull();
+    expect(resolveFocusedRightPanelSurfaceId("chat:child")).toBe("chat:child");
   });
 });

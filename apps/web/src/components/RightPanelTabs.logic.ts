@@ -59,3 +59,9 @@ export function resolveFocusTargetAfterRemoteSurfaceRemoval(input: {
     ? { kind: "surface", surfaceId: input.activeSurfaceId }
     : { kind: "owner" };
 }
+
+export function resolveFocusedRightPanelSurfaceId(
+  focusOwnerSurfaceId: string | undefined,
+): string | null {
+  return focusOwnerSurfaceId ?? null;
+}
