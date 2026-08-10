@@ -17,6 +17,7 @@ import { useCallback } from "react";
 import { resolveSnoozePresets, snoozeWakeDescription } from "../components/Sidebar.snooze";
 import {
   buildThreadActionMenuItems,
+  resolveThreadRevealPathLabel,
   type ThreadActionMenuId,
 } from "../components/threadActionMenu.logic";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
@@ -31,6 +32,7 @@ import {
 } from "../state/entities";
 import { readLocalApi } from "../localApi";
 import { useUiStateStore } from "../uiStateStore";
+import { usePrimaryEnvironmentId } from "../state/environments";
 import { useCopyToClipboard } from "./useCopyToClipboard";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { useClientSettings } from "./useSettings";
@@ -82,6 +84,7 @@ export function useThreadActionMenu(input: {
   const autoSettleAfterDays = useClientSettings((s) => s.sidebarAutoSettleAfterDays);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
   const { copyToClipboard: copyPathToClipboard } = useCopyToClipboard<{ path: string }>({
     onCopy: ({ path }) => {
       toastManager.add({ type: "success", title: "Path copied", description: path });
@@ -106,6 +109,8 @@ export function useThreadActionMenu(input: {
         // what the user is looking at.
         const thread = readThreadShell(threadRef);
         if (!thread) return;
+        const workspacePath = thread.worktreePath ?? projectCwd;
+        const revealPath = api.shell.revealPath;
         const now = new Date();
         const supports = {
           settlement: readEnvironmentSupportsSettlement(threadRef.environmentId),
@@ -131,6 +136,13 @@ export function useThreadActionMenu(input: {
           isSnoozed: supports.snooze && effectiveSnoozed(thread, { now: now.toISOString() }),
           canSnoozeNow: canSnooze(thread, { now: now.toISOString() }),
           isRegeneratingTitle,
+          revealPathLabel: resolveThreadRevealPathLabel({
+            hasRevealPathCapability: revealPath !== undefined,
+            threadEnvironmentId: threadRef.environmentId,
+            primaryEnvironmentId,
+            workspacePath,
+            platform: navigator.platform,
+          }),
           supports,
           snoozePresets,
         });
@@ -222,8 +234,15 @@ export function useThreadActionMenu(input: {
           case "mark-unread":
             markThreadUnread(scopedThreadKey(threadRef), thread.latestTurn?.completedAt);
             return;
+          case "reveal-path": {
+            if (!workspacePath || !revealPath) return;
+            const result = await settlePromise(() => revealPath(workspacePath));
+            if (result._tag === "Failure") {
+              failureToast("Unable to reveal workspace", squashAtomCommandFailure(result));
+            }
+            return;
+          }
           case "copy-path": {
-            const workspacePath = thread.worktreePath ?? projectCwd;
             if (!workspacePath) {
               toastManager.add(
                 stackedThreadToast({
@@ -283,6 +302,7 @@ export function useThreadActionMenu(input: {
       markThreadUnread,
       onStartRename,
       pinThread,
+      primaryEnvironmentId,
       projectCwd,
       settleThread,
       snoozeThread,

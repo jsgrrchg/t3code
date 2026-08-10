@@ -2,14 +2,16 @@ import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import { beforeEach, vi } from "vite-plus/test";
 
-const { openExternalMock, writeTextMock } = vi.hoisted(() => ({
+const { openExternalMock, showItemInFolderMock, writeTextMock } = vi.hoisted(() => ({
   openExternalMock: vi.fn(),
+  showItemInFolderMock: vi.fn(),
   writeTextMock: vi.fn(),
 }));
 
 vi.mock("electron", () => ({
   shell: {
     openExternal: openExternalMock,
+    showItemInFolder: showItemInFolderMock,
   },
   clipboard: {
     writeText: writeTextMock,
@@ -21,6 +23,7 @@ import * as ElectronShell from "./ElectronShell.ts";
 describe("ElectronShell", () => {
   beforeEach(() => {
     openExternalMock.mockReset();
+    showItemInFolderMock.mockReset();
     writeTextMock.mockReset();
   });
 
@@ -54,6 +57,27 @@ describe("ElectronShell", () => {
       const result = yield* electronShell.openExternal("https://example.com/path");
 
       assert.equal(result, false);
+    }).pipe(Effect.provide(ElectronShell.layer)),
+  );
+
+  it.effect("reveals paths in the platform file manager", () =>
+    Effect.gen(function* () {
+      const electronShell = yield* ElectronShell.ElectronShell;
+      const result = yield* electronShell.revealPath("/tmp/project");
+
+      assert.equal(result, true);
+      assert.deepEqual(showItemInFolderMock.mock.calls, [["/tmp/project"]]);
+    }).pipe(Effect.provide(ElectronShell.layer)),
+  );
+
+  it.effect("returns false when revealing a path throws", () =>
+    Effect.gen(function* () {
+      showItemInFolderMock.mockImplementation(() => {
+        throw new Error("reveal failed");
+      });
+
+      const electronShell = yield* ElectronShell.ElectronShell;
+      assert.equal(yield* electronShell.revealPath("/tmp/missing"), false);
     }).pipe(Effect.provide(ElectronShell.layer)),
   );
 });

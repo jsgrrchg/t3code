@@ -119,7 +119,7 @@ import {
 import { formatRelativeTimeLabel, parseTimestampDate } from "../timestampFormat";
 import type { SidebarThreadSummary } from "../types";
 import { cn } from "~/lib/utils";
-import { buildThreadActionMenuItems } from "./threadActionMenu.logic";
+import { buildThreadActionMenuItems, resolveThreadRevealPathLabel } from "./threadActionMenu.logic";
 import {
   buildBulkTitleRegenerationContextMenuItem,
   formatWorkingDurationLabel,
@@ -3156,6 +3156,7 @@ export default function Sidebar() {
         const isPinned = thread.pinnedAt != null;
         // Presets resolve at menu-open time (same as the popover).
         const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
+        const revealPath = api.shell.revealPath;
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
             buildThreadActionMenuItems({
@@ -3165,6 +3166,13 @@ export default function Sidebar() {
               isSnoozed,
               canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
               isRegeneratingTitle,
+              revealPathLabel: resolveThreadRevealPathLabel({
+                hasRevealPathCapability: revealPath !== undefined,
+                threadEnvironmentId: thread.environmentId,
+                primaryEnvironmentId,
+                workspacePath: threadWorkspacePath,
+                platform: navigator.platform,
+              }),
               supports: {
                 settlement: supportsSettlement,
                 snooze: supportsSnooze,
@@ -3247,6 +3255,21 @@ export default function Sidebar() {
           case "mark-unread":
             markThreadUnread(threadKey, thread.latestTurn?.completedAt);
             return;
+          case "reveal-path": {
+            if (!threadWorkspacePath || !revealPath) return;
+            const result = await settlePromise(() => revealPath(threadWorkspacePath));
+            if (result._tag === "Failure") {
+              const error = squashAtomCommandFailure(result);
+              toastManager.add(
+                stackedThreadToast({
+                  type: "error",
+                  title: "Unable to reveal workspace",
+                  description: error instanceof Error ? error.message : "An error occurred.",
+                }),
+              );
+            }
+            return;
+          }
           case "copy-path":
             if (!threadWorkspacePath) {
               toastManager.add(
@@ -3309,6 +3332,7 @@ export default function Sidebar() {
       deleteThread,
       handleMultiSelectContextMenu,
       markThreadUnread,
+      primaryEnvironmentId,
       projectCwdByKey,
       serverConfigs,
       startThreadRename,

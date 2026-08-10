@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildThreadActionMenuItems, type ThreadActionMenuState } from "./threadActionMenu.logic";
+import {
+  buildThreadActionMenuItems,
+  resolveThreadRevealPathLabel,
+  type ThreadActionMenuState,
+} from "./threadActionMenu.logic";
 
 const baseState: ThreadActionMenuState = {
   branch: null,
@@ -9,6 +13,7 @@ const baseState: ThreadActionMenuState = {
   isSnoozed: false,
   canSnoozeNow: true,
   isRegeneratingTitle: false,
+  revealPathLabel: null,
   supports: { settlement: true, snooze: true, pinning: true, titleRegeneration: true },
   snoozePresets: [
     { id: "hour", label: "In 1 hour", whenLabel: "3:00 PM", snoozedUntil: "2026-08-07T15:00:00Z" },
@@ -37,6 +42,16 @@ describe("buildThreadActionMenuItems", () => {
     expect(ids(baseState)).not.toContain("copy-branch");
   });
 
+  it("includes reveal path only when the local shell provides it", () => {
+    expect(ids(baseState)).not.toContain("reveal-path");
+    expect(ids({ ...baseState, revealPathLabel: "Reveal in Finder" })).toContain("reveal-path");
+    expect(
+      buildThreadActionMenuItems({ ...baseState, revealPathLabel: "Reveal in Finder" }).find(
+        (item) => item.id === "reveal-path",
+      ),
+    ).toMatchObject({ label: "Reveal in Finder", icon: "folder-tree" });
+  });
+
   it("flips lifecycle labels with thread state", () => {
     expect(ids({ ...baseState, isPinned: true, isSettled: true, isSnoozed: true })).toEqual(
       expect.arrayContaining(["unpin", "unsettle", "unsnooze"]),
@@ -62,5 +77,29 @@ describe("buildThreadActionMenuItems", () => {
   it("marks delete as destructive and keeps it last", () => {
     const items = buildThreadActionMenuItems({ ...baseState, branch: "main" });
     expect(items.at(-1)).toMatchObject({ id: "delete", destructive: true });
+  });
+});
+
+describe("resolveThreadRevealPathLabel", () => {
+  const baseInput = {
+    hasRevealPathCapability: true,
+    threadEnvironmentId: "local",
+    primaryEnvironmentId: "local",
+    workspacePath: "/tmp/project",
+    platform: "MacIntel",
+  };
+
+  it("labels local desktop workspace paths for the platform", () => {
+    expect(resolveThreadRevealPathLabel(baseInput)).toBe("Reveal in Finder");
+  });
+
+  it("hides the action without a desktop capability, local path, or primary environment", () => {
+    expect(
+      resolveThreadRevealPathLabel({ ...baseInput, hasRevealPathCapability: false }),
+    ).toBeNull();
+    expect(resolveThreadRevealPathLabel({ ...baseInput, workspacePath: null })).toBeNull();
+    expect(
+      resolveThreadRevealPathLabel({ ...baseInput, threadEnvironmentId: "remote" }),
+    ).toBeNull();
   });
 });
