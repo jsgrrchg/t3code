@@ -317,13 +317,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         return yield* decideCommandSequence({
           readModel,
           commands: [
-            ...activeThreads.map(
-              (thread): Extract<OrchestrationCommand, { type: "thread.delete" }> => ({
-                type: "thread.delete",
-                commandId: command.commandId,
-                threadId: thread.id,
-              }),
-            ),
+            ...activeThreads
+              .filter((thread) => thread.parentThreadId == null)
+              .map(
+                (thread): Extract<OrchestrationCommand, { type: "thread.delete" }> => ({
+                  type: "thread.delete",
+                  commandId: command.commandId,
+                  threadId: thread.id,
+                }),
+              ),
             {
               type: "project.delete",
               commandId: command.commandId,
@@ -360,6 +362,32 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      const parentThreadId = command.parentThreadId ?? null;
+      if (parentThreadId !== null) {
+        const parent = yield* requireThread({
+          readModel,
+          command,
+          threadId: parentThreadId,
+        });
+        if (parent.deletedAt !== null) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Parent thread '${parentThreadId}' is deleted and cannot own a panel chat.`,
+          });
+        }
+        if (parent.projectId !== command.projectId) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Parent thread '${parentThreadId}' belongs to a different project.`,
+          });
+        }
+        if (parent.parentThreadId != null) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Panel chat '${parentThreadId}' cannot own nested panel chats.`,
+          });
+        }
+      }
       return {
         ...(yield* withEventBase({
           aggregateKind: "thread",
@@ -371,6 +399,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           projectId: command.projectId,
+          parentThreadId,
           title: command.title,
           modelSelection: command.modelSelection,
           runtimeMode: command.runtimeMode,
@@ -384,11 +413,29 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.delete": {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
+      const activeChildren = readModel.threads.filter(
+        (candidate) => candidate.parentThreadId === thread.id && candidate.deletedAt === null,
+      );
+      if (activeChildren.length > 0) {
+        return yield* decideCommandSequence({
+          readModel,
+          commands: [
+            ...activeChildren.map(
+              (child): Extract<OrchestrationCommand, { type: "thread.delete" }> => ({
+                type: "thread.delete",
+                commandId: command.commandId,
+                threadId: child.id,
+              }),
+            ),
+            command,
+          ],
+        });
+      }
       const occurredAt = yield* nowIso;
       return {
         ...(yield* withEventBase({

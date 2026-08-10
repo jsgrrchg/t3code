@@ -137,6 +137,96 @@ function normalizeDeleteEvent(event: PlannedEvent | ReadonlyArray<PlannedEvent>)
 }
 
 it.layer(NodeServices.layer)("decider deletion flows", (it) => {
+  it.effect("creates panel chats only below an existing top-level thread", () =>
+    Effect.gen(function* () {
+      const readModel = yield* seedReadModel;
+      const createChild = {
+        type: "thread.create",
+        commandId: asCommandId("cmd-panel-chat-create"),
+        threadId: asThreadId("thread-panel-chat"),
+        projectId: asProjectId("project-delete"),
+        parentThreadId: asThreadId("thread-delete-1"),
+        title: "New chat",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5-codex",
+        },
+        runtimeMode: "approval-required",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        branch: null,
+        worktreePath: null,
+        createdAt: "2026-01-01T00:00:01.000Z",
+      } satisfies Extract<OrchestrationCommand, { type: "thread.create" }>;
+
+      const created = yield* decideOrchestrationCommand({ command: createChild, readModel });
+      expect(Array.isArray(created)).toBe(false);
+      if (!("type" in created) || created.type !== "thread.created") return;
+      const createdEvent = created as Extract<OrchestrationEvent, { type: "thread.created" }>;
+      expect(createdEvent.payload.parentThreadId).toBe(asThreadId("thread-delete-1"));
+
+      const withChild = yield* projectEvent(readModel, {
+        ...createdEvent,
+        sequence: 4,
+      } as OrchestrationEvent);
+      const nestedError = yield* Effect.flip(
+        decideOrchestrationCommand({
+          command: {
+            ...createChild,
+            commandId: asCommandId("cmd-panel-chat-nested"),
+            threadId: asThreadId("thread-panel-chat-nested"),
+            parentThreadId: createChild.threadId,
+          },
+          readModel: withChild,
+        }),
+      );
+      expect(nestedError.message).toContain("cannot own nested panel chats");
+    }),
+  );
+
+  it.effect("deletes panel chat children before their parent", () =>
+    Effect.gen(function* () {
+      const readModel = yield* seedReadModel;
+      const childCreated = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.create",
+          commandId: asCommandId("cmd-panel-chat-create"),
+          threadId: asThreadId("thread-panel-chat"),
+          projectId: asProjectId("project-delete"),
+          parentThreadId: asThreadId("thread-delete-1"),
+          title: "New chat",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "approval-required",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          branch: null,
+          worktreePath: null,
+          createdAt: "2026-01-01T00:00:01.000Z",
+        },
+        readModel,
+      });
+      if (!("type" in childCreated)) return;
+      const withChild = yield* projectEvent(readModel, {
+        ...childCreated,
+        sequence: 4,
+      } as OrchestrationEvent);
+      const deleted = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.delete",
+          commandId: asCommandId("cmd-parent-delete"),
+          threadId: asThreadId("thread-delete-1"),
+        },
+        readModel: withChild,
+      });
+
+      expect(normalizeDeleteEvent(deleted).map((event) => event.payload)).toEqual([
+        { threadId: asThreadId("thread-panel-chat") },
+        { threadId: asThreadId("thread-delete-1") },
+      ]);
+    }),
+  );
+
   it.effect("rejects deleting a non-empty project without force", () =>
     Effect.gen(function* () {
       const readModel = yield* seedReadModel;

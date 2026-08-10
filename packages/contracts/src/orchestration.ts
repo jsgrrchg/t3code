@@ -504,15 +504,11 @@ export const OrchestrationThreadShell = Schema.Struct({
 });
 export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;
 
-export function isTopLevelThread(
-  thread: Pick<OrchestrationThreadShell, "parentThreadId">,
-): boolean {
+export function isTopLevelThread(thread: { readonly parentThreadId?: unknown }): boolean {
   return thread.parentThreadId == null;
 }
 
-export function isPanelChatThread(
-  thread: Pick<OrchestrationThreadShell, "parentThreadId">,
-): boolean {
+export function isPanelChatThread(thread: { readonly parentThreadId?: unknown }): boolean {
   return thread.parentThreadId != null;
 }
 

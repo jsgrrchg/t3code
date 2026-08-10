@@ -76,6 +76,7 @@ describe("orchestration projector", () => {
       {
         id: "thread-1",
         projectId: "project-1",
+        parentThreadId: null,
         title: "demo",
         modelSelection: {
           instanceId: "codex",
@@ -101,6 +102,38 @@ describe("orchestration projector", () => {
         session: null,
       },
     ]);
+  });
+
+  it("projects a panel chat parent relationship", async () => {
+    const now = "2026-01-01T00:00:00.000Z";
+    const next = await Effect.runPromise(
+      projectEvent(
+        createEmptyReadModel(now),
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-child",
+          occurredAt: now,
+          commandId: "cmd-thread-create",
+          payload: {
+            threadId: "thread-child",
+            projectId: "project-1",
+            parentThreadId: "thread-parent",
+            title: "New chat",
+            modelSelection: { provider: "codex", model: "gpt-5-codex" },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        }),
+      ),
+    );
+
+    expect(next.threads[0]?.parentThreadId).toBe("thread-parent");
   });
 
   it("fails when event payload cannot be decoded by runtime schema", async () => {
