@@ -322,9 +322,7 @@ describe("desktop follow-up queue", () => {
       EnvironmentThreadShell,
       "environmentId" | "id" | "latestUserMessageAt" | "latestTurn" | "session"
     >;
-    const barrier = createDesktopFollowUpQueueBarrier(entry, baseline, {
-      now: "2026-08-09T00:00:02.000Z",
-    });
+    const barrier = createDesktopFollowUpQueueBarrier(entry, baseline);
     const now = "2026-08-09T00:00:02.000Z";
 
     expect(desktopFollowUpQueueBarrierCompleted(barrier, baseline, { now })).toBe(false);
@@ -334,6 +332,11 @@ describe("desktop follow-up queue", () => {
       latestUserMessageAt: "2026-08-09T00:00:02.000Z",
     };
     expect(desktopFollowUpQueueBarrierCompleted(barrier, awaitingAdoption, { now })).toBe(false);
+    expect(
+      desktopFollowUpQueueBarrierCompleted(barrier, awaitingAdoption, {
+        now: "2026-08-09T01:00:02.000Z",
+      }),
+    ).toBe(false);
     expect(
       canDispatchDesktopQueuedFollowUp({
         sessionStatus: "ready",
@@ -360,6 +363,21 @@ describe("desktop follow-up queue", () => {
       },
     };
     expect(desktopFollowUpQueueBarrierCompleted(barrier, running, { now })).toBe(false);
+
+    const erroredWithoutSessionFailure = {
+      ...running,
+      latestTurn: {
+        ...running.latestTurn,
+        state: "error" as const,
+        completedAt: "2026-08-09T00:00:03.000Z",
+      },
+      session: baseline.session,
+    };
+    expect(
+      desktopFollowUpQueueBarrierCompleted(barrier, erroredWithoutSessionFailure, {
+        now: "2026-08-09T00:00:03.000Z",
+      }),
+    ).toBe(false);
 
     const completed = {
       ...running,
@@ -399,9 +417,7 @@ describe("desktop follow-up queue", () => {
         updatedAt: "2026-08-09T00:00:01.000Z",
       },
     };
-    const barrier = createDesktopFollowUpQueueBarrier(entry, baseline, {
-      now: "2026-08-09T00:00:02.000Z",
-    });
+    const barrier = createDesktopFollowUpQueueBarrier(entry, baseline);
 
     expect(
       desktopFollowUpQueueBarrierCompleted(barrier, baseline, {

@@ -235,9 +235,7 @@ export function DesktopFollowUpQueueDrain() {
     const attemptKey = `${candidate.entry.id}:${candidate.thread.session?.status ?? "none"}:${candidate.thread.session?.updatedAt ?? "none"}`;
     if (lastAttemptKeyRef.current === attemptKey) return;
     lastAttemptKeyRef.current = attemptKey;
-    const barrier = createDesktopFollowUpQueueBarrier(candidate.entry, candidate.thread, {
-      now: new Date().toISOString(),
-    });
+    const barrier = createDesktopFollowUpQueueBarrier(candidate.entry, candidate.thread);
     setBarriers((current) => new Map(current).set(barrier.key, barrier));
     void dispatchEntry(candidate.entry, candidate.thread).then((sent) => {
       if (sent) {

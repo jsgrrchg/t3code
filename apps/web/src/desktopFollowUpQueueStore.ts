@@ -1,8 +1,5 @@
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
-import {
-  hasQueuedTurnStart,
-  QUEUED_TURN_START_GRACE_MS,
-} from "@t3tools/client-runtime/state/thread-settled";
+import { hasQueuedTurnStart } from "@t3tools/client-runtime/state/thread-settled";
 import {
   CommandId,
   EnvironmentId,
@@ -76,7 +73,6 @@ export interface DesktopFollowUpQueueBarrier {
   readonly kind: DesktopQueuedFollowUp["kind"];
   readonly baselineSessionUpdatedAt: string | null;
   readonly baselineLatestTurn: string | null;
-  readonly expiresAtMs: number;
 }
 
 function latestTurnFingerprint(thread: DesktopFollowUpQueueThreadLifecycle): string | null {
@@ -95,15 +91,12 @@ export function desktopFollowUpQueueThreadKey(
 export function createDesktopFollowUpQueueBarrier(
   entry: DesktopQueuedFollowUp,
   thread: DesktopFollowUpQueueThreadLifecycle,
-  options: { readonly now: string },
 ): DesktopFollowUpQueueBarrier {
-  const nowMs = Date.parse(options.now);
   return {
     key: desktopFollowUpQueueThreadKey(thread),
     kind: entry.kind,
     baselineSessionUpdatedAt: thread.session?.updatedAt ?? null,
     baselineLatestTurn: latestTurnFingerprint(thread),
-    expiresAtMs: (Number.isNaN(nowMs) ? Date.now() : nowMs) + QUEUED_TURN_START_GRACE_MS,
   };
 }
 
@@ -129,13 +122,13 @@ export function desktopFollowUpQueueBarrierCompleted(
 
   const sessionAdvanced = (thread.session?.updatedAt ?? null) !== barrier.baselineSessionUpdatedAt;
   const latestTurnAdvanced = latestTurnFingerprint(thread) !== barrier.baselineLatestTurn;
-  const latestTurnReachedTerminalState = thread.latestTurn !== null;
+  const latestTurnCompleted = thread.latestTurn?.state === "completed";
   const sessionReachedFailureState =
     sessionStatus === "error" || sessionStatus === "stopped" || sessionStatus === "interrupted";
 
   if (barrier.kind === "message") {
     const lifecycleCompleted =
-      (latestTurnAdvanced && latestTurnReachedTerminalState) ||
+      (latestTurnAdvanced && latestTurnCompleted) ||
       (sessionAdvanced && sessionReachedFailureState);
     if (lifecycleCompleted) return true;
   } else {
@@ -143,12 +136,11 @@ export function desktopFollowUpQueueBarrierCompleted(
     // only be visible through the session returning to ready.
     const lifecycleCompleted =
       (sessionAdvanced && sessionStatus !== null) ||
-      (latestTurnAdvanced && latestTurnReachedTerminalState);
+      (latestTurnAdvanced && thread.latestTurn !== null);
     if (lifecycleCompleted) return true;
   }
 
-  const nowMs = Date.parse(options.now);
-  return !Number.isNaN(nowMs) && nowMs >= barrier.expiresAtMs;
+  return false;
 }
 
 const PersistedDesktopFollowUpQueue = Schema.Struct({
