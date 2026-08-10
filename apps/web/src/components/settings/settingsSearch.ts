@@ -119,6 +119,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
   },
   {
+    id: "composer-send-behavior",
+    title: "Send messages with",
+    to: "/settings/general",
+  },
+  {
     id: "follow-up-behavior",
     title: "Follow-up behavior",
     to: "/settings/general",

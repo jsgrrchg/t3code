@@ -14,16 +14,68 @@ import {
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
 describe("shouldSubmitComposerOnEnter", () => {
+  const keyboardInput = (
+    overrides: Partial<Parameters<typeof shouldSubmitComposerOnEnter>[0]> = {},
+  ): Parameters<typeof shouldSubmitComposerOnEnter>[0] => ({
+    isMobileViewport: false,
+    sendBehavior: "enter",
+    platform: "MacIntel",
+    metaKey: false,
+    ctrlKey: false,
+    shiftKey: false,
+    altKey: false,
+    ...overrides,
+  });
+
   it("submits plain Enter on desktop", () => {
-    expect(shouldSubmitComposerOnEnter({ isMobileViewport: false, shiftKey: false })).toBe(true);
+    expect(shouldSubmitComposerOnEnter(keyboardInput())).toBe(true);
+    expect(shouldSubmitComposerOnEnter(keyboardInput({ metaKey: true }))).toBe(true);
+    expect(shouldSubmitComposerOnEnter(keyboardInput({ ctrlKey: true }))).toBe(true);
   });
 
   it("inserts a newline for plain Enter on mobile", () => {
-    expect(shouldSubmitComposerOnEnter({ isMobileViewport: true, shiftKey: false })).toBe(false);
+    expect(shouldSubmitComposerOnEnter(keyboardInput({ isMobileViewport: true }))).toBe(false);
   });
 
   it("inserts a newline for Shift+Enter", () => {
-    expect(shouldSubmitComposerOnEnter({ isMobileViewport: false, shiftKey: true })).toBe(false);
+    expect(shouldSubmitComposerOnEnter(keyboardInput({ shiftKey: true }))).toBe(false);
+  });
+
+  it("requires Cmd+Enter on macOS when modifier sending is enabled", () => {
+    expect(shouldSubmitComposerOnEnter(keyboardInput({ sendBehavior: "mod-enter" }))).toBe(false);
+    expect(
+      shouldSubmitComposerOnEnter(keyboardInput({ sendBehavior: "mod-enter", metaKey: true })),
+    ).toBe(true);
+    expect(
+      shouldSubmitComposerOnEnter(keyboardInput({ sendBehavior: "mod-enter", ctrlKey: true })),
+    ).toBe(false);
+  });
+
+  it.each(["Win32", "Linux x86_64"])(
+    "requires Ctrl+Enter on %s when modifier sending is enabled",
+    (platform) => {
+      const platformInput = { sendBehavior: "mod-enter", platform } as const;
+      expect(shouldSubmitComposerOnEnter(keyboardInput(platformInput))).toBe(false);
+      expect(shouldSubmitComposerOnEnter(keyboardInput({ ...platformInput, ctrlKey: true }))).toBe(
+        true,
+      );
+      expect(shouldSubmitComposerOnEnter(keyboardInput({ ...platformInput, metaKey: true }))).toBe(
+        false,
+      );
+    },
+  );
+
+  it("does not submit modified Enter with extra Alt or Shift modifiers", () => {
+    expect(
+      shouldSubmitComposerOnEnter(
+        keyboardInput({ sendBehavior: "mod-enter", metaKey: true, altKey: true }),
+      ),
+    ).toBe(false);
+    expect(
+      shouldSubmitComposerOnEnter(
+        keyboardInput({ sendBehavior: "mod-enter", metaKey: true, shiftKey: true }),
+      ),
+    ).toBe(false);
   });
 });
 

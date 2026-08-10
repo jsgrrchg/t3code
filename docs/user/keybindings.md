@@ -32,6 +32,14 @@ Modifiers: `mod` (`cmd` on macOS, `ctrl` elsewhere), `cmd` / `meta`, `ctrl` / `c
 
 Examples: `mod+j`, `mod+shift+d`, `ctrl+l`, `cmd+k`.
 
+## Composer Send Behavior
+
+The desktop app can use either `Enter` or the platform modifier plus `Enter` to send chat
+messages. Choose the behavior in **Settings** → **General** → **Send messages with**. When
+`Cmd+Enter` on macOS or `Ctrl+Enter` on Windows and Linux is selected, plain `Enter` starts a new
+paragraph and `Shift+Enter` inserts a line break. This preference is local to the desktop app and
+does not change web or mobile clients.
+
 ## Commands
 
 Commands are IDs like `terminal.toggle`, `commandPalette.toggle`, `preview.refresh`, and

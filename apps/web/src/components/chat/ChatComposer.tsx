@@ -42,6 +42,7 @@ import {
   shouldSubmitComposerOnEnter,
 } from "../../composer-logic";
 import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
+import { isElectron } from "../../env";
 import {
   dataTransferHasComposerMention,
   makeComposerMentionDragHandlers,
@@ -1942,7 +1943,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     if (
       key === "Enter" &&
-      shouldSubmitComposerOnEnter({ isMobileViewport, shiftKey: event.shiftKey })
+      shouldSubmitComposerOnEnter({
+        isMobileViewport,
+        sendBehavior: isElectron ? settings.composerSendBehavior : "enter",
+        platform: navigator.platform,
+        metaKey: event.metaKey,
+        ctrlKey: event.ctrlKey,
+        shiftKey: event.shiftKey,
+        altKey: event.altKey,
+      })
     ) {
       submitComposer();
       return true;

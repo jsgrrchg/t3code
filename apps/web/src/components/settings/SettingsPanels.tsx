@@ -17,6 +17,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import {
+  DEFAULT_COMPOSER_SEND_BEHAVIOR,
   DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE,
   DEFAULT_FOLLOW_UP_MESSAGE_BEHAVIOR,
   DEFAULT_UNIFIED_SETTINGS,
@@ -514,6 +515,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace
         ? ["Diff whitespace changes"]
         : []),
+      ...(settings.composerSendBehavior !== DEFAULT_UNIFIED_SETTINGS.composerSendBehavior
+        ? ["Send messages with"]
+        : []),
       ...(settings.enableLegacyTokenStreaming !==
       DEFAULT_UNIFIED_SETTINGS.enableLegacyTokenStreaming
         ? ["Stream token by token"]
@@ -551,6 +555,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.defaultThreadEnvMode,
       settings.newWorktreesStartFromOrigin,
       settings.diffIgnoreWhitespace,
+      settings.composerSendBehavior,
       settings.environmentIdentificationMode,
       settings.fontFamilyCode,
       settings.fontFamilyComposer,
@@ -640,6 +645,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
+      composerSendBehavior: DEFAULT_UNIFIED_SETTINGS.composerSendBehavior,
       environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
       chatContentMaxWidth: DEFAULT_UNIFIED_SETTINGS.chatContentMaxWidth,
@@ -1807,6 +1813,7 @@ export function GeneralSettingsPanel() {
     settings.backgroundActivity,
     DEFAULT_UNIFIED_SETTINGS.backgroundActivity,
   );
+  const modifierSendShortcutLabel = isMacPlatform(navigator.platform) ? "⌘ Enter" : "Ctrl Enter";
 
   return (
     <SettingsPageContainer>
@@ -1955,6 +1962,52 @@ export function GeneralSettingsPanel() {
             />
           }
         />
+
+        {isElectron ? (
+          <SettingsRow
+            {...searchableSetting("composer-send-behavior")}
+            description="Choose whether Enter sends immediately or starts a new paragraph. Shift+Enter always inserts a line break."
+            resetAction={
+              settings.composerSendBehavior !== DEFAULT_COMPOSER_SEND_BEHAVIOR ? (
+                <SettingResetButton
+                  label="composer send behavior"
+                  onClick={() =>
+                    updateSettings({ composerSendBehavior: DEFAULT_COMPOSER_SEND_BEHAVIOR })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <div
+                className="inline-flex rounded-lg bg-muted/55 p-0.5"
+                role="radiogroup"
+                aria-label="Send messages with"
+              >
+                {(["enter", "mod-enter"] as const).map((behavior) => {
+                  const selected = settings.composerSendBehavior === behavior;
+                  const label = behavior === "enter" ? "Enter" : modifierSendShortcutLabel;
+                  return (
+                    <button
+                      key={behavior}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      className={cn(
+                        "min-w-16 rounded-md px-3 py-1.5 text-xs transition-colors",
+                        selected
+                          ? "bg-background text-foreground shadow-xs"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                      onClick={() => updateSettings({ composerSendBehavior: behavior })}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            }
+          />
+        ) : null}
 
         {isElectron ? (
           <SettingsRow

@@ -118,6 +118,10 @@ export const FollowUpMessageBehavior = Schema.Literals(["queue", "steer"]);
 export type FollowUpMessageBehavior = typeof FollowUpMessageBehavior.Type;
 export const DEFAULT_FOLLOW_UP_MESSAGE_BEHAVIOR: FollowUpMessageBehavior = "steer";
 
+export const ComposerSendBehavior = Schema.Literals(["enter", "mod-enter"]);
+export type ComposerSendBehavior = typeof ComposerSendBehavior.Type;
+export const DEFAULT_COMPOSER_SEND_BEHAVIOR: ComposerSendBehavior = "enter";
+
 /**
  * A user-chosen font family (a single name or a comma-separated list). Empty
  * means "use the app default"; clients compose their own fallback stacks.
@@ -160,6 +164,9 @@ export const ClientSettingsSchema = Schema.Struct({
   // Grayscale `-webkit-font-smoothing: antialiased` (thinner strokes);
   // disabling restores the platform's heavier default. No effect off macOS.
   fontSmoothing: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  composerSendBehavior: ComposerSendBehavior.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_COMPOSER_SEND_BEHAVIOR)),
+  ),
   followUpMessageBehavior: FollowUpMessageBehavior.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_FOLLOW_UP_MESSAGE_BEHAVIOR)),
   ),
@@ -790,6 +797,7 @@ export const ClientSettingsPatch = Schema.Struct({
   fontFamilySans: Schema.optionalKey(FontFamilyPreference),
   fontFamilyTerminal: Schema.optionalKey(FontFamilyPreference),
   fontSmoothing: Schema.optionalKey(Schema.Boolean),
+  composerSendBehavior: Schema.optionalKey(ComposerSendBehavior),
   followUpMessageBehavior: Schema.optionalKey(FollowUpMessageBehavior),
   favorites: Schema.optionalKey(
     Schema.Array(

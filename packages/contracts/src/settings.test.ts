@@ -99,6 +99,20 @@ describe("ClientSettings follow-up behavior", () => {
   });
 });
 
+describe("ClientSettings composer send behavior", () => {
+  it("preserves Enter-to-send by default and accepts modifier sending", () => {
+    expect(decodeClientSettings({}).composerSendBehavior).toBe("enter");
+    expect(
+      decodeClientSettingsPatch({ composerSendBehavior: "mod-enter" }).composerSendBehavior,
+    ).toBe("mod-enter");
+  });
+
+  it("rejects unsupported composer send behavior", () => {
+    expect(() => decodeClientSettings({ composerSendBehavior: "shift-enter" })).toThrow();
+    expect(() => decodeClientSettingsPatch({ composerSendBehavior: "shift-enter" })).toThrow();
+  });
+});
+
 describe("ClientSettings sidebar", () => {
   it("defaults to the current sidebar with a three-day auto-settle threshold", () => {
     const settings = decodeClientSettings({});

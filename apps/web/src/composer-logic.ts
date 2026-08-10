@@ -1,6 +1,8 @@
 import { splitPromptIntoComposerSegments } from "./composer-editor-mentions";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 import type { ProviderThreadAction } from "@t3tools/contracts";
+import type { ComposerSendBehavior } from "@t3tools/contracts/settings";
+import { isMacPlatform } from "./lib/utils";
 
 export type ComposerTriggerKind = "path" | "slash-command" | "skill";
 export type ComposerSlashCommand =
@@ -25,9 +27,20 @@ export interface ComposerTrigger {
 
 export function shouldSubmitComposerOnEnter(input: {
   isMobileViewport: boolean;
+  sendBehavior: ComposerSendBehavior;
+  platform: string;
+  metaKey: boolean;
+  ctrlKey: boolean;
   shiftKey: boolean;
+  altKey: boolean;
 }): boolean {
-  return !input.isMobileViewport && !input.shiftKey;
+  if (input.isMobileViewport || input.shiftKey) return false;
+  if (input.sendBehavior === "enter") return true;
+  if (input.altKey) return false;
+
+  return isMacPlatform(input.platform)
+    ? input.metaKey && !input.ctrlKey
+    : input.ctrlKey && !input.metaKey;
 }
 
 const isInlineTokenSegment = (

@@ -20,6 +20,7 @@ const clientSettings: ClientSettings = {
   confirmThreadArchive: true,
   confirmThreadDelete: false,
   chatContentMaxWidth: DEFAULT_CHAT_CONTENT_MAX_WIDTH,
+  composerSendBehavior: "mod-enter",
   dismissedProviderUpdateNotificationKeys: [],
   diffIgnoreWhitespace: true,
   environmentIdentificationMode: "artwork",

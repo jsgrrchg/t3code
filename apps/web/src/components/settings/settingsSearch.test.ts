@@ -96,4 +96,11 @@ describe("searchSettings", () => {
       to: "/settings/general",
     });
   });
+
+  it("indexes the desktop composer send behavior setting", () => {
+    expect(searchSettings("send messages with")[0]).toMatchObject({
+      id: "composer-send-behavior",
+      to: "/settings/general",
+    });
+  });
 });
