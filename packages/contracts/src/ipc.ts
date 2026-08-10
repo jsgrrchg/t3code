@@ -1049,6 +1049,8 @@ export interface DesktopBridge {
     items: readonly ContextMenuItem<T>[],
     position?: { x: number; y: number },
   ) => Promise<T | null>;
+  /** Optional for compatibility with desktop shells built before native clipboard support. */
+  copyText?: (text: string) => Promise<void>;
   openExternal: (url: string) => Promise<boolean>;
   revealPath: (path: string) => Promise<boolean>;
   onMenuAction: (listener: (action: string) => void) => () => void;
@@ -1162,6 +1164,8 @@ export interface LocalApi {
   };
   shell: {
     openExternal: (url: string) => Promise<void>;
+    /** Desktop-only clipboard capability. Absent in browser clients. */
+    copyText?: (text: string) => Promise<void>;
     /** Desktop-only local shell capability. Absent in browser clients. */
     revealPath?: (path: string) => Promise<void>;
   };

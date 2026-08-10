@@ -251,6 +251,16 @@ export const showContextMenu = DesktopIpc.makeIpcMethod({
   }),
 });
 
+export const copyText = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.COPY_TEXT_CHANNEL,
+  payload: Schema.String,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.window.copyText")(function* (text) {
+    const shell = yield* ElectronShell.ElectronShell;
+    yield* shell.copyText(text);
+  }),
+});
+
 export const openExternal = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.OPEN_EXTERNAL_CHANNEL,
   payload: Schema.String,

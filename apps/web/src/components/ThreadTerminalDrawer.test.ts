@@ -1,12 +1,23 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
+  copyTerminalSelectionText,
   resolveTerminalSelectionActionPosition,
   shouldHandleTerminalExit,
   shouldHandleTerminalSelectionMouseUp,
   terminalSelectionActionDelayForClickCount,
   terminalSelectionLineRange,
 } from "./ThreadTerminalDrawer";
+
+describe("copyTerminalSelectionText", () => {
+  it("uses the desktop clipboard bridge when the selection came from a native menu", async () => {
+    const copyText = vi.fn().mockResolvedValue(undefined);
+
+    await copyTerminalSelectionText("terminal output", copyText);
+
+    expect(copyText).toHaveBeenCalledWith("terminal output");
+  });
+});
 
 describe("resolveTerminalSelectionActionPosition", () => {
   it("prefers the selection rect over the last pointer position", () => {

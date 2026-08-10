@@ -83,6 +83,7 @@ describe("LocalApi", () => {
 
     await expect(createLocalApi().contextMenu.show(items, { x: 4, y: 5 })).resolves.toBe("rename");
     expect(showContextMenuFallbackMock).toHaveBeenCalledWith(items, { x: 4, y: 5 });
+    expect(createLocalApi().shell.copyText).toBeUndefined();
     expect(createLocalApi().shell.revealPath).toBeUndefined();
   });
 
@@ -109,12 +110,14 @@ describe("LocalApi", () => {
     const pickFolder = vi.fn().mockResolvedValue("/tmp/project");
     const getClientSettings = vi.fn().mockResolvedValue(DEFAULT_CLIENT_SETTINGS);
     const setClientSettings = vi.fn().mockResolvedValue(undefined);
+    const copyText = vi.fn().mockResolvedValue(undefined);
     const revealPath = vi.fn().mockResolvedValue(true);
     testWindow().desktopBridge = {
       showContextMenu,
       pickFolder,
       getClientSettings,
       setClientSettings,
+      copyText,
       revealPath,
     } as unknown as DesktopBridge;
 
@@ -128,12 +131,14 @@ describe("LocalApi", () => {
     await expect(api.dialogs.pickFolder({ initialPath: "/tmp" })).resolves.toBe("/tmp/project");
     await expect(api.persistence.getClientSettings()).resolves.toEqual(DEFAULT_CLIENT_SETTINGS);
     await api.persistence.setClientSettings(DEFAULT_CLIENT_SETTINGS);
+    await expect(api.shell.copyText?.("terminal output")).resolves.toBeUndefined();
     await expect(api.shell.revealPath?.("/tmp/project")).resolves.toBeUndefined();
 
     expect(showContextMenu).toHaveBeenCalledWith(items, undefined);
     expect(pickFolder).toHaveBeenCalledWith({ initialPath: "/tmp" });
     expect(getClientSettings).toHaveBeenCalledTimes(1);
     expect(setClientSettings).toHaveBeenCalledWith(DEFAULT_CLIENT_SETTINGS);
+    expect(copyText).toHaveBeenCalledWith("terminal output");
     expect(revealPath).toHaveBeenCalledWith("/tmp/project");
   });
 

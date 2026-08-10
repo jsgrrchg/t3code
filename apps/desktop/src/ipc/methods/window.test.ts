@@ -9,7 +9,12 @@ import * as DesktopBackendManager from "../../backend/DesktopBackendManager.ts";
 import * as DesktopBackendPool from "../../backend/DesktopBackendPool.ts";
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as ElectronShell from "../../electron/ElectronShell.ts";
-import { getLocalEnvironmentBootstraps, getWindowFullscreenState, revealPath } from "./window.ts";
+import {
+  copyText,
+  getLocalEnvironmentBootstraps,
+  getWindowFullscreenState,
+  revealPath,
+} from "./window.ts";
 
 const readyWslConfig: DesktopBackendManager.DesktopBackendStartConfig = {
   executablePath: "wsl.exe",
@@ -162,6 +167,26 @@ describe("revealPath", () => {
             Effect.sync(() => {
               revealedPaths.push(path);
               return true;
+            }),
+        }),
+      ),
+    );
+  });
+});
+
+describe("copyText", () => {
+  it.effect("routes clipboard writes through the Electron shell", () => {
+    const copiedText: string[] = [];
+
+    return Effect.gen(function* () {
+      yield* copyText.handler("terminal output");
+      assert.deepEqual(copiedText, ["terminal output"]);
+    }).pipe(
+      Effect.provide(
+        Layer.mock(ElectronShell.ElectronShell)({
+          copyText: (text) =>
+            Effect.sync(() => {
+              copiedText.push(text);
             }),
         }),
       ),

@@ -2,6 +2,7 @@ export const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
 export const PICK_THEME_FILES_CHANNEL = "desktop:pick-theme-files";
 export const SET_THEME_CHANNEL = "desktop:set-theme";
 export const CONTEXT_MENU_CHANNEL = "desktop:context-menu";
+export const COPY_TEXT_CHANNEL = "desktop:copy-text";
 export const OPEN_EXTERNAL_CHANNEL = "desktop:open-external";
 export const REVEAL_PATH_CHANNEL = "desktop:reveal-path";
 export const MENU_ACTION_CHANNEL = "desktop:menu-action";

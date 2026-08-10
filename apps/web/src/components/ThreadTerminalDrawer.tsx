@@ -236,6 +236,17 @@ export function terminalSelectionActionDelayForClickCount(clickCount: number): n
   return clickCount >= 2 ? MULTI_CLICK_SELECTION_ACTION_DELAY_MS : 0;
 }
 
+export async function copyTerminalSelectionText(
+  text: string,
+  copyText?: (text: string) => Promise<void>,
+): Promise<void> {
+  if (copyText) {
+    await copyText(text);
+    return;
+  }
+  await writeTextToClipboard(text, "terminal selection");
+}
+
 export function shouldHandleTerminalSelectionMouseUp(
   selectionGestureActive: boolean,
   button: number,
@@ -555,7 +566,7 @@ export function TerminalViewport({
             return;
           case "copy":
             try {
-              await writeTextToClipboard(nextAction.clipboardText, "terminal selection");
+              await copyTerminalSelectionText(nextAction.clipboardText, localApi.shell.copyText);
             } catch (error) {
               if (requestId !== selectionActionRequestIdRef.current) {
                 return;

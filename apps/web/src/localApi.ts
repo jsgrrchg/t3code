@@ -9,6 +9,7 @@ let cachedApi: LocalApi | undefined;
 
 function createBrowserLocalApi(): LocalApi {
   const desktopBridge = window.desktopBridge;
+  const desktopCopyText = desktopBridge?.copyText;
   return {
     dialogs: {
       pickFolder: async (options) => {
@@ -20,6 +21,11 @@ function createBrowserLocalApi(): LocalApi {
       },
     },
     shell: {
+      ...(desktopCopyText
+        ? {
+            copyText: (text: string) => desktopCopyText(text),
+          }
+        : {}),
       openExternal: async (url) => {
         if (window.desktopBridge) {
           const opened = await window.desktopBridge.openExternal(url);
