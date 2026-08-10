@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  ProjectDeleteEntryInput,
   ProjectListEntriesInput,
   ProjectReadFileError,
   ProjectSearchContentsError,
@@ -12,10 +13,19 @@ import {
 } from "./project.ts";
 
 const decodeListEntriesInput = Schema.decodeUnknownSync(ProjectListEntriesInput);
+const decodeDeleteEntryInput = Schema.decodeUnknownSync(ProjectDeleteEntryInput);
 const decodeSearchEntriesInput = Schema.decodeUnknownSync(ProjectSearchEntriesInput);
 const decodeSearchContentsInput = Schema.decodeUnknownSync(ProjectSearchContentsInput);
 
 describe("project search inputs", () => {
+  it("requires the expected entry kind for workspace deletion", () => {
+    expect(
+      decodeDeleteEntryInput({ cwd: "/workspace", relativePath: "src", kind: "directory" }),
+    ).toEqual({ cwd: "/workspace", relativePath: "src", kind: "directory" });
+    expect(() =>
+      decodeDeleteEntryInput({ cwd: "/workspace", relativePath: "src", kind: "other" }),
+    ).toThrow();
+  });
   it("keeps ignored workspace entries opt-in", () => {
     expect(decodeListEntriesInput({ cwd: "/workspace" })).toEqual({ cwd: "/workspace" });
     expect(decodeListEntriesInput({ cwd: "/workspace", includeIgnored: true }).includeIgnored).toBe(

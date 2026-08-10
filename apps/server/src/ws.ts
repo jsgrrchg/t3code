@@ -35,6 +35,7 @@ import {
   type ProjectEntriesFailure,
   type ProjectFileFailure,
   type ProjectFileOperation,
+  ProjectDeleteEntryError,
   ProjectListEntriesError,
   ProjectReadFileError,
   ProjectSearchContentsError,
@@ -249,6 +250,10 @@ function projectFileFailureContext(
       };
     case "WorkspacePathNotFileError":
       return { failure: "path_not_file", resolvedPath: error.resolvedPath };
+    case "WorkspacePathNotFoundError":
+      return { failure: "path_not_found", resolvedPath: error.resolvedPath };
+    case "WorkspacePathKindMismatchError":
+      return { failure: "path_kind_mismatch", resolvedPath: error.resolvedPath };
     case "WorkspaceBinaryFileError":
       return { failure: "binary_file", resolvedPath: error.resolvedPath };
     default:
@@ -1704,6 +1709,22 @@ const makeWsRpcLayer = (
                   new ProjectListEntriesError({
                     ...input,
                     ...projectEntriesFailureContext(cause),
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.projectsDeleteEntry]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectsDeleteEntry,
+            workspaceFileSystem.deleteEntry(input).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProjectDeleteEntryError({
+                    cwd: input.cwd,
+                    relativePath: input.relativePath,
+                    ...projectFileFailureContext(cause),
                     cause,
                   }),
               ),

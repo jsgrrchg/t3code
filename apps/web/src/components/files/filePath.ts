@@ -4,6 +4,10 @@ export interface FileBreadcrumb {
   kind: "project" | "directory" | "file";
 }
 
+export function pathFallsWithinEntry(path: string, entryPath: string): boolean {
+  return path === entryPath || path.startsWith(`${entryPath}/`);
+}
+
 export function fileBreadcrumbs(projectName: string, relativePath: string): FileBreadcrumb[] {
   const parts = relativePath.split("/").filter(Boolean);
   return [

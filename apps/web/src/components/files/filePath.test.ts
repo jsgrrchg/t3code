@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { fileBreadcrumbs } from "./filePath";
+import { fileBreadcrumbs, pathFallsWithinEntry } from "./filePath";
 
 describe("fileBreadcrumbs", () => {
   it("builds project, directory, and file crumbs", () => {
@@ -19,5 +19,13 @@ describe("fileBreadcrumbs", () => {
       "src",
       "index.ts",
     ]);
+  });
+});
+
+describe("pathFallsWithinEntry", () => {
+  it("matches an entry and its descendants without matching path prefixes", () => {
+    expect(pathFallsWithinEntry("src/index.ts", "src")).toBe(true);
+    expect(pathFallsWithinEntry("src", "src")).toBe(true);
+    expect(pathFallsWithinEntry("src-generated/index.ts", "src")).toBe(false);
   });
 });

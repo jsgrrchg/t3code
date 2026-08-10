@@ -265,4 +265,103 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
       }),
     );
   });
+
+  describe("deleteEntry", () => {
+    it.effect("deletes files and refreshes workspace entries", () =>
+      Effect.gen(function* () {
+        const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "src/delete-me.ts", "export {};\n");
+
+        expect((yield* workspaceEntries.list({ cwd })).entries).toEqual(
+          expect.arrayContaining([expect.objectContaining({ path: "src/delete-me.ts" })]),
+        );
+        const result = yield* workspaceFileSystem.deleteEntry({
+          cwd,
+          relativePath: "src/delete-me.ts",
+          kind: "file",
+        });
+
+        expect(result).toEqual({ relativePath: "src/delete-me.ts", kind: "file" });
+        expect((yield* workspaceEntries.list({ cwd })).entries).not.toEqual(
+          expect.arrayContaining([expect.objectContaining({ path: "src/delete-me.ts" })]),
+        );
+      }),
+    );
+
+    it.effect("recursively deletes non-empty directories", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "generated/nested/output.txt", "generated\n");
+
+        const result = yield* workspaceFileSystem.deleteEntry({
+          cwd,
+          relativePath: "generated",
+          kind: "directory",
+        });
+        const deleted = yield* fileSystem
+          .stat(path.join(cwd, "generated"))
+          .pipe(Effect.orElseSucceed(() => null));
+
+        expect(result).toEqual({ relativePath: "generated", kind: "directory" });
+        expect(deleted).toBeNull();
+      }),
+    );
+
+    it.effect("rejects deletion outside the workspace root", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+
+        const error = yield* workspaceFileSystem
+          .deleteEntry({ cwd, relativePath: "../outside", kind: "directory" })
+          .pipe(Effect.flip);
+
+        expect(error).toBeInstanceOf(WorkspacePaths.WorkspacePathOutsideRootError);
+      }),
+    );
+
+    it.effect("rejects stale entry kinds", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "changed-kind", "file\n");
+
+        const error = yield* workspaceFileSystem
+          .deleteEntry({ cwd, relativePath: "changed-kind", kind: "directory" })
+          .pipe(Effect.flip);
+
+        expect(error).toBeInstanceOf(WorkspaceFileSystem.WorkspacePathKindMismatchError);
+      }),
+    );
+
+    it.effect("deletes symlinks without following targets outside the workspace", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        const outsideDir = yield* makeTempDir;
+        yield* writeTextFile(outsideDir, "keep.txt", "keep\n");
+        yield* fileSystem.symlink(path.join(outsideDir, "keep.txt"), path.join(cwd, "linked.txt"));
+
+        yield* workspaceFileSystem.deleteEntry({
+          cwd,
+          relativePath: "linked.txt",
+          kind: "file",
+        });
+
+        expect(yield* fileSystem.readFileString(path.join(outsideDir, "keep.txt"))).toBe("keep\n");
+        expect(
+          yield* fileSystem
+            .stat(path.join(cwd, "linked.txt"))
+            .pipe(Effect.orElseSucceed(() => null)),
+        ).toBeNull();
+      }),
+    );
+  });
 });

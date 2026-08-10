@@ -18,6 +18,27 @@ describe("FileSaveCoordinator", () => {
     vi.useRealTimers();
   });
 
+  it("flushes pending contents before deletion and discard prevents cleanup from recreating them", async () => {
+    const persisted: string[] = [];
+    const coordinator = new FileSaveCoordinator({
+      debounceMs: 10_000,
+      persist: async (contents: string) => {
+        persisted.push(contents);
+        return AsyncResult.success(undefined);
+      },
+      onPendingChange: vi.fn(),
+      onConfirmed: vi.fn(),
+    });
+
+    coordinator.change("latest contents");
+    await coordinator.flush();
+    coordinator.discard();
+    coordinator.dispose();
+    await Promise.resolve();
+
+    expect(persisted).toEqual(["latest contents"]);
+  });
+
   it("debounces edits and persists only the latest contents", async () => {
     vi.useFakeTimers();
     const persist = vi

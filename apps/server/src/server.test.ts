@@ -4995,6 +4995,36 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("routes websocket rpc projects.deleteEntry", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-project-delete-" });
+      const nestedDir = path.join(workspaceDir, "generated", "nested");
+      yield* fs.makeDirectory(nestedDir, { recursive: true });
+      yield* fs.writeFileString(path.join(nestedDir, "output.txt"), "generated");
+
+      yield* buildAppUnderTest();
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.projectsDeleteEntry]({
+            cwd: workspaceDir,
+            relativePath: "generated",
+            kind: "directory",
+          }),
+        ),
+      );
+      const deleted = yield* fs
+        .stat(path.join(workspaceDir, "generated"))
+        .pipe(Effect.orElseSucceed(() => null));
+
+      assert.deepEqual(response, { relativePath: "generated", kind: "directory" });
+      assert.isNull(deleted);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("creates a missing workspace root during websocket project.create dispatch", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

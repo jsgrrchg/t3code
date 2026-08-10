@@ -13,6 +13,10 @@ composer. They stay out of the default Files tree, but appear when their path ma
 Drag a file from the Files tree, or drag the label of an open file tab, onto the composer to add it
 as file context.
 
+Right-click a file or folder and choose **Delete** to remove it from the project. Deleting a folder
+also deletes everything inside it. T3 Code asks for confirmation because deleted workspace entries
+are not moved to the system trash.
+
 ## Comment on a file
 
 In source view, select one or more lines to add a comment. In a rendered Markdown preview, hover a

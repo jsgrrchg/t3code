@@ -1,5 +1,6 @@
 import { type EnvironmentId, type ProjectReadFileResult, WS_METHODS } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
+import * as Effect from "effect/Effect";
 import { Atom } from "effect/unstable/reactivity";
 
 import {
@@ -54,26 +55,29 @@ export function createProjectEnvironmentAtoms<R, E>(
     key: ({ environmentId, input }: { environmentId: string; input: { projectId: string } }) =>
       JSON.stringify([environmentId, input.projectId]),
   };
+  const searchEntries = createEnvironmentRpcQueryAtomFamily(runtime, {
+    label: "environment-data:projects:search-entries",
+    tag: WS_METHODS.projectsSearchEntries,
+    // File search surfaces are transient. Revalidate when they mount so a
+    // workspace refresh from the previous turn is visible immediately.
+    staleTimeMs: 0,
+  });
+  const listEntries = createEnvironmentRpcQueryAtomFamily(runtime, {
+    label: "environment-data:projects:list-entries",
+    tag: WS_METHODS.projectsListEntries,
+    staleTimeMs: 30_000,
+    idleTtlMs: 5 * 60_000,
+  });
+  const readFile = createEnvironmentRpcQueryAtomFamily(runtime, {
+    label: "environment-data:projects:read-file",
+    tag: WS_METHODS.projectsReadFile,
+    staleTimeMs: 30_000,
+    idleTtlMs: 5 * 60_000,
+  });
   return {
-    searchEntries: createEnvironmentRpcQueryAtomFamily(runtime, {
-      label: "environment-data:projects:search-entries",
-      tag: WS_METHODS.projectsSearchEntries,
-      // File search surfaces are transient. Revalidate when they mount so a
-      // workspace refresh from the previous turn is visible immediately.
-      staleTimeMs: 0,
-    }),
-    listEntries: createEnvironmentRpcQueryAtomFamily(runtime, {
-      label: "environment-data:projects:list-entries",
-      tag: WS_METHODS.projectsListEntries,
-      staleTimeMs: 30_000,
-      idleTtlMs: 5 * 60_000,
-    }),
-    readFile: createEnvironmentRpcQueryAtomFamily(runtime, {
-      label: "environment-data:projects:read-file",
-      tag: WS_METHODS.projectsReadFile,
-      staleTimeMs: 30_000,
-      idleTtlMs: 5 * 60_000,
-    }),
+    searchEntries,
+    listEntries,
+    readFile,
     optimisticFile: (target: OptimisticProjectFileTarget) =>
       optimisticFileFamily(optimisticProjectFileKey(target)),
     create: createEnvironmentCommand(runtime, {
@@ -94,14 +98,35 @@ export function createProjectEnvironmentAtoms<R, E>(
       scheduler: projectScheduler,
       concurrency: projectConcurrency,
     }),
+    deleteEntry: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projects:delete-entry",
+      tag: WS_METHODS.projectsDeleteEntry,
+      scheduler: fileScheduler,
+      concurrency: {
+        mode: "serial",
+        key: ({ environmentId, input }) => JSON.stringify([environmentId, input.cwd]),
+      },
+      onSuccess: ({ environmentId, input }, registry) =>
+        Effect.sync(() => {
+          registry.refresh(listEntries({ environmentId, input: { cwd: input.cwd } }));
+          registry.refresh(
+            listEntries({ environmentId, input: { cwd: input.cwd, includeIgnored: true } }),
+          );
+          registry.refresh(
+            readFile({
+              environmentId,
+              input: { cwd: input.cwd, relativePath: input.relativePath },
+            }),
+          );
+        }),
+    }),
     writeFile: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:projects:write-file",
       tag: WS_METHODS.projectsWriteFile,
       scheduler: fileScheduler,
       concurrency: {
         mode: "serial",
-        key: ({ environmentId, input }) =>
-          JSON.stringify([environmentId, input.cwd, input.relativePath]),
+        key: ({ environmentId, input }) => JSON.stringify([environmentId, input.cwd]),
       },
     }),
   };
