@@ -46,6 +46,10 @@ describe("MermaidBlock", () => {
       configurable: true,
       value: { writeText: vi.fn(async () => undefined) },
     });
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      value: vi.fn(),
+    });
   });
 
   afterEach(async () => {
@@ -141,6 +145,84 @@ describe("MermaidBlock", () => {
     await act(async () => copy?.click());
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(code);
     expect(renderer).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the rendered diagram in a zoomable overview", async () => {
+    const renderer = vi.fn(async () => ({ _tag: "Success", svg: "<svg />" }) as const);
+    await render({ code: "flowchart LR\nA-->B", theme: "light", renderer });
+    await act(async () => undefined);
+
+    vi.spyOn(Element.prototype, "clientWidth", "get").mockImplementation(function (this: Element) {
+      return (this as HTMLElement).dataset.testid === "mermaid-overview-viewport" ? 900 : 0;
+    });
+    vi.spyOn(Element.prototype, "clientHeight", "get").mockImplementation(function (this: Element) {
+      return (this as HTMLElement).dataset.testid === "mermaid-overview-viewport" ? 500 : 0;
+    });
+
+    const expand = container.querySelector<HTMLButtonElement>(
+      "button[aria-label='Expand Mermaid diagram']",
+    );
+    expect(expand?.disabled).toBe(false);
+    await act(async () => expand?.click());
+
+    const dialog = document.querySelector("[role='dialog']");
+    const image = document.querySelector<HTMLImageElement>("img[alt='Expanded Mermaid diagram']");
+    expect(dialog).not.toBeNull();
+    expect(image?.getAttribute("src")).toBe("blob:mermaid-1");
+
+    Object.defineProperties(image as HTMLImageElement, {
+      naturalWidth: { configurable: true, value: 1200 },
+      naturalHeight: { configurable: true, value: 600 },
+    });
+    await act(async () => image?.dispatchEvent(new Event("load", { bubbles: true })));
+
+    const viewport = document.querySelector<HTMLElement>(
+      "[data-testid='mermaid-overview-viewport']",
+    );
+    vi.spyOn(viewport as HTMLElement, "getBoundingClientRect").mockReturnValue({
+      bottom: 500,
+      height: 500,
+      left: 0,
+      right: 900,
+      top: 0,
+      width: 900,
+      x: 0,
+      y: 0,
+      toJSON: () => undefined,
+    });
+
+    const scaleBefore = Number(viewport?.dataset.scale);
+    expect(scaleBefore).toBeCloseTo(0.71, 2);
+    const scroll = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      deltaY: 100,
+    });
+    viewport?.dispatchEvent(scroll);
+    expect(scroll.defaultPrevented).toBe(false);
+    expect(Number(viewport?.dataset.scale)).toBe(scaleBefore);
+
+    const pinch = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 450,
+      clientY: 250,
+      ctrlKey: true,
+      deltaY: -100,
+    });
+    await act(async () => {
+      viewport?.dispatchEvent(pinch);
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+
+    expect(pinch.defaultPrevented).toBe(true);
+    expect(Number(viewport?.dataset.scale)).toBeGreaterThan(scaleBefore);
+
+    const close = document.querySelector<HTMLButtonElement>(
+      "button[aria-label='Close Mermaid overview']",
+    );
+    await act(async () => close?.click());
+    expect(document.querySelector("[role='dialog']")).toBeNull();
   });
 
   it("preserves source line annotations for rendered Markdown reviews", async () => {

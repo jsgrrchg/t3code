@@ -1,4 +1,11 @@
-import { CheckIcon, Code2Icon, CopyIcon, NetworkIcon, RefreshCwIcon } from "lucide-react";
+import {
+  CheckIcon,
+  Code2Icon,
+  CopyIcon,
+  Maximize2Icon,
+  NetworkIcon,
+  RefreshCwIcon,
+} from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
@@ -7,6 +14,7 @@ import {
   type MermaidRenderResult,
   type MermaidRenderTheme,
 } from "../lib/mermaidRendering";
+import { MermaidOverviewDialog } from "./MermaidOverviewDialog";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
@@ -43,6 +51,7 @@ export function MermaidBlock({
 }: MermaidBlockProps) {
   const [mode, setMode] = useState<"diagram" | "code">("diagram");
   const [retry, setRetry] = useState(0);
+  const [overviewOpen, setOverviewOpen] = useState(false);
   const key = useMemo(() => renderKey(code, theme, retry), [code, retry, theme]);
   const [state, setState] = useState<MermaidBlockState>({ key, status: "loading" });
   const [objectUrl, setObjectUrl] = useState<{ readonly key: string; readonly url: string } | null>(
@@ -84,6 +93,12 @@ export function MermaidBlock({
       URL.revokeObjectURL(url);
     };
   }, [key, successfulSvg]);
+
+  useEffect(() => {
+    if (!visibleObjectUrl) {
+      setOverviewOpen(false);
+    }
+  }, [visibleObjectUrl]);
 
   const toggleMode = () => {
     if (showingSource) {
@@ -141,6 +156,24 @@ export function MermaidBlock({
                   variant="ghost"
                   size="icon-xs"
                   className="chat-markdown-chrome-action"
+                  disabled={!visibleObjectUrl || showingSource}
+                  onClick={() => setOverviewOpen(true)}
+                  aria-label="Expand Mermaid diagram"
+                />
+              }
+            >
+              <Maximize2Icon className="size-3" />
+            </TooltipTrigger>
+            <TooltipPopup side="top">Expand Mermaid diagram</TooltipPopup>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="chat-markdown-chrome-action"
                   aria-pressed={showingSource}
                   onClick={toggleMode}
                   aria-label={modeLabel}
@@ -190,6 +223,11 @@ export function MermaidBlock({
           {visibleState.message}
         </div>
       ) : null}
+      <MermaidOverviewDialog
+        open={overviewOpen}
+        src={visibleObjectUrl}
+        onOpenChange={setOverviewOpen}
+      />
     </div>
   );
 }
