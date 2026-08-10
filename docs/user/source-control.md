@@ -54,9 +54,9 @@ Run a quick **Rescan** after setting up a new machine or changing credentials.
 ### Browse Commit History
 
 Open **History** from the empty Right Panel or its **+** menu to browse the repository's commit
-graph, subjects, authors, and commit IDs. History is read-only and uses the branches, remote refs,
-and tags already known by the Git repository on the server. Opening it does not fetch from a remote
-or change the working tree.
+graph, subjects, authors, author dates, and commit IDs. History is read-only and uses the branches,
+remote refs, and tags already known by the Git repository on the server. Opening it does not fetch
+from a remote or change the working tree.
 
 History behaves like the other Right Panel tabs: select its tab to return to it, use the tab's close
 control to remove it, and open **History** again from the empty state or **+** menu when needed. This

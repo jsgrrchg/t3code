@@ -22,6 +22,7 @@ import { Button } from "~/components/ui/button";
 import { gitEnvironment } from "~/state/git";
 import { useEnvironmentQuery } from "~/state/query";
 import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
+import { parseTimestampDate } from "~/timestampFormat";
 
 import { GitHistoryGraphCell, getGitHistoryGraphWidth } from "./GitHistoryGraphCell";
 import { layoutGitHistoryGraph, type GitHistoryGraphRow } from "./gitHistoryGraphLayout";
@@ -30,9 +31,20 @@ const HISTORY_ROW_HEIGHT = 34;
 const HISTORY_OVERSCAN_PX = HISTORY_ROW_HEIGHT * 4;
 const SUBJECT_MIN_WIDTH = 80;
 const AUTHOR_MIN_WIDTH = 64;
+const DATE_COLUMN_WIDTH = 96;
 const SHA_COLUMN_WIDTH = 76;
 const ROW_END_PADDING = 8;
 const SKELETON_ROW_IDS = ["one", "two", "three", "four", "five", "six", "seven"] as const;
+const HISTORY_DATE_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+});
+
+function formatHistoryDate(authoredAt: string): string {
+  const date = parseTimestampDate(authoredAt);
+  return date === null ? "—" : HISTORY_DATE_FORMATTER.format(date);
+}
 
 interface HistoryPanelLocalState {
   readonly targetKey: string;
@@ -91,6 +103,7 @@ export function GitHistoryCommitRow({
 }: GitHistoryCommitRowProps) {
   const subject = commit.subject || "(no subject)";
   const author = commit.authorName || "Unknown author";
+  const authoredDate = formatHistoryDate(commit.authoredAt);
   const headLabel = graphRow.isHead ? "HEAD, " : "";
   const accessibleName = `${headLabel}${subject}, ${author} <${commit.authorEmail}>, ${commit.authoredAt}, commit ${commit.sha}`;
   const tooltip = [
@@ -127,6 +140,12 @@ export function GitHistoryCommitRow({
         {author}
       </span>
       <span
+        className="min-w-0 truncate pe-2 text-[11px] tabular-nums text-muted-foreground"
+        data-history-date="true"
+      >
+        {authoredDate}
+      </span>
+      <span
         className="w-[76px] shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground"
         data-history-sha="true"
       >
@@ -144,6 +163,7 @@ function StaticHistorySkeleton() {
           <span className="size-2 rounded-full bg-muted-foreground/20" />
           <span className="h-2.5 flex-1 rounded-sm bg-muted-foreground/15" />
           <span className="h-2.5 w-16 rounded-sm bg-muted-foreground/10" />
+          <span className="h-2.5 w-20 rounded-sm bg-muted-foreground/10" />
           <span className="h-2.5 w-14 rounded-sm bg-muted-foreground/10" />
         </div>
       ))}
@@ -192,10 +212,15 @@ export function GitHistoryPanelView({
     [commits, layout.rows],
   );
   const graphWidth = getGitHistoryGraphWidth(layout.maxLaneCount);
-  const gridTemplateColumns = `${graphWidth}px minmax(${SUBJECT_MIN_WIDTH}px, 1fr) minmax(${AUTHOR_MIN_WIDTH}px, 0.34fr) ${SHA_COLUMN_WIDTH}px`;
+  const gridTemplateColumns = `${graphWidth}px minmax(${SUBJECT_MIN_WIDTH}px, 1fr) minmax(${AUTHOR_MIN_WIDTH}px, 0.34fr) ${DATE_COLUMN_WIDTH}px ${SHA_COLUMN_WIDTH}px`;
   const contentStyle = {
     minWidth:
-      graphWidth + SUBJECT_MIN_WIDTH + AUTHOR_MIN_WIDTH + SHA_COLUMN_WIDTH + ROW_END_PADDING,
+      graphWidth +
+      SUBJECT_MIN_WIDTH +
+      AUTHOR_MIN_WIDTH +
+      DATE_COLUMN_WIDTH +
+      SHA_COLUMN_WIDTH +
+      ROW_END_PADDING,
   } satisfies CSSProperties;
   const controlsPending = isInitialLoading || isRefreshing || isLoadingMore;
 
@@ -224,6 +249,7 @@ export function GitHistoryPanelView({
             <span />
             <span>Commit</span>
             <span>Author</span>
+            <span>Date</span>
             <span>SHA</span>
           </div>
           {refreshError !== null ? (

@@ -34,6 +34,7 @@ import {
 import { layoutGitHistoryGraph } from "./gitHistoryGraphLayout";
 
 const HEAD_SHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const GRID_TEMPLATE_COLUMNS = "17px minmax(80px, 1fr) minmax(64px, 0.34fr) 96px 76px";
 
 function commit(
   sha = HEAD_SHA,
@@ -76,7 +77,7 @@ function buttonTagBefore(markup: string, text: string): string {
 }
 
 describe("GitHistoryCommitRow", () => {
-  it("renders graph, subject, author, and short SHA in that order", () => {
+  it("renders graph, subject, author, date, and short SHA in that order", () => {
     const item = commit();
     const graph = layoutGitHistoryGraph([item], { headSha: item.sha });
     const markup = renderToStaticMarkup(
@@ -84,19 +85,28 @@ describe("GitHistoryCommitRow", () => {
         commit={item}
         graphLaneCount={graph.maxLaneCount}
         graphRow={graph.rows[0]!}
-        gridTemplateColumns="17px minmax(80px, 1fr) minmax(64px, 0.34fr) 76px"
+        gridTemplateColumns={GRID_TEMPLATE_COLUMNS}
       />,
     );
 
     const graphIndex = markup.indexOf("<svg");
     const subjectIndex = markup.indexOf('data-history-subject="true"');
     const authorIndex = markup.indexOf('data-history-author="true"');
+    const dateIndex = markup.indexOf('data-history-date="true"');
     const shaIndex = markup.indexOf('data-history-sha="true"');
     expect(graphIndex).toBeLessThan(subjectIndex);
     expect(subjectIndex).toBeLessThan(authorIndex);
-    expect(authorIndex).toBeLessThan(shaIndex);
+    expect(authorIndex).toBeLessThan(dateIndex);
+    expect(dateIndex).toBeLessThan(shaIndex);
     expect(markup).toContain(item.subject);
     expect(markup).toContain(item.authorName);
+    expect(markup).toContain(
+      new Intl.DateTimeFormat(undefined, {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      }).format(new Date(item.authoredAt)),
+    );
     expect(markup).toContain(item.sha.slice(0, 7));
   });
 
@@ -108,7 +118,7 @@ describe("GitHistoryCommitRow", () => {
         commit={item}
         graphLaneCount={graph.maxLaneCount}
         graphRow={graph.rows[0]!}
-        gridTemplateColumns="17px minmax(80px, 1fr) minmax(64px, 0.34fr) 76px"
+        gridTemplateColumns={GRID_TEMPLATE_COLUMNS}
       />,
     );
 
@@ -122,7 +132,7 @@ describe("GitHistoryCommitRow", () => {
     expect(markup.match(/<circle/g)).toHaveLength(2);
   });
 
-  it("keeps truncatable subject and author columns alongside the fixed SHA column", () => {
+  it("keeps truncatable subject and author columns alongside fixed date and SHA columns", () => {
     const item = commit(HEAD_SHA, "A very long subject that must truncate", "A very long author");
     const graph = layoutGitHistoryGraph([item]);
     const markup = renderToStaticMarkup(
@@ -130,7 +140,7 @@ describe("GitHistoryCommitRow", () => {
         commit={item}
         graphLaneCount={graph.maxLaneCount}
         graphRow={graph.rows[0]!}
-        gridTemplateColumns="17px minmax(80px, 1fr) minmax(64px, 0.34fr) 76px"
+        gridTemplateColumns={GRID_TEMPLATE_COLUMNS}
       />,
     );
 
@@ -138,8 +148,24 @@ describe("GitHistoryCommitRow", () => {
     expect(markup).toContain("minmax(64px, 0.34fr)");
     expect(markup).toContain('data-history-subject="true"');
     expect(markup).toContain('data-history-author="true"');
+    expect(markup).toContain('data-history-date="true"');
     expect(markup).toContain('data-history-sha="true"');
     expect(markup.match(/truncate/g)?.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("renders an em dash when the author date is invalid", () => {
+    const item = { ...commit(), authoredAt: "not-a-date" };
+    const graph = layoutGitHistoryGraph([item]);
+    const markup = renderToStaticMarkup(
+      <GitHistoryCommitRow
+        commit={item}
+        graphLaneCount={graph.maxLaneCount}
+        graphRow={graph.rows[0]!}
+        gridTemplateColumns={GRID_TEMPLATE_COLUMNS}
+      />,
+    );
+
+    expect(markup).toContain('data-history-date="true">—</span>');
   });
 });
 
