@@ -239,7 +239,10 @@ import {
   useThread,
   useThreadRefs,
   useThreadShell,
+  useThreadShells,
+  useAllEnvironmentShellsBootstrapped,
 } from "../state/entities";
+import { buildPanelChatCreateInput, panelChatShellsForParent } from "../panelChats";
 import { environmentShell } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { DesktopFollowUpQueuePanel } from "./chat/DesktopFollowUpQueuePanel";
@@ -353,7 +356,6 @@ const IMAGE_ONLY_BOOTSTRAP_PROMPT =
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
-const EMPTY_PANEL_CHAT_TITLES: ReadonlyMap<string, string> = new Map();
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
 function useDraftHeroLayoutTransition(isDraftHeroState: boolean) {
   const transitionGroupRef = useRef<HTMLDivElement | null>(null);
@@ -1579,6 +1581,17 @@ function ChatViewContent(props: ChatViewProps) {
     [activeThreadEnvironmentId, activeThreadId],
   );
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
+  const allThreadShells = useThreadShells();
+  const allEnvironmentShellsBootstrapped = useAllEnvironmentShellsBootstrapped();
+  const panelChatShells = useMemo(
+    () =>
+      activeThread && isServerThread ? panelChatShellsForParent(allThreadShells, activeThread) : [],
+    [activeThread, allThreadShells, isServerThread],
+  );
+  const panelChatTitlesById = useMemo(
+    () => new Map(panelChatShells.map((thread) => [thread.id, thread.title] as const)),
+    [panelChatShells],
+  );
   const [timelineAnchor, setTimelineAnchor] = useState<{
     readonly threadKey: string | null;
     readonly messageId: MessageId | null;
@@ -1629,6 +1642,16 @@ function ChatViewContent(props: ChatViewProps) {
       .getState()
       .reconcileBrowserSurfaces(activeThreadRef, Object.keys(activePreviewState.sessions));
   }, [activePreviewState.sessions, activeThreadRef]);
+
+  useEffect(() => {
+    if (!isWorkspacePresentation || !activeThreadRef || !allEnvironmentShellsBootstrapped) {
+      return;
+    }
+    useRightPanelStore.getState().reconcileChatSurfaces(
+      activeThreadRef,
+      panelChatShells.map((thread) => thread.id),
+    );
+  }, [activeThreadRef, allEnvironmentShellsBootstrapped, isWorkspacePresentation, panelChatShells]);
 
   useEffect(() => {
     if (!activeThreadRef || !activePreviewMiniPlayer) return;
@@ -3259,6 +3282,55 @@ function ChatViewContent(props: ChatViewProps) {
     if (!activeThreadRef) return;
     useRightPanelStore.getState().open(activeThreadRef, "agents");
   }, [activeThreadRef]);
+  const panelChatCreateInFlightRef = useRef(false);
+  const addPanelChatSurface = useCallback(async () => {
+    if (
+      panelChatCreateInFlightRef.current ||
+      !isWorkspacePresentation ||
+      !activeThreadRef ||
+      !activeThread ||
+      !isServerThread ||
+      activeThread.parentThreadId != null ||
+      serverConfig?.environment.capabilities.panelChats !== true
+    ) {
+      return;
+    }
+
+    panelChatCreateInFlightRef.current = true;
+    const nextThreadId = newThreadId();
+    const result = await createThread({
+      environmentId: activeThreadRef.environmentId,
+      input: buildPanelChatCreateInput({
+        parent: activeThread,
+        threadId: nextThreadId,
+        createdAt: new Date().toISOString(),
+      }),
+    });
+    panelChatCreateInFlightRef.current = false;
+
+    if (result._tag === "Failure") {
+      if (!isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Failed to create panel chat",
+            description: chatActionErrorMessage(error),
+          }),
+        );
+      }
+      return;
+    }
+
+    useRightPanelStore.getState().openChat(activeThreadRef, nextThreadId);
+  }, [
+    activeThread,
+    activeThreadRef,
+    createThread,
+    isServerThread,
+    isWorkspacePresentation,
+    serverConfig?.environment.capabilities.panelChats,
+  ]);
   const openFileSurface = useCallback(
     (relativePath: string) => {
       if (!activeThreadRef || !activeProject) return;
@@ -6187,6 +6259,12 @@ function ChatViewContent(props: ChatViewProps) {
         environmentId={activeThreadRef?.environmentId ?? null}
         threadId={activeThreadRef?.threadId ?? null}
       />
+    ) : activeRightPanelSurface?.kind === "chat" ? (
+      <ThreadConversationPane
+        key={`${activeThread.environmentId}:${activeRightPanelSurface.threadId}`}
+        environmentId={activeThread.environmentId}
+        threadId={activeRightPanelSurface.threadId}
+      />
     ) : (activeRightPanelSurface?.kind === "files" || activeRightPanelSurface?.kind === "file") &&
       activeProject &&
       activeWorkspaceRoot ? (
@@ -6643,12 +6721,17 @@ function ChatViewContent(props: ChatViewProps) {
           onAddDiff={addDiffSurface}
           onAddFiles={addFilesSurface}
           onAddAgents={addAgentsSurface}
-          onAddChat={() => undefined}
+          onAddChat={() => void addPanelChatSurface()}
           browserAvailable={isPreviewSupportedInRuntime()}
           diffAvailable={isServerThread && isGitRepo}
           filesAvailable={activeProject !== null}
-          chatAvailable={false}
-          chatTitlesById={EMPTY_PANEL_CHAT_TITLES}
+          chatAvailable={
+            isWorkspacePresentation &&
+            isServerThread &&
+            activeThread.parentThreadId == null &&
+            serverConfig?.environment.capabilities.panelChats === true
+          }
+          chatTitlesById={panelChatTitlesById}
           liveAgentCount={agentPanelModel.liveCount}
         >
           {rightPanelContent}
@@ -6675,12 +6758,17 @@ function ChatViewContent(props: ChatViewProps) {
             onAddDiff={addDiffSurface}
             onAddFiles={addFilesSurface}
             onAddAgents={addAgentsSurface}
-            onAddChat={() => undefined}
+            onAddChat={() => void addPanelChatSurface()}
             browserAvailable={isPreviewSupportedInRuntime()}
             diffAvailable={isServerThread && isGitRepo}
             filesAvailable={activeProject !== null}
-            chatAvailable={false}
-            chatTitlesById={EMPTY_PANEL_CHAT_TITLES}
+            chatAvailable={
+              isWorkspacePresentation &&
+              isServerThread &&
+              activeThread.parentThreadId == null &&
+              serverConfig?.environment.capabilities.panelChats === true
+            }
+            chatTitlesById={panelChatTitlesById}
             liveAgentCount={agentPanelModel.liveCount}
           >
             {rightPanelContent}
