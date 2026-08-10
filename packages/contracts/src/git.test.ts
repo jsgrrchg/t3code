@@ -57,12 +57,16 @@ describe("GitObjectId", () => {
 describe("GitListHistoryInput", () => {
   it("round-trips a bounded page request", () => {
     const decoded = decodeListHistoryInput({
+      projectId: "project-1",
+      threadId: "thread-1",
       cwd: "/repo/worktree",
       cursor: 100,
       limit: GIT_HISTORY_MAX_LIMIT,
     });
 
     expect(encodeListHistoryInput(decoded)).toEqual({
+      projectId: "project-1",
+      threadId: "thread-1",
       cwd: "/repo/worktree",
       cursor: 100,
       limit: GIT_HISTORY_MAX_LIMIT,
@@ -70,10 +74,11 @@ describe("GitListHistoryInput", () => {
   });
 
   it.each([
-    { cwd: "/repo", cursor: -1 },
-    { cwd: "/repo", limit: 0 },
-    { cwd: "/repo", limit: GIT_HISTORY_MAX_LIMIT + 1 },
-    { cwd: "x".repeat(GIT_HISTORY_CWD_MAX_LENGTH + 1) },
+    { projectId: "project-1", cwd: "/repo", cursor: -1 },
+    { projectId: "project-1", cwd: "/repo", limit: 0 },
+    { projectId: "project-1", cwd: "/repo", limit: GIT_HISTORY_MAX_LIMIT + 1 },
+    { projectId: "project-1", cwd: "x".repeat(GIT_HISTORY_CWD_MAX_LENGTH + 1) },
+    { cwd: "/repo" },
   ])("rejects an invalid page request: $input", (input) => {
     expect(() => decodeListHistoryInput(input)).toThrow();
   });

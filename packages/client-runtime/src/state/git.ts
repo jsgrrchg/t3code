@@ -3,6 +3,8 @@ import {
   type EnvironmentId,
   type GitHistoryCommitSummary,
   type GitListHistoryResult,
+  type ProjectId,
+  type ThreadId,
 } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
 
@@ -19,6 +21,8 @@ export const gitHistoryQueryOptions = {
 
 export interface GitHistoryTarget {
   readonly environmentId: EnvironmentId;
+  readonly projectId: ProjectId;
+  readonly threadId: ThreadId | null;
   readonly cwd: string;
 }
 
@@ -32,7 +36,12 @@ function sameGitHistoryTarget(
   accumulation: GitHistoryAccumulation,
   target: GitHistoryTarget,
 ): boolean {
-  return accumulation.environmentId === target.environmentId && accumulation.cwd === target.cwd;
+  return (
+    accumulation.environmentId === target.environmentId &&
+    accumulation.projectId === target.projectId &&
+    accumulation.threadId === target.threadId &&
+    accumulation.cwd === target.cwd
+  );
 }
 
 function dedupeGitHistoryCommits(

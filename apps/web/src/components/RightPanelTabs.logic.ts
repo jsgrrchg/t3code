@@ -57,17 +57,34 @@ export function resolveGitHistoryAvailability(input: {
   return { available: true, disabledReason: "" };
 }
 
-export function resolveGitHistoryPanelTarget<EnvironmentId extends string>(input: {
+export function resolveGitHistoryPanelTarget<
+  EnvironmentId extends string,
+  ProjectId extends string,
+  ThreadId extends string,
+>(input: {
   readonly activeSurfaceKind: string | null;
   readonly availability: GitHistoryAvailability;
   readonly environmentId: EnvironmentId | null;
+  readonly projectId: ProjectId | null;
+  readonly threadId: ThreadId | null;
   readonly cwd: string | null;
-}): { readonly environmentId: EnvironmentId; readonly cwd: string } | null {
+}): {
+  readonly environmentId: EnvironmentId;
+  readonly projectId: ProjectId;
+  readonly threadId: ThreadId | null;
+  readonly cwd: string;
+} | null {
   return input.activeSurfaceKind === "history" &&
     input.availability.available &&
     input.environmentId !== null &&
+    input.projectId !== null &&
     input.cwd !== null
-    ? { environmentId: input.environmentId, cwd: input.cwd }
+    ? {
+        environmentId: input.environmentId,
+        projectId: input.projectId,
+        threadId: input.threadId,
+        cwd: input.cwd,
+      }
     : null;
 }
 

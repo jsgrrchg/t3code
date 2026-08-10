@@ -35,6 +35,10 @@ import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import { makeAssertWorkspaceBoundCwd } from "../workspace/WorkspaceBoundCwd.ts";
 
+export type GitListHistoryWorkspaceInput = Omit<GitListHistoryInput, "projectId" | "threadId"> & {
+  readonly workspaceRoot: string;
+};
+
 export class GitWorkflowService extends Context.Service<
   GitWorkflowService,
   {
@@ -66,7 +70,7 @@ export class GitWorkflowService extends Context.Service<
       input: VcsListRefsInput,
     ) => Effect.Effect<VcsListRefsResult, GitCommandError>;
     readonly listHistory: (
-      input: GitListHistoryInput,
+      input: GitListHistoryWorkspaceInput,
     ) => Effect.Effect<GitListHistoryResult, GitCommandError>;
     readonly createWorktree: (
       input: VcsCreateWorktreeInput,
@@ -307,7 +311,10 @@ export const make = Effect.gen(function* () {
         ),
       ),
     listHistory: (input) =>
-      assertWorkspaceBoundCwd(input.cwd).pipe(
+      assertWorkspaceBoundCwd(input.cwd, {
+        workspaceRoot: input.workspaceRoot,
+        includeManagedWorktrees: false,
+      }).pipe(
         Effect.mapError(
           (cause) =>
             new GitCommandError({
@@ -317,12 +324,17 @@ export const make = Effect.gen(function* () {
               detail:
                 cause._tag === "WorkspaceCwdCanonicalizationError"
                   ? "Failed to resolve a path while validating the Git history workspace."
-                  : "Git history cwd must stay within the configured workspace, its linked Git worktrees, or the managed worktrees root.",
+                  : "Git history cwd must stay within the selected project or its linked Git worktrees.",
               cause,
             }),
         ),
         Effect.andThen(ensureGitCommand("GitWorkflowService.listHistory", input.cwd)),
-        Effect.andThen(Effect.suspend(() => git.listHistory(input))),
+        Effect.andThen(
+          Effect.suspend(() => {
+            const { workspaceRoot: _, ...historyInput } = input;
+            return git.listHistory(historyInput);
+          }),
+        ),
       ),
     createWorktree: (input) =>
       ensureGitCommand("GitWorkflowService.createWorktree", input.cwd).pipe(

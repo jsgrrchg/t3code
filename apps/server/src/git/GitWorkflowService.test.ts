@@ -202,7 +202,7 @@ describe("GitWorkflowService", () => {
     );
   });
 
-  it.effect("lists history for Git workspaces and managed worktrees only", () =>
+  it.effect("lists history only within the selected project", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -247,20 +247,24 @@ describe("GitWorkflowService", () => {
         Layer.provideMerge(NodeServices.layer),
       );
 
-      const [workspaceResult, worktreeResult] = yield* Effect.gen(function* () {
+      const workspaceResult = yield* Effect.gen(function* () {
         const workflow = yield* GitWorkflowService.GitWorkflowService;
-        const workspace = yield* workflow.listHistory({ cwd: workspaceRoot });
-        const worktree = yield* workflow.listHistory({ cwd: managedWorktree });
-        const outsideError = yield* workflow.listHistory({ cwd: outsideRoot }).pipe(Effect.flip);
+        const workspace = yield* workflow.listHistory({ cwd: workspaceRoot, workspaceRoot });
+        const managedWorktreeError = yield* workflow
+          .listHistory({ cwd: managedWorktree, workspaceRoot })
+          .pipe(Effect.flip);
+        const outsideError = yield* workflow
+          .listHistory({ cwd: outsideRoot, workspaceRoot })
+          .pipe(Effect.flip);
+        assert.equal(managedWorktreeError._tag, "GitCommandError");
         assert.equal(outsideError._tag, "GitCommandError");
-        assert.match(outsideError.detail, /configured workspace.*managed worktrees root/);
-        return [workspace, worktree] as const;
+        assert.match(outsideError.detail, /selected project.*linked Git worktrees/);
+        return workspace;
       }).pipe(Effect.provide(layer));
 
       assert.deepStrictEqual(workspaceResult, { commits: [], headSha: null, nextCursor: null });
-      assert.deepStrictEqual(worktreeResult, { commits: [], headSha: null, nextCursor: null });
-      assert.deepStrictEqual(resolveCalls, [workspaceRoot, managedWorktree]);
-      assert.deepStrictEqual(listHistoryCalls, [workspaceRoot, managedWorktree]);
+      assert.deepStrictEqual(resolveCalls, [workspaceRoot]);
+      assert.deepStrictEqual(listHistoryCalls, [workspaceRoot]);
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
@@ -317,7 +321,7 @@ describe("GitWorkflowService", () => {
 
       yield* Effect.gen(function* () {
         const workflow = yield* GitWorkflowService.GitWorkflowService;
-        yield* workflow.listHistory({ cwd: mainWorktree });
+        yield* workflow.listHistory({ cwd: configuredWorktree, workspaceRoot: mainWorktree });
 
         // A .git file alone must not let an unrelated directory impersonate a
         // linked worktree; the private Git directory backlink must also match.
@@ -325,11 +329,13 @@ describe("GitWorkflowService", () => {
           path.join(unrelatedDirectory, ".git"),
           yield* fileSystem.readFileString(path.join(configuredWorktree, ".git")),
         );
-        const error = yield* workflow.listHistory({ cwd: unrelatedDirectory }).pipe(Effect.flip);
+        const error = yield* workflow
+          .listHistory({ cwd: unrelatedDirectory, workspaceRoot: mainWorktree })
+          .pipe(Effect.flip);
         assert.equal(error._tag, "GitCommandError");
       }).pipe(Effect.provide(layer));
 
-      assert.deepStrictEqual(listHistoryCalls, [mainWorktree]);
+      assert.deepStrictEqual(listHistoryCalls, [configuredWorktree]);
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
@@ -362,9 +368,13 @@ describe("GitWorkflowService", () => {
 
       const [jjError, unknownError] = yield* Effect.gen(function* () {
         const workflow = yield* GitWorkflowService.GitWorkflowService;
-        const jj = yield* workflow.listHistory({ cwd: workspaceRoot }).pipe(Effect.flip);
+        const jj = yield* workflow
+          .listHistory({ cwd: workspaceRoot, workspaceRoot })
+          .pipe(Effect.flip);
         resolvedKind = "unknown";
-        const unknown = yield* workflow.listHistory({ cwd: workspaceRoot }).pipe(Effect.flip);
+        const unknown = yield* workflow
+          .listHistory({ cwd: workspaceRoot, workspaceRoot })
+          .pipe(Effect.flip);
         return [jj, unknown] as const;
       }).pipe(Effect.provide(layer));
 

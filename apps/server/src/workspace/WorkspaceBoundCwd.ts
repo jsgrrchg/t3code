@@ -19,6 +19,11 @@ export class WorkspaceCwdOutsideRootsError extends Data.TaggedError(
   readonly cwd: string;
 }> {}
 
+export interface WorkspaceBoundCwdOptions {
+  readonly workspaceRoot?: string;
+  readonly includeManagedWorktrees?: boolean;
+}
+
 export const makeAssertWorkspaceBoundCwd = Effect.fn("makeAssertWorkspaceBoundCwd")(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const fileSystem = yield* FileSystem.FileSystem;
@@ -101,16 +106,21 @@ export const makeAssertWorkspaceBoundCwd = Effect.fn("makeAssertWorkspaceBoundCw
       Effect.orElseSucceed(() => false),
     );
 
-  return Effect.fn("WorkspaceBoundCwd.assert")(function* (cwd: string) {
+  return Effect.fn("WorkspaceBoundCwd.assert")(function* (
+    cwd: string,
+    options: WorkspaceBoundCwdOptions = {},
+  ) {
+    const configuredWorkspaceRoot = options.workspaceRoot ?? config.cwd;
+    const includeManagedWorktrees = options.includeManagedWorktrees ?? true;
     const [candidate, workspaceRoot, worktreesRoot] = yield* Effect.all([
       canonicalizePath(cwd),
-      canonicalizePath(config.cwd),
+      canonicalizePath(configuredWorkspaceRoot),
       canonicalizePath(config.worktreesDir),
     ]);
 
     if (
       isWithinRoot(candidate, workspaceRoot) ||
-      isWithinRoot(candidate, worktreesRoot) ||
+      (includeManagedWorktrees && isWithinRoot(candidate, worktreesRoot)) ||
       (yield* isLinkedGitWorktree(candidate, workspaceRoot))
     ) {
       return;

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
   EnvironmentId,
+  ProjectId,
+  ThreadId,
   type GitHistoryCommitSummary,
   type GitListHistoryResult,
 } from "@t3tools/contracts";
@@ -43,8 +45,15 @@ function page(
   };
 }
 
-const target = (environmentId = "environment-1", cwd = "/repo/one"): GitHistoryTarget => ({
+const target = (
+  environmentId = "environment-1",
+  cwd = "/repo/one",
+  projectId = "project-1",
+  threadId: string | null = "thread-1",
+): GitHistoryTarget => ({
   environmentId: EnvironmentId.make(environmentId),
+  projectId: ProjectId.make(projectId),
+  threadId: threadId === null ? null : ThreadId.make(threadId),
   cwd,
 });
 
@@ -52,7 +61,13 @@ describe("Git history query", () => {
   it("isolates pages by environment, cwd, and cursor", () => {
     const first = {
       environmentId: EnvironmentId.make("environment-1"),
-      input: { cwd: "/repo/one", cursor: 0, limit: 100 },
+      input: {
+        projectId: ProjectId.make("project-1"),
+        threadId: ThreadId.make("thread-1"),
+        cwd: "/repo/one",
+        cursor: 0,
+        limit: 100,
+      },
     };
 
     expect(environmentRpcKey(first)).not.toBe(
@@ -60,6 +75,12 @@ describe("Git history query", () => {
     );
     expect(environmentRpcKey(first)).not.toBe(
       environmentRpcKey({ ...first, input: { ...first.input, cwd: "/repo/two" } }),
+    );
+    expect(environmentRpcKey(first)).not.toBe(
+      environmentRpcKey({
+        ...first,
+        input: { ...first.input, projectId: ProjectId.make("project-2") },
+      }),
     );
     expect(environmentRpcKey(first)).not.toBe(
       environmentRpcKey({ ...first, input: { ...first.input, cursor: 100 } }),
@@ -117,7 +138,7 @@ describe("Git history accumulation", () => {
     expect(beforeRetry.commits).toEqual(current.commits);
   });
 
-  it("discards accumulated commits when environment or cwd changes", () => {
+  it("discards accumulated commits when environment, project, thread, or cwd changes", () => {
     const current = replaceGitHistoryPage(target(), page([commit(SHA.first, "first")], 100));
 
     const nextEnvironment = reconcileGitHistoryTarget(
@@ -125,11 +146,21 @@ describe("Git history accumulation", () => {
       target("environment-2", "/repo/one"),
     );
     const nextCwd = reconcileGitHistoryTarget(current, target("environment-1", "/repo/two"));
+    const nextProject = reconcileGitHistoryTarget(
+      current,
+      target("environment-1", "/repo/one", "project-2"),
+    );
+    const nextThread = reconcileGitHistoryTarget(
+      current,
+      target("environment-1", "/repo/one", "project-1", "thread-2"),
+    );
 
     expect(nextEnvironment.commits).toEqual([]);
     expect(nextEnvironment.nextCursor).toBeNull();
     expect(nextCwd.commits).toEqual([]);
     expect(nextCwd.nextCursor).toBeNull();
+    expect(nextProject.commits).toEqual([]);
+    expect(nextThread.commits).toEqual([]);
   });
 
   it("replaces stale repository data if an append response targets another repository", () => {

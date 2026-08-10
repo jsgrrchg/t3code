@@ -53,11 +53,15 @@ describe("Git History right-panel availability", () => {
       activeSurfaceKind: "history",
       availability: available,
       environmentId: "environment-1",
+      projectId: "project-1",
+      threadId: "thread-1",
       cwd: "/repo/worktree",
     } as const;
 
     expect(resolveGitHistoryPanelTarget(input)).toEqual({
       environmentId: "environment-1",
+      projectId: "project-1",
+      threadId: "thread-1",
       cwd: "/repo/worktree",
     });
     expect(resolveGitHistoryPanelTarget({ ...input, activeSurfaceKind: "diff" })).toBeNull();

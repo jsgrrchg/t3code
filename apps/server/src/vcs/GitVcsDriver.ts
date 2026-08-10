@@ -33,6 +33,8 @@ import {
   type VcsStatusResult,
 } from "@t3tools/contracts";
 import { makeGitVcsDriverCore } from "./GitVcsDriverCore.ts";
+
+export type GitListHistoryRepositoryInput = Omit<GitListHistoryInput, "projectId" | "threadId">;
 import * as VcsDriver from "./VcsDriver.ts";
 import * as VcsProcess from "./VcsProcess.ts";
 
@@ -241,7 +243,7 @@ export class GitVcsDriver extends Context.Service<
       input: VcsListRefsInput,
     ) => Effect.Effect<VcsListRefsResult, GitCommandError>;
     readonly listHistory: (
-      input: GitListHistoryInput,
+      input: GitListHistoryRepositoryInput,
     ) => Effect.Effect<GitListHistoryResult, GitCommandError>;
     readonly pullCurrentBranch: (cwd: string) => Effect.Effect<VcsPullResult, GitCommandError>;
     readonly createWorktree: (

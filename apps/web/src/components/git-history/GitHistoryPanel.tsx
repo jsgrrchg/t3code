@@ -4,6 +4,8 @@ import {
   type EnvironmentId,
   type GitHistoryCommitSummary,
   type GitListHistoryResult,
+  type ProjectId,
+  type ThreadId,
 } from "@t3tools/contracts";
 import {
   appendGitHistoryPage,
@@ -41,7 +43,7 @@ interface HistoryPanelLocalState {
 }
 
 function targetKey(target: GitHistoryTarget): string {
-  return JSON.stringify([target.environmentId, target.cwd]);
+  return JSON.stringify([target.environmentId, target.projectId, target.threadId, target.cwd]);
 }
 
 function createLocalState(target: GitHistoryTarget): HistoryPanelLocalState {
@@ -312,17 +314,30 @@ export function GitHistoryPanelView({
 
 export function GitHistoryPanel({
   environmentId,
+  projectId,
+  threadId,
   cwd,
 }: {
   readonly environmentId: EnvironmentId;
+  readonly projectId: ProjectId;
+  readonly threadId: ThreadId | null;
   readonly cwd: string;
 }) {
-  const target = useMemo<GitHistoryTarget>(() => ({ environmentId, cwd }), [cwd, environmentId]);
+  const target = useMemo<GitHistoryTarget>(
+    () => ({ environmentId, projectId, threadId, cwd }),
+    [cwd, environmentId, projectId, threadId],
+  );
   const currentTargetKey = targetKey(target);
   const firstPage = useEnvironmentQuery(
     gitEnvironment.history({
       environmentId,
-      input: { cwd, cursor: 0, limit: GIT_HISTORY_DEFAULT_LIMIT },
+      input: {
+        projectId,
+        ...(threadId !== null ? { threadId } : {}),
+        cwd,
+        cursor: 0,
+        limit: GIT_HISTORY_DEFAULT_LIMIT,
+      },
     }),
   );
   const runHistoryPage = useAtomQueryRunner(gitEnvironment.history, {
@@ -385,7 +400,13 @@ export function GitHistoryPanel({
 
     void runHistoryPage({
       environmentId,
-      input: { cwd, cursor, limit: GIT_HISTORY_DEFAULT_LIMIT },
+      input: {
+        projectId,
+        ...(threadId !== null ? { threadId } : {}),
+        cwd,
+        cursor,
+        limit: GIT_HISTORY_DEFAULT_LIMIT,
+      },
     }).then((result) => {
       if (activeTarget.current !== target) {
         if (loadMoreFlight.current?.token === token) loadMoreFlight.current = null;
@@ -414,8 +435,10 @@ export function GitHistoryPanel({
     cwd,
     environmentId,
     firstPage.data,
+    projectId,
     runHistoryPage,
     target,
+    threadId,
     visibleHistory,
   ]);
 

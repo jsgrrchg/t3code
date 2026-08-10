@@ -6487,6 +6487,8 @@ function ChatViewContent(props: ChatViewProps) {
     activeSurfaceKind: activeRightPanelSurface?.kind ?? null,
     availability: gitHistoryAvailability,
     environmentId: activeThreadRef?.environmentId ?? null,
+    projectId: activeProject?.id ?? null,
+    threadId: isServerThread ? (activeThreadId ?? null) : null,
     cwd: gitStatusCwd,
   });
   const rightPanelContent = activeThreadRef ? (
@@ -6536,6 +6538,8 @@ function ChatViewContent(props: ChatViewProps) {
         <Suspense fallback={null}>
           <GitHistoryPanel
             environmentId={gitHistoryPanelTarget.environmentId}
+            projectId={gitHistoryPanelTarget.projectId}
+            threadId={gitHistoryPanelTarget.threadId}
             cwd={gitHistoryPanelTarget.cwd}
           />
         </Suspense>

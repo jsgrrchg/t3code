@@ -51,6 +51,8 @@ import {
   AssetWorkspaceContextResolutionError,
   RpcClientId,
   EnvironmentAuthorizationError,
+  GitCommandError,
+  type GitListHistoryInput,
   ThreadId,
   type TerminalAttachStreamEvent,
   type TerminalError,
@@ -1036,6 +1038,63 @@ const makeWsRpcLayer = (
           .refreshStatus(cwd)
           .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach, Effect.asVoid);
 
+      const resolveGitHistoryWorkspaceInput = Effect.fn("resolveGitHistoryWorkspaceInput")(
+        function* (input: GitListHistoryInput) {
+          const project = yield* projectionSnapshotQuery.getProjectShellById(input.projectId).pipe(
+            Effect.mapError(
+              (cause) =>
+                new GitCommandError({
+                  operation: "GitWorkflowService.listHistory",
+                  command: "project-context",
+                  cwd: input.cwd,
+                  detail: "Failed to resolve the selected project for Git history.",
+                  cause,
+                }),
+            ),
+          );
+          if (Option.isNone(project)) {
+            return yield* new GitCommandError({
+              operation: "GitWorkflowService.listHistory",
+              command: "project-context",
+              cwd: input.cwd,
+              detail: "The selected project is no longer registered in this environment.",
+            });
+          }
+
+          let cwd = input.cwd;
+          if (input.threadId !== undefined) {
+            const thread = yield* projectionSnapshotQuery.getThreadShellById(input.threadId).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new GitCommandError({
+                    operation: "GitWorkflowService.listHistory",
+                    command: "thread-context",
+                    cwd: input.cwd,
+                    detail: "Failed to resolve the selected thread for Git history.",
+                    cause,
+                  }),
+              ),
+            );
+            if (Option.isNone(thread) || thread.value.projectId !== input.projectId) {
+              return yield* new GitCommandError({
+                operation: "GitWorkflowService.listHistory",
+                command: "thread-context",
+                cwd: input.cwd,
+                detail: "The selected thread does not belong to the selected project.",
+              });
+            }
+            cwd = thread.value.worktreePath ?? project.value.workspaceRoot;
+          }
+
+          return {
+            cwd,
+            workspaceRoot: project.value.workspaceRoot,
+            ...(input.cursor !== undefined ? { cursor: input.cursor } : {}),
+            ...(input.limit !== undefined ? { limit: input.limit } : {}),
+          } satisfies GitWorkflowService.GitListHistoryWorkspaceInput;
+        },
+      );
+
       return WsRpcGroup.of({
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
@@ -1921,9 +1980,13 @@ const makeWsRpcLayer = (
             { "rpc.aggregate": "git" },
           ),
         [WS_METHODS.gitListHistory]: (input) =>
-          observeRpcEffect(WS_METHODS.gitListHistory, gitWorkflow.listHistory(input), {
-            "rpc.aggregate": "git",
-          }),
+          observeRpcEffect(
+            WS_METHODS.gitListHistory,
+            resolveGitHistoryWorkspaceInput(input).pipe(Effect.flatMap(gitWorkflow.listHistory)),
+            {
+              "rpc.aggregate": "git",
+            },
+          ),
         [WS_METHODS.vcsListRefs]: (input) =>
           observeRpcEffect(WS_METHODS.vcsListRefs, gitWorkflow.listRefs(input), {
             "rpc.aggregate": "vcs",

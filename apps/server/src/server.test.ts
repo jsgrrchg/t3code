@@ -5153,9 +5153,26 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       yield* buildAppUnderTest({
         config: {
-          cwd: "/tmp/repo",
+          cwd: "/tmp/t3-server",
         },
         layers: {
+          projectionSnapshotQuery: {
+            getProjectShellById: (projectId) =>
+              Effect.succeed(
+                projectId === defaultProjectId
+                  ? Option.some({
+                      ...makeDefaultOrchestrationReadModel().projects[0]!,
+                      workspaceRoot: "/tmp/repo",
+                    })
+                  : Option.none(),
+              ),
+            getThreadShellById: (threadId) =>
+              Effect.succeed(
+                threadId === defaultThreadId
+                  ? Option.some(makeDefaultOrchestrationThreadShell())
+                  : Option.none(),
+              ),
+          },
           vcsDriver: {
             isInsideWorkTree: () => Effect.succeed(true),
           },
@@ -5416,9 +5433,25 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(prepared.branch, "feature/demo");
 
       const history = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.gitListHistory]({ cwd: "/tmp/repo" })),
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.gitListHistory]({
+            projectId: defaultProjectId,
+            cwd: "/tmp/repo",
+          }),
+        ),
       );
       assert.equal(history.commits[0]?.subject, "initial commit");
+
+      const threadHistory = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.gitListHistory]({
+            projectId: defaultProjectId,
+            threadId: defaultThreadId,
+            cwd: "/tmp/untrusted-client-cwd",
+          }),
+        ),
+      );
+      assert.equal(threadHistory.commits[0]?.subject, "initial commit");
 
       const refs = yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) => client[WS_METHODS.vcsListRefs]({ cwd: "/tmp/repo" })),

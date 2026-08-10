@@ -1,5 +1,11 @@
 import * as Schema from "effect/Schema";
-import { NonNegativeInt, PositiveInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import {
+  NonNegativeInt,
+  PositiveInt,
+  ProjectId,
+  ThreadId,
+  TrimmedNonEmptyString,
+} from "./baseSchemas.ts";
 import { SourceControlProviderError, SourceControlProviderInfo } from "./sourceControl.ts";
 import { VcsDriverKind } from "./vcs.ts";
 
@@ -122,6 +128,8 @@ export type GitResolvedPullRequest = typeof GitResolvedPullRequest.Type;
 // RPC Inputs
 
 export const GitListHistoryInput = Schema.Struct({
+  projectId: ProjectId,
+  threadId: Schema.optional(ThreadId),
   cwd: TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(GIT_HISTORY_CWD_MAX_LENGTH)),
   cursor: Schema.optional(NonNegativeInt),
   limit: Schema.optional(PositiveInt.check(Schema.isLessThanOrEqualTo(GIT_HISTORY_MAX_LIMIT))),

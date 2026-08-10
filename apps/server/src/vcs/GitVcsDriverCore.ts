@@ -28,7 +28,6 @@ import {
   GitCommandError,
   GitHistoryCommitSummary,
   GitObjectId,
-  type GitListHistoryInput,
   type GitListHistoryResult,
   type ReviewDiffFileContentsInput,
   type ReviewDiffPreviewInput,
@@ -2534,7 +2533,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     );
 
   const listHistory: GitVcsDriver.GitVcsDriver["Service"]["listHistory"] = Effect.fn("listHistory")(
-    function* (input: GitListHistoryInput) {
+    function* (input: GitVcsDriver.GitListHistoryRepositoryInput) {
       const cursor = input.cursor ?? 0;
       const limit = input.limit ?? GIT_HISTORY_DEFAULT_LIMIT;
       const headResult = yield* executeGit(
