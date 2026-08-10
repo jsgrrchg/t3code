@@ -34,6 +34,7 @@ import {
   startNewThreadForProject,
   shouldShowBranchMismatchBanner,
   shouldWriteThreadErrorToCurrentServerThread,
+  shouldSeedThreadTitleForFirstTurn,
 } from "./ChatView.logic";
 
 const environmentId = EnvironmentId.make("environment-local");
@@ -204,6 +205,30 @@ describe("resolveThreadMetadataUpdateForNextTurn", () => {
         nextBranch: "feature/current",
       }),
     ).toBeNull();
+  });
+});
+
+describe("shouldSeedThreadTitleForFirstTurn", () => {
+  it("only replaces the placeholder appropriate to the thread kind", () => {
+    expect(shouldSeedThreadTitleForFirstTurn({ currentTitle: "New thread" })).toBe(true);
+    expect(
+      shouldSeedThreadTitleForFirstTurn({
+        currentTitle: "New chat",
+        parentThreadId: ThreadId.make("thread-parent"),
+      }),
+    ).toBe(true);
+    expect(
+      shouldSeedThreadTitleForFirstTurn({
+        currentTitle: "Investigate logs",
+        parentThreadId: ThreadId.make("thread-parent"),
+      }),
+    ).toBe(false);
+    expect(
+      shouldSeedThreadTitleForFirstTurn({
+        currentTitle: "New thread",
+        parentThreadId: ThreadId.make("thread-parent"),
+      }),
+    ).toBe(false);
   });
 });
 

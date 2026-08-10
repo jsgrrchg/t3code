@@ -157,7 +157,7 @@ describe("rightPanelStore", () => {
         "env-1:thread-B": {
           isOpen: true,
           activeSurfaceId: "diff",
-          surfaces: [{ id: "diff", kind: "diff" }],
+          surfaces: [{ id: "diff", kind: "diff", threadId: null }],
         },
       },
     });
@@ -187,9 +187,27 @@ describe("rightPanelStore", () => {
       isOpen: true,
       activeSurfaceId: "diff",
       surfaces: [
-        { id: "diff", kind: "diff" },
+        { id: "diff", kind: "diff", threadId: null },
         { id: "agents", kind: "agents" },
       ],
+    });
+  });
+
+  it("tracks the conversation whose turn diff is shown in the owner's panel", () => {
+    const childId = ThreadId.make("thread-child");
+    useRightPanelStore.getState().openThreadDiff(refA, childId);
+
+    expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      id: "diff",
+      kind: "diff",
+      threadId: childId,
+    });
+
+    useRightPanelStore.getState().open(refA, "diff");
+    expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      id: "diff",
+      kind: "diff",
+      threadId: null,
     });
   });
 
@@ -319,7 +337,7 @@ describe("rightPanelStore", () => {
     expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
       isOpen: false,
       activeSurfaceId: "diff",
-      surfaces: [{ id: "diff", kind: "diff" }],
+      surfaces: [{ id: "diff", kind: "diff", threadId: null }],
     });
   });
 

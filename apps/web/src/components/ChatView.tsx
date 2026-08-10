@@ -237,9 +237,11 @@ import {
   useProject,
   useProjects,
   useThread,
+  useThreadDetail,
   useThreadRefs,
   useThreadShell,
   useThreadShells,
+  useThreadStatus,
   useAllEnvironmentShellsBootstrapped,
 } from "../state/entities";
 import { buildPanelChatCreateInput, panelChatShellsForParent } from "../panelChats";
@@ -311,10 +313,11 @@ import {
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
   shouldWriteThreadErrorToCurrentServerThread,
+  shouldSeedThreadTitleForFirstTurn,
   startNewThreadForProject,
   waitForStartedServerThread,
 } from "./ChatView.logic";
-import type { ThreadSyncPhase } from "../threadSync";
+import { resolveThreadSyncPhase, type ThreadSyncPhase } from "../threadSync";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { useComposerHandleContext } from "../composerHandleContext";
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
@@ -503,6 +506,16 @@ function formatOutgoingPrompt(params: {
 }
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
+const PANEL_CHAT_SCROLL_OFFSETS = new Map<string, number>();
+const MAX_REMEMBERED_PANEL_CHAT_SCROLL_OFFSETS = 200;
+
+function rememberPanelChatScrollOffset(threadKey: string, offset: number): void {
+  PANEL_CHAT_SCROLL_OFFSETS.delete(threadKey);
+  PANEL_CHAT_SCROLL_OFFSETS.set(threadKey, offset);
+  if (PANEL_CHAT_SCROLL_OFFSETS.size <= MAX_REMEMBERED_PANEL_CHAT_SCROLL_OFFSETS) return;
+  const oldestKey = PANEL_CHAT_SCROLL_OFFSETS.keys().next().value;
+  if (oldestKey !== undefined) PANEL_CHAT_SCROLL_OFFSETS.delete(oldestKey);
+}
 
 type ChatViewProps =
   | {
@@ -515,6 +528,7 @@ type ChatViewProps =
       routeKind: "server";
       draftId?: never;
       presentation?: ChatViewPresentation;
+      panelOwnerThreadRef?: ScopedThreadRef;
     }
   | {
       environmentId: EnvironmentId;
@@ -1205,6 +1219,15 @@ function ChatViewContent(props: ChatViewProps) {
     [environmentId, threadId],
   );
   const routeThreadKey = useMemo(() => scopedThreadKey(routeThreadRef), [routeThreadRef]);
+  const panelOwnerThreadRef =
+    routeKind === "server" ? (props.panelOwnerThreadRef ?? routeThreadRef) : routeThreadRef;
+  const panelInitialScrollOffsetRef = useRef(
+    isWorkspacePresentation ? null : (PANEL_CHAT_SCROLL_OFFSETS.get(routeThreadKey) ?? null),
+  );
+  const rememberPanelScrollOffset = useCallback(
+    (offset: number) => rememberPanelChatScrollOffset(routeThreadKey, offset),
+    [routeThreadKey],
+  );
   const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
   const upsertKeybinding = useAtomCommand(serverEnvironment.upsertKeybinding, {
     reportFailure: false,
@@ -1338,7 +1361,9 @@ function ChatViewContent(props: ChatViewProps) {
   const composerTerminalContextsRef = useRef<TerminalContextDraft[]>([]);
   const composerElementContextsRef = useRef<ElementContextDraft[]>([]);
   const localComposerRef = useRef<ChatComposerHandle | null>(null);
-  const composerRef = useComposerHandleContext() ?? localComposerRef;
+  const workspaceComposerRef = useComposerHandleContext();
+  const composerRef =
+    isWorkspacePresentation && workspaceComposerRef ? workspaceComposerRef : localComposerRef;
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
@@ -1650,11 +1675,11 @@ function ChatViewContent(props: ChatViewProps) {
   const inlineRightPanelOwnsTitleBar = rightPanelOpen && !shouldUseRightPanelSheet;
 
   useEffect(() => {
-    if (!activeThreadRef) return;
+    if (!isWorkspacePresentation || !activeThreadRef) return;
     useRightPanelStore
       .getState()
       .reconcileBrowserSurfaces(activeThreadRef, Object.keys(activePreviewState.sessions));
-  }, [activePreviewState.sessions, activeThreadRef]);
+  }, [activePreviewState.sessions, activeThreadRef, isWorkspacePresentation]);
 
   useEffect(() => {
     if (!isWorkspacePresentation || !activeThreadRef || !allEnvironmentShellsBootstrapped) {
@@ -1667,7 +1692,7 @@ function ChatViewContent(props: ChatViewProps) {
   }, [activeThreadRef, allEnvironmentShellsBootstrapped, isWorkspacePresentation, panelChatShells]);
 
   useEffect(() => {
-    if (!activeThreadRef || !activePreviewMiniPlayer) return;
+    if (!isWorkspacePresentation || !activeThreadRef || !activePreviewMiniPlayer) return;
     const miniTabStillExists = Boolean(activePreviewState.sessions[activePreviewMiniPlayer.tabId]);
     const sameTabOpenInPanel =
       previewPanelOpen &&
@@ -1681,6 +1706,7 @@ function ChatViewContent(props: ChatViewProps) {
     activePreviewState.sessions,
     activeRightPanelSurface,
     activeThreadRef,
+    isWorkspacePresentation,
     previewPanelOpen,
   ]);
 
@@ -1769,9 +1795,9 @@ function ChatViewContent(props: ChatViewProps) {
   );
 
   useEffect(() => {
-    if (!activeThreadRef || !activeEnvironmentBootstrapComplete) return;
+    if (!isWorkspacePresentation || !activeThreadRef || !activeEnvironmentBootstrapComplete) return;
     useRightPanelStore.getState().reconcileFileSurfaces(activeThreadRef, activeProject !== null);
-  }, [activeEnvironmentBootstrapComplete, activeProject, activeThreadRef]);
+  }, [activeEnvironmentBootstrapComplete, activeProject, activeThreadRef, isWorkspacePresentation]);
 
   // Compute the list of environments this logical project spans, used to
   // drive the environment picker in BranchToolbar.
@@ -5429,7 +5455,14 @@ function ChatViewContent(props: ChatViewProps) {
 
     let failure: AtomCommandResult<unknown, unknown> | null = null;
     // Auto-title from first message
-    if (isFirstMessage && isServerThread) {
+    if (
+      isFirstMessage &&
+      isServerThread &&
+      shouldSeedThreadTitleForFirstTurn({
+        currentTitle: activeThread.title,
+        parentThreadId: activeThread.parentThreadId,
+      })
+    ) {
       const titleResult = await updateThreadMetadata({
         environmentId,
         input: {
@@ -6263,12 +6296,12 @@ function ChatViewContent(props: ChatViewProps) {
   }, []);
   const onOpenTurnDiff = useCallback(
     (turnId: TurnId, filePath?: string) => {
-      if (!isServerThread || !activeThreadRef) return;
+      if (!isServerThread || !activeThreadRef || !panelOwnerThreadRef) return;
       useDiffPanelStore.getState().selectTurn(activeThreadRef, turnId, filePath);
-      useRightPanelStore.getState().open(activeThreadRef, "diff");
+      useRightPanelStore.getState().openThreadDiff(panelOwnerThreadRef, activeThreadRef.threadId);
       onDiffPanelOpen?.();
     },
-    [activeThreadRef, isServerThread, onDiffPanelOpen],
+    [activeThreadRef, isServerThread, onDiffPanelOpen, panelOwnerThreadRef],
   );
   // Both the Map and the revert handler are read from refs at call-time so
   // the callback reference is fully stable and never busts context identity.
@@ -6324,6 +6357,10 @@ function ChatViewContent(props: ChatViewProps) {
       {panelToggleControls}
     </div>
   );
+  const activeDiffThreadRef =
+    activeRightPanelSurface?.kind === "diff" && activeRightPanelSurface.threadId
+      ? scopeThreadRef(activeThread.environmentId, activeRightPanelSurface.threadId)
+      : activeThreadRef;
   const rightPanelContent = activeThreadRef ? (
     activeRightPanelSurface?.kind === "preview" ? (
       <Suspense fallback={null}>
@@ -6359,9 +6396,10 @@ function ChatViewContent(props: ChatViewProps) {
     ) : activeRightPanelSurface?.kind === "diff" ? (
       <Suspense fallback={null}>
         <DiffPanel
-          key={`${activeThreadKey}:${diffPanelGitStatusResolutionKey}`}
+          key={`${activeDiffThreadRef ? scopedThreadKey(activeDiffThreadRef) : activeThreadKey}:${diffPanelGitStatusResolutionKey}`}
           mode="embedded"
-          composerDraftTarget={composerDraftTarget}
+          threadRef={activeDiffThreadRef}
+          composerDraftTarget={activeDiffThreadRef ?? composerDraftTarget}
           initialGitScope={initialDiffPanelGitScope}
         />
       </Suspense>
@@ -6376,6 +6414,7 @@ function ChatViewContent(props: ChatViewProps) {
         key={`${activeThread.environmentId}:${activeRightPanelSurface.threadId}`}
         environmentId={activeThread.environmentId}
         threadId={activeRightPanelSurface.threadId}
+        panelOwnerThreadRef={activeThreadRef}
       />
     ) : (activeRightPanelSurface?.kind === "files" || activeRightPanelSurface?.kind === "file") &&
       activeProject &&
@@ -6497,6 +6536,7 @@ function ChatViewContent(props: ChatViewProps) {
                 turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
                 activeThreadEnvironmentId={activeThread.environmentId}
                 routeThreadKey={routeThreadKey}
+                markdownThreadRef={panelOwnerThreadRef}
                 onOpenTurnDiff={onOpenTurnDiff}
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
                 onRevertUserMessage={onRevertUserMessage}
@@ -6513,6 +6553,12 @@ function ChatViewContent(props: ChatViewProps) {
                 liveFollowEnabled={timelineLiveFollowEnabled}
                 onIsAtEndChange={onIsAtEndChange}
                 onManualNavigation={cancelTimelineLiveFollowForUserNavigation}
+                {...(!isWorkspacePresentation
+                  ? {
+                      initialScrollOffset: panelInitialScrollOffsetRef.current,
+                      onScrollOffsetChange: rememberPanelScrollOffset,
+                    }
+                  : {})}
                 hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
                 topFadeEnabled={!hasTimelineTopBanner}
                 loadEarlier={loadEarlierTurns}
@@ -6926,18 +6972,35 @@ export default function ChatView(props: ChatViewProps) {
 export type ThreadConversationPaneProps = {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
+  readonly panelOwnerThreadRef: ScopedThreadRef;
   readonly threadSyncPhase?: ThreadSyncPhase | null;
 };
 
 /** A route-neutral conversation surface for a durable server thread. */
 export function ThreadConversationPane(props: ThreadConversationPaneProps) {
+  const threadRef = useMemo(
+    () => scopeThreadRef(props.environmentId, props.threadId),
+    [props.environmentId, props.threadId],
+  );
+  const shell = useThreadShell(threadRef);
+  const detail = useThreadDetail(threadRef);
+  const status = useThreadStatus(threadRef);
+  const threadSyncPhase =
+    props.threadSyncPhase ??
+    resolveThreadSyncPhase({
+      detailExists: detail !== null,
+      shellExists: shell !== null,
+      status,
+    });
+
   return (
     <ChatViewContent
       environmentId={props.environmentId}
       threadId={props.threadId}
       routeKind="server"
       presentation="panel"
-      threadSyncPhase={props.threadSyncPhase ?? null}
+      panelOwnerThreadRef={props.panelOwnerThreadRef}
+      threadSyncPhase={threadSyncPhase}
       reserveTitleBarControlInset={false}
     />
   );

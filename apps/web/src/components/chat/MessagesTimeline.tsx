@@ -214,6 +214,7 @@ interface MessagesTimelineProps {
   runningTurnId: TurnId | null;
   turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
   routeThreadKey: string;
+  markdownThreadRef?: ScopedThreadRef;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
   onRevertUserMessage: (messageId: MessageId) => void;
@@ -237,6 +238,8 @@ interface MessagesTimelineProps {
   liveFollowEnabled: boolean;
   onIsAtEndChange: (isAtEnd: boolean) => void;
   onManualNavigation: () => void;
+  initialScrollOffset?: number | null;
+  onScrollOffsetChange?: (offset: number) => void;
   hideEmptyPlaceholder?: boolean;
   topFadeEnabled?: boolean;
   /** Non-null when older turns exist beyond the loaded window. */
@@ -260,6 +263,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   runningTurnId,
   turnDiffSummaryByAssistantMessageId,
   routeThreadKey,
+  markdownThreadRef,
   onOpenTurnDiff,
   revertTurnCountByUserMessageId,
   onRevertUserMessage,
@@ -277,6 +281,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   liveFollowEnabled,
   onIsAtEndChange,
   onManualNavigation,
+  initialScrollOffset = null,
+  onScrollOffsetChange,
   hideEmptyPlaceholder = false,
   topFadeEnabled = false,
   loadEarlier = null,
@@ -288,6 +294,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const disclosureAnchorKeyRef = useRef<string | null>(null);
   const disclosureSettleFrameRef = useRef<number | null>(null);
   const disclosureSettleSecondFrameRef = useRef<number | null>(null);
+  const restoredScrollOffsetRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -451,6 +458,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     }
 
     const scrollTop = state.scroll ?? 0;
+    onScrollOffsetChange?.(scrollTop);
     const scrollBottom = scrollTop + (state.scrollLength ?? 0);
 
     for (const item of minimapItems) {
@@ -468,7 +476,25 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
       strip.dataset.inView = inView ? "true" : "false";
     }
-  }, [contentInsetEndAdjustment, listRef, minimapItems, minimapStripMap, onIsAtEndChange]);
+  }, [
+    contentInsetEndAdjustment,
+    listRef,
+    minimapItems,
+    minimapStripMap,
+    onIsAtEndChange,
+    onScrollOffsetChange,
+  ]);
+
+  useEffect(() => {
+    if (restoredScrollOffsetRef.current || initialScrollOffset === null || rows.length === 0) {
+      return;
+    }
+    restoredScrollOffsetRef.current = true;
+    const frame = requestAnimationFrame(() => {
+      void listRef.current?.scrollToOffset({ offset: initialScrollOffset, animated: false });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [initialScrollOffset, listRef, rows.length]);
 
   useEffect(() => {
     const frame = requestAnimationFrame(handleScroll);
@@ -504,7 +530,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     () => ({
       timestampFormat,
       routeThreadKey,
-      threadRef: parseScopedThreadKey(routeThreadKey),
+      threadRef: markdownThreadRef ?? parseScopedThreadKey(routeThreadKey),
       markdownCwd,
       resolvedTheme,
       workspaceRoot,
@@ -521,6 +547,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [
       timestampFormat,
       routeThreadKey,
+      markdownThreadRef,
       markdownCwd,
       resolvedTheme,
       workspaceRoot,
@@ -579,7 +606,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             getItemType={getItemType}
             renderItem={renderItem}
             estimatedItemSize={90}
-            initialScrollAtEnd
+            initialScrollAtEnd={initialScrollOffset === null}
             {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
             contentInsetEndAdjustment={contentInsetEndAdjustment}
             maintainScrollAtEnd={

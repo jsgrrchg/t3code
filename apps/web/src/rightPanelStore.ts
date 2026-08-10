@@ -36,7 +36,7 @@ export type RightPanelSurface =
       activeTerminalId: string;
       splitDirection?: "horizontal" | "vertical";
     }
-  | { id: "diff"; kind: "diff" }
+  | { id: "diff"; kind: "diff"; threadId?: ThreadId | null }
   | { id: "files"; kind: "files" }
   | {
       id: `file:${string}`;
@@ -65,6 +65,7 @@ interface RightPanelStoreState {
   openFile: (ref: ScopedThreadRef, relativePath: string, line?: number) => void;
   openTerminal: (ref: ScopedThreadRef, terminalId: string) => void;
   openChat: (ref: ScopedThreadRef, threadId: ThreadId) => void;
+  openThreadDiff: (ref: ScopedThreadRef, threadId: ThreadId | null) => void;
   splitTerminal: (
     ref: ScopedThreadRef,
     surfaceId: string,
@@ -102,7 +103,7 @@ const singletonSurface = (
 ): RightPanelSurface => {
   switch (kind) {
     case "diff":
-      return { id: "diff", kind };
+      return { id: "diff", kind, threadId: null };
     case "files":
       return { id: "files", kind };
     case "agents":
@@ -140,6 +141,19 @@ const chatSurface = (threadId: ThreadId): RightPanelSurface => ({
   id: `chat:${threadId}`,
   kind: "chat",
   threadId,
+});
+
+const openDiffSurface = (
+  current: ThreadRightPanelState,
+  threadId: ThreadId | null,
+): ThreadRightPanelState => ({
+  isOpen: true,
+  activeSurfaceId: "diff",
+  surfaces: current.surfaces.some((surface) => surface.id === "diff")
+    ? current.surfaces.map((surface) =>
+        surface.id === "diff" ? { id: "diff", kind: "diff", threadId } : surface,
+      )
+    : [...current.surfaces, { id: "diff", kind: "diff", threadId }],
 });
 
 const upsertSurface = (
@@ -219,6 +233,18 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                       }
                       return [surface];
                     }
+                    if (surface.kind === "diff") {
+                      return [
+                        {
+                          id: "diff",
+                          kind: "diff",
+                          threadId:
+                            "threadId" in surface && typeof surface.threadId === "string"
+                              ? surface.threadId
+                              : null,
+                        },
+                      ];
+                    }
                     if (surface.kind !== "terminal") return [surface];
                     if (
                       !("resourceId" in surface) ||
@@ -285,6 +311,9 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
       open: (ref, kind) =>
         set((state) => ({
           byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) => {
+            if (kind === "diff") {
+              return openDiffSurface(current, null);
+            }
             if (kind === "preview") {
               const existing = current.surfaces.find((surface) => surface.kind === "preview");
               return upsertSurface(current, existing ?? browserSurface(null));
@@ -339,6 +368,12 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
         set((state) => ({
           byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) =>
             upsertSurface(current, chatSurface(threadId)),
+          ),
+        })),
+      openThreadDiff: (ref, threadId) =>
+        set((state) => ({
+          byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) =>
+            openDiffSurface(current, threadId),
           ),
         })),
       splitTerminal: (ref, surfaceId, terminalId, direction = "horizontal") =>

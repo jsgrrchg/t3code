@@ -83,6 +83,14 @@ export function resolveThreadMetadataUpdateForNextTurn(input: {
   };
 }
 
+export function shouldSeedThreadTitleForFirstTurn(input: {
+  readonly currentTitle: string;
+  readonly parentThreadId?: ThreadId | null | undefined;
+}): boolean {
+  const placeholder = input.parentThreadId == null ? "New thread" : "New chat";
+  return input.currentTitle.trim().toLowerCase() === placeholder.toLowerCase();
+}
+
 export function buildLocalDraftThread(
   threadId: ThreadId,
   draftThread: DraftThreadState,
