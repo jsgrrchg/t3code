@@ -15,6 +15,7 @@ import {
   branchMismatchKey,
   buildExpiredTerminalContextToastCopy,
   buildLoadingThreadFromShell,
+  chatPresentationOwnsWorkspaceChrome,
   buildThreadTurnInterruptInput,
   canInterruptThreadTurn,
   createLocalDispatchSnapshot,
@@ -39,6 +40,13 @@ const environmentId = EnvironmentId.make("environment-local");
 const projectId = ProjectId.make("project-1");
 const threadId = ThreadId.make("thread-1");
 const now = "2026-03-29T00:00:00.000Z";
+
+describe("chat view presentation", () => {
+  it("reserves global workspace chrome and effects for the primary chat", () => {
+    expect(chatPresentationOwnsWorkspaceChrome("workspace")).toBe(true);
+    expect(chatPresentationOwnsWorkspaceChrome("panel")).toBe(false);
+  });
+});
 
 describe("environment reconnect warning grace", () => {
   afterEach(() => vi.useRealTimers());
