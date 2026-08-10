@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  appendFileCommentAnnotationEntry,
   formatFileCommentRange,
   normalizeFileCommentRange,
   remapFileCommentAnnotations,
@@ -15,6 +16,26 @@ describe("file comment annotations", () => {
     });
     expect(formatFileCommentRange(7, 7)).toBe("L7");
     expect(formatFileCommentRange(7, 16)).toBe("L7 to L16");
+  });
+
+  it("groups persisted and draft comments by their ending line", () => {
+    const first = {
+      id: "comment-1",
+      kind: "comment" as const,
+      startLine: 2,
+      endLine: 4,
+      text: "First",
+    };
+    const second = { ...first, id: "comment-2", kind: "draft" as const };
+
+    expect(
+      appendFileCommentAnnotationEntry(appendFileCommentAnnotationEntry([], first), second),
+    ).toEqual([
+      {
+        lineNumber: 4,
+        metadata: { entries: [first, second] },
+      },
+    ]);
   });
 
   it("keeps an annotation range attached when Pierre remaps its anchor line", () => {

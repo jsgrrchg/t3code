@@ -9,3 +9,11 @@ like any other project file. Turn the option off to return to the filtered tree.
 
 Ignored files are also available when searching for a file from **Open file** or typing `@` in the
 composer. They stay out of the default Files tree, but appear when their path matches the search.
+
+## Comment on a file
+
+In source view, select one or more lines to add a comment. In a rendered Markdown preview, hover a
+paragraph, heading, list item, quote, code block, or table and use the comment button in the left
+margin. Comments from either view are attached to the same source lines and added to the composer as
+review context. Removing a comment from the file or composer removes it from both source and rendered
+views.

@@ -1611,6 +1611,19 @@ label:has(> select#reasoning-effort) select {
   word-break: break-word;
 }
 
+.markdown-review-surface [data-markdown-source-start][data-markdown-source-end] {
+  border-radius: var(--radius-sm);
+}
+
+.markdown-review-surface [data-markdown-has-comment] {
+  background: color-mix(in srgb, var(--primary) 5%, transparent);
+  box-shadow: inset 2px 0 color-mix(in srgb, var(--primary) 55%, transparent);
+}
+
+.markdown-review-surface [data-markdown-comment-active] {
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+}
+
 .chat-markdown > :first-child {
   margin-top: 0;
 }

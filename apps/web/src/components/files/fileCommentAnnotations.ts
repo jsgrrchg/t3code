@@ -35,6 +35,32 @@ export function formatFileCommentRange(startLine: number, endLine: number): stri
   return startLine === endLine ? `L${startLine}` : `L${startLine} to L${endLine}`;
 }
 
+export function appendFileCommentAnnotationEntry(
+  annotations: ReadonlyArray<FileCommentLineAnnotation>,
+  entry: FileCommentAnnotationEntry,
+): FileCommentLineAnnotation[] {
+  const annotationIndex = annotations.findIndex(
+    (annotation) => annotation.lineNumber === entry.endLine,
+  );
+  if (annotationIndex < 0) {
+    return [
+      ...annotations,
+      {
+        lineNumber: entry.endLine,
+        metadata: { entries: [entry] },
+      },
+    ];
+  }
+  return annotations.map((annotation, index) =>
+    index === annotationIndex
+      ? {
+          ...annotation,
+          metadata: { entries: [...annotation.metadata.entries, entry] },
+        }
+      : annotation,
+  );
+}
+
 export function remapFileCommentAnnotations(
   annotations: ReadonlyArray<FileCommentLineAnnotation>,
 ): FileCommentLineAnnotation[] {
