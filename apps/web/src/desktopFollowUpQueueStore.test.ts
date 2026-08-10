@@ -1,14 +1,18 @@
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import {
   CommandId,
   EnvironmentId,
   MessageId,
   ProviderInstanceId,
   ThreadId,
+  TurnId,
 } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
   canDispatchDesktopQueuedFollowUp,
+  createDesktopFollowUpQueueBarrier,
+  desktopFollowUpQueueBarrierCompleted,
   type DesktopQueuedMessageFollowUp,
   type DesktopQueuedProviderAction,
   queuedFollowUpsForThread,
@@ -264,20 +268,158 @@ describe("desktop follow-up queue", () => {
     expect(
       canDispatchDesktopQueuedFollowUp({
         sessionStatus: "interrupted",
+        latestTurnState: "completed",
+        hasQueuedTurnStart: false,
+      }),
+    ).toBe(false);
+    expect(
+      canDispatchDesktopQueuedFollowUp({
+        sessionStatus: "ready",
         latestTurnState: "interrupted",
+        hasQueuedTurnStart: false,
       }),
     ).toBe(false);
     expect(
       canDispatchDesktopQueuedFollowUp({
         sessionStatus: "running",
         latestTurnState: "running",
+        hasQueuedTurnStart: false,
       }),
     ).toBe(false);
     expect(
       canDispatchDesktopQueuedFollowUp({
         sessionStatus: "ready",
         latestTurnState: "completed",
+        hasQueuedTurnStart: false,
       }),
+    ).toBe(true);
+  });
+
+  it("holds the next queued message from receipt through turn completion", () => {
+    const entry = queuedFollowUp(1);
+    const baseline = {
+      environmentId: entry.environmentId,
+      id: entry.threadId,
+      latestUserMessageAt: "2026-08-09T00:00:00.000Z",
+      latestTurn: {
+        turnId: TurnId.make("turn-original"),
+        state: "completed",
+        requestedAt: "2026-08-09T00:00:00.000Z",
+        startedAt: "2026-08-09T00:00:00.100Z",
+        completedAt: "2026-08-09T00:00:01.000Z",
+        assistantMessageId: null,
+      },
+      session: {
+        threadId: entry.threadId,
+        status: "ready",
+        providerName: "Codex",
+        runtimeMode: "full-access",
+        activeTurnId: null,
+        lastError: null,
+        updatedAt: "2026-08-09T00:00:01.000Z",
+      },
+    } satisfies Pick<
+      EnvironmentThreadShell,
+      "environmentId" | "id" | "latestUserMessageAt" | "latestTurn" | "session"
+    >;
+    const barrier = createDesktopFollowUpQueueBarrier(entry, baseline, {
+      now: "2026-08-09T00:00:02.000Z",
+    });
+    const now = "2026-08-09T00:00:02.000Z";
+
+    expect(desktopFollowUpQueueBarrierCompleted(barrier, baseline, { now })).toBe(false);
+
+    const awaitingAdoption = {
+      ...baseline,
+      latestUserMessageAt: "2026-08-09T00:00:02.000Z",
+    };
+    expect(desktopFollowUpQueueBarrierCompleted(barrier, awaitingAdoption, { now })).toBe(false);
+    expect(
+      canDispatchDesktopQueuedFollowUp({
+        sessionStatus: "ready",
+        latestTurnState: "completed",
+        hasQueuedTurnStart: true,
+      }),
+    ).toBe(false);
+
+    const running = {
+      ...awaitingAdoption,
+      latestTurn: {
+        turnId: TurnId.make("turn-queued"),
+        state: "running" as const,
+        requestedAt: "2026-08-09T00:00:02.000Z",
+        startedAt: "2026-08-09T00:00:02.100Z",
+        completedAt: null,
+        assistantMessageId: null,
+      },
+      session: {
+        ...baseline.session,
+        status: "running" as const,
+        activeTurnId: TurnId.make("turn-queued"),
+        updatedAt: "2026-08-09T00:00:02.100Z",
+      },
+    };
+    expect(desktopFollowUpQueueBarrierCompleted(barrier, running, { now })).toBe(false);
+
+    const completed = {
+      ...running,
+      latestTurn: {
+        ...running.latestTurn,
+        state: "completed" as const,
+        completedAt: "2026-08-09T00:00:03.000Z",
+      },
+      session: {
+        ...running.session,
+        status: "ready" as const,
+        activeTurnId: null,
+        updatedAt: "2026-08-09T00:00:03.000Z",
+      },
+    };
+    expect(
+      desktopFollowUpQueueBarrierCompleted(barrier, completed, {
+        now: "2026-08-09T00:00:03.000Z",
+      }),
+    ).toBe(true);
+  });
+
+  it("holds provider actions until their session cycle completes", () => {
+    const entry = queuedProviderAction(1);
+    const baseline = {
+      environmentId: entry.environmentId,
+      id: entry.threadId,
+      latestUserMessageAt: "2026-08-09T00:00:00.000Z",
+      latestTurn: null,
+      session: {
+        threadId: entry.threadId,
+        status: "ready" as const,
+        providerName: "Codex",
+        runtimeMode: "full-access" as const,
+        activeTurnId: null,
+        lastError: null,
+        updatedAt: "2026-08-09T00:00:01.000Z",
+      },
+    };
+    const barrier = createDesktopFollowUpQueueBarrier(entry, baseline, {
+      now: "2026-08-09T00:00:02.000Z",
+    });
+
+    expect(
+      desktopFollowUpQueueBarrierCompleted(barrier, baseline, {
+        now: "2026-08-09T00:00:02.000Z",
+      }),
+    ).toBe(false);
+    expect(
+      desktopFollowUpQueueBarrierCompleted(
+        barrier,
+        {
+          ...baseline,
+          session: {
+            ...baseline.session,
+            updatedAt: "2026-08-09T00:00:03.000Z",
+          },
+        },
+        { now: "2026-08-09T00:00:03.000Z" },
+      ),
     ).toBe(true);
   });
 });

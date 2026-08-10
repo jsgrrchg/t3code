@@ -1,19 +1,25 @@
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import { hasQueuedTurnStart } from "@t3tools/client-runtime/state/thread-settled";
 import {
   CommandId,
   type ModelSelection,
   type ProviderInteractionMode,
   type RuntimeMode,
 } from "@t3tools/contracts";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { isElectron } from "./env";
+import { useNowMinute } from "./hooks/useNowMinute";
 import { useThreadShells } from "./state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "./state/environments";
 import { threadEnvironment } from "./state/threads";
 import { useAtomCommand } from "./state/use-atom-command";
 import {
   canDispatchDesktopQueuedFollowUp,
+  createDesktopFollowUpQueueBarrier,
+  desktopFollowUpQueueBarrierCompleted,
+  desktopFollowUpQueueThreadKey,
+  type DesktopFollowUpQueueBarrier,
   type DesktopQueuedFollowUp,
   type DesktopQueuedMessageFollowUp,
   useDesktopFollowUpQueueStore,
@@ -165,6 +171,26 @@ export function DesktopFollowUpQueueDrain() {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const dispatchEntry = useDispatchDesktopQueuedFollowUp();
   const lastAttemptKeyRef = useRef<string | null>(null);
+  const [barriers, setBarriers] = useState<ReadonlyMap<string, DesktopFollowUpQueueBarrier>>(
+    () => new Map(),
+  );
+  const nowMinute = useNowMinute();
+
+  useEffect(() => {
+    setBarriers((current) => {
+      let next: Map<string, DesktopFollowUpQueueBarrier> | null = null;
+      for (const [key, barrier] of current) {
+        const thread = threads.find(
+          (candidate) => desktopFollowUpQueueThreadKey(candidate) === key,
+        );
+        if (thread && desktopFollowUpQueueBarrierCompleted(barrier, thread, { now: nowMinute })) {
+          next ??= new Map(current);
+          next.delete(key);
+        }
+      }
+      return next ?? current;
+    });
+  }, [nowMinute, threads]);
 
   const candidate = useMemo(() => {
     if (!isElectron || dispatchingEntryId !== null || editingEntryId !== null) return null;
@@ -181,25 +207,49 @@ export function DesktopFollowUpQueueDrain() {
           candidate.environmentId === entry.environmentId && candidate.id === entry.threadId,
       );
       if (!thread) continue;
+      if (barriers.has(desktopFollowUpQueueThreadKey(thread))) continue;
       if (
         !canDispatchDesktopQueuedFollowUp({
           sessionStatus: thread.session?.status ?? null,
           latestTurnState: thread.latestTurn?.state ?? null,
+          hasQueuedTurnStart: hasQueuedTurnStart(thread, { now: nowMinute }),
         })
       )
         continue;
       return { entry, thread };
     }
     return null;
-  }, [dispatchingEntryId, editingEntryId, entries, environments, primaryEnvironmentId, threads]);
+  }, [
+    barriers,
+    dispatchingEntryId,
+    editingEntryId,
+    entries,
+    environments,
+    nowMinute,
+    primaryEnvironmentId,
+    threads,
+  ]);
 
   useEffect(() => {
     if (!candidate) return;
     const attemptKey = `${candidate.entry.id}:${candidate.thread.session?.status ?? "none"}:${candidate.thread.session?.updatedAt ?? "none"}`;
     if (lastAttemptKeyRef.current === attemptKey) return;
     lastAttemptKeyRef.current = attemptKey;
+    const barrier = createDesktopFollowUpQueueBarrier(candidate.entry, candidate.thread, {
+      now: new Date().toISOString(),
+    });
+    setBarriers((current) => new Map(current).set(barrier.key, barrier));
     void dispatchEntry(candidate.entry, candidate.thread).then((sent) => {
-      if (sent) lastAttemptKeyRef.current = null;
+      if (sent) {
+        lastAttemptKeyRef.current = null;
+        return;
+      }
+      setBarriers((current) => {
+        if (!current.has(barrier.key)) return current;
+        const next = new Map(current);
+        next.delete(barrier.key);
+        return next;
+      });
     });
   }, [candidate, dispatchEntry]);
 

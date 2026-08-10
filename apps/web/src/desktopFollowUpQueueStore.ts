@@ -1,3 +1,8 @@
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+import {
+  hasQueuedTurnStart,
+  QUEUED_TURN_START_GRACE_MS,
+} from "@t3tools/client-runtime/state/thread-settled";
 import {
   CommandId,
   EnvironmentId,
@@ -60,6 +65,91 @@ export const DesktopQueuedFollowUp = Schema.Union([
   DesktopQueuedProviderAction,
 ]);
 export type DesktopQueuedFollowUp = typeof DesktopQueuedFollowUp.Type;
+
+type DesktopFollowUpQueueThreadLifecycle = Pick<
+  EnvironmentThreadShell,
+  "environmentId" | "id" | "latestUserMessageAt" | "latestTurn" | "session"
+>;
+
+export interface DesktopFollowUpQueueBarrier {
+  readonly key: string;
+  readonly kind: DesktopQueuedFollowUp["kind"];
+  readonly baselineSessionUpdatedAt: string | null;
+  readonly baselineLatestTurn: string | null;
+  readonly expiresAtMs: number;
+}
+
+function latestTurnFingerprint(thread: DesktopFollowUpQueueThreadLifecycle): string | null {
+  const turn = thread.latestTurn;
+  return turn === null
+    ? null
+    : JSON.stringify([turn.turnId, turn.state, turn.requestedAt, turn.startedAt, turn.completedAt]);
+}
+
+export function desktopFollowUpQueueThreadKey(
+  thread: Pick<EnvironmentThreadShell, "environmentId" | "id">,
+): string {
+  return JSON.stringify([thread.environmentId, thread.id]);
+}
+
+export function createDesktopFollowUpQueueBarrier(
+  entry: DesktopQueuedFollowUp,
+  thread: DesktopFollowUpQueueThreadLifecycle,
+  options: { readonly now: string },
+): DesktopFollowUpQueueBarrier {
+  const nowMs = Date.parse(options.now);
+  return {
+    key: desktopFollowUpQueueThreadKey(thread),
+    kind: entry.kind,
+    baselineSessionUpdatedAt: thread.session?.updatedAt ?? null,
+    baselineLatestTurn: latestTurnFingerprint(thread),
+    expiresAtMs: (Number.isNaN(nowMs) ? Date.now() : nowMs) + QUEUED_TURN_START_GRACE_MS,
+  };
+}
+
+/**
+ * A successful command receipt only proves persistence. Keep the thread
+ * blocked until its provider lifecycle advances and returns to a terminal
+ * state, otherwise the next local queue item can become a same-turn steer.
+ */
+export function desktopFollowUpQueueBarrierCompleted(
+  barrier: DesktopFollowUpQueueBarrier,
+  thread: DesktopFollowUpQueueThreadLifecycle,
+  options: { readonly now: string },
+): boolean {
+  const sessionStatus = thread.session?.status ?? null;
+  if (
+    sessionStatus === "starting" ||
+    sessionStatus === "running" ||
+    thread.latestTurn?.state === "running" ||
+    hasQueuedTurnStart(thread, options)
+  ) {
+    return false;
+  }
+
+  const sessionAdvanced = (thread.session?.updatedAt ?? null) !== barrier.baselineSessionUpdatedAt;
+  const latestTurnAdvanced = latestTurnFingerprint(thread) !== barrier.baselineLatestTurn;
+  const latestTurnReachedTerminalState = thread.latestTurn !== null;
+  const sessionReachedFailureState =
+    sessionStatus === "error" || sessionStatus === "stopped" || sessionStatus === "interrupted";
+
+  if (barrier.kind === "message") {
+    const lifecycleCompleted =
+      (latestTurnAdvanced && latestTurnReachedTerminalState) ||
+      (sessionAdvanced && sessionReachedFailureState);
+    if (lifecycleCompleted) return true;
+  } else {
+    // Provider actions do not create a user message, so their completion may
+    // only be visible through the session returning to ready.
+    const lifecycleCompleted =
+      (sessionAdvanced && sessionStatus !== null) ||
+      (latestTurnAdvanced && latestTurnReachedTerminalState);
+    if (lifecycleCompleted) return true;
+  }
+
+  const nowMs = Date.parse(options.now);
+  return !Number.isNaN(nowMs) && nowMs >= barrier.expiresAtMs;
+}
 
 const PersistedDesktopFollowUpQueue = Schema.Struct({
   entries: Schema.Array(DesktopQueuedFollowUp),
@@ -265,11 +355,14 @@ export function shouldQueueDesktopFollowUp(input: {
 export function canDispatchDesktopQueuedFollowUp(input: {
   readonly sessionStatus: string | null;
   readonly latestTurnState: string | null;
+  readonly hasQueuedTurnStart: boolean;
 }): boolean {
   return (
     input.sessionStatus !== "running" &&
     input.sessionStatus !== "starting" &&
-    input.latestTurnState !== "interrupted"
+    input.sessionStatus !== "interrupted" &&
+    input.latestTurnState !== "interrupted" &&
+    !input.hasQueuedTurnStart
   );
 }
 
