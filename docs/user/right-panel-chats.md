@@ -20,10 +20,14 @@ title generation. You can double-click its tab, press `F2` while the tab is focu
 **Rename** from the tab menu to set your own title. The same menu can regenerate the automatic
 title.
 
-Closing a tab only removes it from the current right-panel layout. It does not delete the chat or
-stop a running turn. Reopen it from **Open chat** in the right-panel **+** menu or from the panel's
-empty state. Both selectors search the complete chat history while keeping the visible result list
-bounded. Choose **Delete chat** from the tab menu to permanently remove its conversation.
+Closing a chat tab asks for confirmation and then permanently deletes that chat and its conversation
+history. The same rule applies when a chat is included in **Close others**, **Close to the right**, or
+**Close all**; one confirmation covers all chats affected by the action. Closing non-chat surfaces
+such as Files, Diff, Terminal, Preview, or Agents keeps their existing behavior.
+
+**Open chat** in the right-panel **+** menu and the panel's empty state remain available for chats
+that were closed by an older client. Both selectors search the complete retained chat history while
+keeping the visible result list bounded.
 
 With focus on a panel tab, use Left and Right Arrow (or Home and End) to change tabs, `F2` to rename
 a chat, and Delete to close the tab. Escape cancels a rename and returns focus to the tab. The tab
@@ -34,8 +38,9 @@ clients.
 
 Right-panel chats belong to their main thread. They do not add entries to the left sidebar,
 recents, archive lists, or global thread search. Their relationship and conversation history are
-stored by the server, so they survive reloads and work over remote connections. Which tabs are
-open, their order, and the active tab are layout preferences local to each client.
+stored by the server while the chat exists, so they survive reloads and work over remote
+connections. Which tabs are open, their order, and the active tab are layout preferences local to
+each client; closing a chat tab also deletes the server-owned chat for every client.
 
 The feature is available in the shared web renderer, including the desktop app and remote web
 clients. Mobile does not currently show the right panel and hides these chats from its main thread

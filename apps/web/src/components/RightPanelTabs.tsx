@@ -69,10 +69,10 @@ interface RightPanelTabsProps {
   previewSessions: Readonly<Record<string, PreviewSessionSnapshot>>;
   terminalLabelsById: ReadonlyMap<string, string>;
   onActivate: (surface: RightPanelSurface) => void;
-  onCloseSurface: (surface: RightPanelSurface) => void;
-  onCloseOtherSurfaces: (surface: RightPanelSurface) => void;
-  onCloseSurfacesToRight: (surface: RightPanelSurface) => void;
-  onCloseAllSurfaces: () => void;
+  onCloseSurface: (surface: RightPanelSurface) => Promise<boolean>;
+  onCloseOtherSurfaces: (surface: RightPanelSurface) => Promise<boolean>;
+  onCloseSurfacesToRight: (surface: RightPanelSurface) => Promise<boolean>;
+  onCloseAllSurfaces: () => Promise<boolean>;
   onFocusOwner: () => void;
   onCopyFilePath: (relativePath: string) => void;
   onAddBrowser: () => void;
@@ -505,9 +505,9 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     [focusTab, props],
   );
   const closeSurfaceAndRestoreFocus = useCallback(
-    (surface: RightPanelSurface) => {
-      props.onCloseSurface(surface);
-      restoreFocusAfterSurfaceRemoval(surface);
+    async (surface: RightPanelSurface) => {
+      const closed = await props.onCloseSurface(surface);
+      if (closed) restoreFocusAfterSurfaceRemoval(surface);
     },
     [props, restoreFocusAfterSurfaceRemoval],
   );
@@ -521,9 +521,9 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     },
     [props, restoreFocusAfterSurfaceRemoval],
   );
-  const closeAllSurfacesAndRestoreFocus = useCallback(() => {
-    props.onCloseAllSurfaces();
-    window.requestAnimationFrame(props.onFocusOwner);
+  const closeAllSurfacesAndRestoreFocus = useCallback(async () => {
+    const closed = await props.onCloseAllSurfaces();
+    if (closed) window.requestAnimationFrame(props.onFocusOwner);
   }, [props]);
 
   const handleTabKeyDown = useCallback(
@@ -542,7 +542,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
         return;
       }
       if (action.kind === "close") {
-        closeSurfaceAndRestoreFocus(surface);
+        void closeSurfaceAndRestoreFocus(surface);
         return;
       }
       const target = props.surfaces[action.index];
@@ -580,7 +580,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
         );
       }
       items.push(
-        { id: "close", label: "Close" },
+        { id: "close", label: surface.kind === "chat" ? "Close and delete" : "Close" },
         {
           id: "close-others",
           label: "Close others",
@@ -613,16 +613,16 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           if (surface.kind === "chat") await deleteChatAndRestoreFocus(surface);
           break;
         case "close":
-          closeSurfaceAndRestoreFocus(surface);
+          await closeSurfaceAndRestoreFocus(surface);
           break;
         case "close-others":
-          props.onCloseOtherSurfaces(surface);
+          await props.onCloseOtherSurfaces(surface);
           break;
         case "close-to-right":
-          props.onCloseSurfacesToRight(surface);
+          await props.onCloseSurfacesToRight(surface);
           break;
         case "close-all":
-          closeAllSurfacesAndRestoreFocus();
+          await closeAllSurfacesAndRestoreFocus();
           break;
         case null:
           break;
@@ -645,7 +645,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       if (event.button !== 1) return;
       event.preventDefault();
       event.stopPropagation();
-      closeSurfaceAndRestoreFocus(surface);
+      void closeSurfaceAndRestoreFocus(surface);
     },
     [closeSurfaceAndRestoreFocus],
   );
@@ -772,8 +772,10 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                   <button
                     type="button"
                     className="cursor-pointer group/close relative flex size-4 shrink-0 items-center justify-center rounded-sm hover:bg-muted"
-                    aria-label={`Close ${title}`}
-                    onClick={() => closeSurfaceAndRestoreFocus(surface)}
+                    aria-label={
+                      surface.kind === "chat" ? `Close and delete ${title}` : `Close ${title}`
+                    }
+                    onClick={() => void closeSurfaceAndRestoreFocus(surface)}
                   >
                     <span className="relative flex size-3 items-center justify-center group-hover/tab:hidden group-focus-visible/close:hidden">
                       <SurfaceIcon
@@ -888,22 +890,24 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                           Delete chat
                         </MenuItem>
                         <MenuSeparator />
-                        <MenuItem onClick={() => closeSurfaceAndRestoreFocus(surface)}>
-                          Close
+                        <MenuItem onClick={() => void closeSurfaceAndRestoreFocus(surface)}>
+                          Close and delete
                         </MenuItem>
                         <MenuItem
                           disabled={props.surfaces.length <= 1}
-                          onClick={() => props.onCloseOtherSurfaces(surface)}
+                          onClick={() => void props.onCloseOtherSurfaces(surface)}
                         >
                           Close others
                         </MenuItem>
                         <MenuItem
                           disabled={surfaceIndex >= props.surfaces.length - 1}
-                          onClick={() => props.onCloseSurfacesToRight(surface)}
+                          onClick={() => void props.onCloseSurfacesToRight(surface)}
                         >
                           Close to the right
                         </MenuItem>
-                        <MenuItem onClick={closeAllSurfacesAndRestoreFocus}>Close all</MenuItem>
+                        <MenuItem onClick={() => void closeAllSurfacesAndRestoreFocus()}>
+                          Close all
+                        </MenuItem>
                       </MenuPopup>
                     </Menu>
                   ) : null}

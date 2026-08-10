@@ -153,6 +153,10 @@ import {
   type PanelChatOpenAnnouncement,
   type PanelChatTabMetadata,
 } from "./RightPanelTabs";
+import {
+  panelChatThreadIdsForClose,
+  surfacesClosedAfterPanelChatDeletion,
+} from "./RightPanelTabs.logic";
 import { hasUnseenCompletion } from "./Sidebar.logic";
 import { AgentsPanel } from "./AgentsPanel";
 import {
@@ -3461,43 +3465,6 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [panelChatShells, updateThreadMetadata],
   );
-  const deletePanelChat = useCallback(
-    async (threadId: string): Promise<boolean> => {
-      const panelChat = panelChatShells.find((thread) => thread.id === threadId);
-      if (!panelChat || !activeThreadRef) return false;
-      const api = readLocalApi();
-      const confirmationMessage = [
-        `Delete panel chat "${panelChat.title}"?`,
-        "This permanently clears its conversation history.",
-      ].join("\n");
-      if (api) {
-        const confirmed = await settlePromise(() => api.dialogs.confirm(confirmationMessage));
-        if (confirmed._tag === "Failure" || !confirmed.value) return false;
-      } else if (!globalThis.confirm(confirmationMessage)) {
-        return false;
-      }
-
-      const result = await deleteThread({
-        environmentId: panelChat.environmentId,
-        input: { threadId: panelChat.id },
-      });
-      if (result._tag === "Failure") {
-        if (!isAtomCommandInterrupted(result)) {
-          toastManager.add(
-            stackedThreadToast({
-              type: "error",
-              title: "Failed to delete panel chat",
-              description: chatActionErrorMessage(squashAtomCommandFailure(result)),
-            }),
-          );
-        }
-        return false;
-      }
-      useRightPanelStore.getState().closeSurface(activeThreadRef, `chat:${panelChat.id}`);
-      return true;
-    },
-    [activeThreadRef, deleteThread, panelChatShells],
-  );
   const openFileSurface = useCallback(
     (relativePath: string) => {
       if (!activeThreadRef || !activeProject) return;
@@ -3693,52 +3660,118 @@ function ChatViewContent(props: ChatViewProps) {
       setActivePreviewTab(activeThreadRef, nextActiveSurface.resourceId);
     }
   }, [activeThreadRef]);
-  const closeRightPanelSurface = useCallback(
-    (surface: RightPanelSurface) => {
-      if (!activeThreadRef) return;
-      cleanupRightPanelSurfaces([surface]);
-      useRightPanelStore.getState().closeSurface(activeThreadRef, surface.id);
+  const closeRightPanelSurfaces = useCallback(
+    async (surfaces: readonly RightPanelSurface[]): Promise<boolean> => {
+      if (!activeThreadRef) return false;
+
+      const chatThreadIds = panelChatThreadIdsForClose(surfaces);
+      const chats = chatThreadIds.map(
+        (threadId) =>
+          panelChatShells.find((thread) => thread.id === threadId) ?? {
+            id: threadId,
+            environmentId: activeThreadRef.environmentId,
+            title: panelChatTitlesById.get(threadId) ?? "New chat",
+          },
+      );
+
+      if (chats.length > 0) {
+        const confirmationMessage =
+          chats.length === 1
+            ? [
+                `Close and delete panel chat "${chats[0]?.title ?? "New chat"}"?`,
+                "This permanently clears its conversation history.",
+              ].join("\n")
+            : [
+                `Close and delete ${chats.length} panel chats?`,
+                "This permanently clears their conversation histories.",
+              ].join("\n");
+        const api = readLocalApi();
+        if (api) {
+          const confirmed = await settlePromise(() => api.dialogs.confirm(confirmationMessage));
+          if (confirmed._tag === "Failure" || !confirmed.value) return false;
+        } else if (!globalThis.confirm(confirmationMessage)) {
+          return false;
+        }
+      }
+
+      const deletionResults = await Promise.all(
+        chats.map(async (chat) => ({
+          chat,
+          result: await deleteThread({
+            environmentId: chat.environmentId,
+            input: { threadId: chat.id },
+          }),
+        })),
+      );
+      const failedChatIds = new Set<string>();
+      for (const { chat, result } of deletionResults) {
+        if (result._tag !== "Failure") continue;
+        failedChatIds.add(chat.id);
+        if (!isAtomCommandInterrupted(result)) {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Failed to delete panel chat",
+              description: chatActionErrorMessage(squashAtomCommandFailure(result)),
+            }),
+          );
+        }
+      }
+
+      const closedSurfaces = surfacesClosedAfterPanelChatDeletion(surfaces, failedChatIds);
+      cleanupRightPanelSurfaces(closedSurfaces);
+      const store = useRightPanelStore.getState();
+      for (const surface of closedSurfaces) {
+        store.closeSurface(activeThreadRef, surface.id);
+      }
       syncActivePreviewSurface();
+      return closedSurfaces.length === surfaces.length;
     },
-    [activeThreadRef, cleanupRightPanelSurfaces, syncActivePreviewSurface],
+    [
+      activeThreadRef,
+      cleanupRightPanelSurfaces,
+      deleteThread,
+      panelChatShells,
+      panelChatTitlesById,
+      syncActivePreviewSurface,
+    ],
+  );
+  const closeRightPanelSurface = useCallback(
+    (surface: RightPanelSurface) => closeRightPanelSurfaces([surface]),
+    [closeRightPanelSurfaces],
   );
   const closeOtherRightPanelSurfaces = useCallback(
-    (surface: RightPanelSurface) => {
-      if (!activeThreadRef) return;
+    (surface: RightPanelSurface): Promise<boolean> => {
+      if (!activeThreadRef) return Promise.resolve(false);
       const surfaces = rightPanelState.surfaces.filter((entry) => entry.id !== surface.id);
-      cleanupRightPanelSurfaces(surfaces);
-      useRightPanelStore.getState().closeOtherSurfaces(activeThreadRef, surface.id);
-      syncActivePreviewSurface();
+      return closeRightPanelSurfaces(surfaces);
     },
-    [
-      activeThreadRef,
-      cleanupRightPanelSurfaces,
-      rightPanelState.surfaces,
-      syncActivePreviewSurface,
-    ],
+    [activeThreadRef, closeRightPanelSurfaces, rightPanelState.surfaces],
   );
   const closeRightPanelSurfacesToRight = useCallback(
-    (surface: RightPanelSurface) => {
-      if (!activeThreadRef) return;
+    (surface: RightPanelSurface): Promise<boolean> => {
+      if (!activeThreadRef) return Promise.resolve(false);
       const surfaceIndex = rightPanelState.surfaces.findIndex((entry) => entry.id === surface.id);
-      if (surfaceIndex < 0) return;
+      if (surfaceIndex < 0) return Promise.resolve(false);
       const surfaces = rightPanelState.surfaces.slice(surfaceIndex + 1);
-      cleanupRightPanelSurfaces(surfaces);
-      useRightPanelStore.getState().closeSurfacesToRight(activeThreadRef, surface.id);
-      syncActivePreviewSurface();
+      return closeRightPanelSurfaces(surfaces);
     },
-    [
-      activeThreadRef,
-      cleanupRightPanelSurfaces,
-      rightPanelState.surfaces,
-      syncActivePreviewSurface,
-    ],
+    [activeThreadRef, closeRightPanelSurfaces, rightPanelState.surfaces],
   );
-  const closeAllRightPanelSurfaces = useCallback(() => {
-    if (!activeThreadRef) return;
-    cleanupRightPanelSurfaces(rightPanelState.surfaces);
-    useRightPanelStore.getState().closeAllSurfaces(activeThreadRef);
-  }, [activeThreadRef, cleanupRightPanelSurfaces, rightPanelState.surfaces]);
+  const closeAllRightPanelSurfaces = useCallback(
+    () => closeRightPanelSurfaces(rightPanelState.surfaces),
+    [closeRightPanelSurfaces, rightPanelState.surfaces],
+  );
+  const deletePanelChat = useCallback(
+    (threadId: string): Promise<boolean> => {
+      const surface = rightPanelState.surfaces.find(
+        (entry): entry is Extract<RightPanelSurface, { kind: "chat" }> =>
+          entry.kind === "chat" && entry.threadId === threadId,
+      );
+      return surface ? closeRightPanelSurface(surface) : Promise.resolve(false);
+    },
+    [closeRightPanelSurface, rightPanelState.surfaces],
+  );
   const copyRightPanelFilePath = useCallback(
     (relativePath: string) => {
       if (!activeWorkspaceRoot) {

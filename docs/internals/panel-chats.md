@@ -31,7 +31,9 @@ Durable data and local layout intentionally have different owners:
 - The server owns the parent-child relationship, transcript, execution, title, checkpoints, and
   lifecycle.
 - `rightPanelStore` owns open surfaces, order, and active surface per environment and top-level
-  thread. Closing a tab changes only this local layout state.
+  thread. Closing a non-chat surface changes only this local layout state. Closing a chat surface
+  first deletes its durable child thread, then removes the local surface; bulk close actions apply
+  the same rule to every included chat.
 - The child selector derives all durable children for a parent, allowing a client to reopen a chat
   even when no local tab exists. It searches the full derived collection and caps rendered results
   so an unbounded durable history does not create an unbounded menu tree.

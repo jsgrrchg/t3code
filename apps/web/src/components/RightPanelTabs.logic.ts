@@ -4,6 +4,33 @@ export type RightPanelTabKeyAction =
   | { readonly kind: "rename" }
   | null;
 
+interface ClosableRightPanelSurface<ThreadId extends string = string> {
+  readonly kind: string;
+  readonly threadId?: ThreadId | null;
+}
+
+export function panelChatThreadIdsForClose<ThreadId extends string>(
+  surfaces: readonly ClosableRightPanelSurface<ThreadId>[],
+): ThreadId[] {
+  return [
+    ...new Set(
+      surfaces.flatMap((surface) =>
+        surface.kind === "chat" && surface.threadId ? [surface.threadId] : [],
+      ),
+    ),
+  ];
+}
+
+export function surfacesClosedAfterPanelChatDeletion<T extends ClosableRightPanelSurface>(
+  surfaces: readonly T[],
+  failedChatThreadIds: ReadonlySet<string>,
+): T[] {
+  return surfaces.filter(
+    (surface) =>
+      surface.kind !== "chat" || !surface.threadId || !failedChatThreadIds.has(surface.threadId),
+  );
+}
+
 export function resolveRightPanelTabKeyAction(input: {
   readonly key: string;
   readonly currentIndex: number;

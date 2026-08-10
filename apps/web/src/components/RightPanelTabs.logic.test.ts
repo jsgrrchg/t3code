@@ -1,12 +1,40 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  panelChatThreadIdsForClose,
   resolvePanelChatOpenAnnouncementThreadId,
   resolveFocusTargetAfterRemoteSurfaceRemoval,
   resolveFocusedRightPanelSurfaceId,
   shouldClearRightPanelFocusOwner,
   resolveRightPanelTabKeyAction,
+  surfacesClosedAfterPanelChatDeletion,
 } from "./RightPanelTabs.logic";
+
+describe("right-panel chat close deletion", () => {
+  const surfaces = [
+    { id: "files", kind: "files" },
+    { id: "chat:one", kind: "chat", threadId: "one" },
+    { id: "diff", kind: "diff" },
+    { id: "chat:two", kind: "chat", threadId: "two" },
+  ] as const;
+
+  it("selects every unique chat included in a close action", () => {
+    expect(panelChatThreadIdsForClose([...surfaces, surfaces[1]])).toEqual(["one", "two"]);
+  });
+
+  it("keeps a chat surface open when its durable deletion fails", () => {
+    expect(surfacesClosedAfterPanelChatDeletion(surfaces, new Set(["two"]))).toEqual([
+      surfaces[0],
+      surfaces[1],
+      surfaces[2],
+    ]);
+    expect(surfacesClosedAfterPanelChatDeletion(surfaces, new Set(["one"]))).toEqual([
+      surfaces[0],
+      surfaces[2],
+      surfaces[3],
+    ]);
+  });
+});
 
 describe("resolveRightPanelTabKeyAction", () => {
   it("wraps arrow navigation and resolves home and end", () => {
