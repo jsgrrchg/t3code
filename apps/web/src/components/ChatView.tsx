@@ -2758,7 +2758,7 @@ function ChatViewContent(props: ChatViewProps) {
   const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
   const gitHistoryAvailability = resolveGitHistoryAvailability({
     hasProject: activeProject !== null,
-    cwd: gitCwd,
+    cwd: gitStatusCwd,
     isGitRepo: gitStatusQuery.data?.isRepo ?? null,
     capability: serverConfig?.environment.capabilities.gitHistory,
   });
@@ -6487,7 +6487,7 @@ function ChatViewContent(props: ChatViewProps) {
     activeSurfaceKind: activeRightPanelSurface?.kind ?? null,
     availability: gitHistoryAvailability,
     environmentId: activeThreadRef?.environmentId ?? null,
-    cwd: gitCwd,
+    cwd: gitStatusCwd,
   });
   const rightPanelContent = activeThreadRef ? (
     activeRightPanelSurface?.kind === "preview" ? (

@@ -253,7 +253,7 @@ describe("GitWorkflowService", () => {
         const worktree = yield* workflow.listHistory({ cwd: managedWorktree });
         const outsideError = yield* workflow.listHistory({ cwd: outsideRoot }).pipe(Effect.flip);
         assert.equal(outsideError._tag, "GitCommandError");
-        assert.match(outsideError.detail, /configured workspace or managed worktrees root/);
+        assert.match(outsideError.detail, /configured workspace.*managed worktrees root/);
         return [workspace, worktree] as const;
       }).pipe(Effect.provide(layer));
 
@@ -261,6 +261,75 @@ describe("GitWorkflowService", () => {
       assert.deepStrictEqual(worktreeResult, { commits: [], headSha: null, nextCursor: null });
       assert.deepStrictEqual(resolveCalls, [workspaceRoot, managedWorktree]);
       assert.deepStrictEqual(listHistoryCalls, [workspaceRoot, managedWorktree]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("lists history from sibling worktrees linked to the configured workspace", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const parent = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-git-history-linked-worktrees-",
+      });
+      const mainWorktree = path.join(parent, "main");
+      const configuredWorktree = path.join(parent, "feature");
+      const unrelatedDirectory = path.join(parent, "unrelated");
+      const baseDir = path.join(parent, "t3-home");
+      const commonGitDir = path.join(mainWorktree, ".git");
+      const configuredGitDir = path.join(commonGitDir, "worktrees", "feature");
+      yield* fileSystem.makeDirectory(configuredGitDir, { recursive: true });
+      yield* fileSystem.makeDirectory(configuredWorktree, { recursive: true });
+      yield* fileSystem.makeDirectory(unrelatedDirectory, { recursive: true });
+      yield* fileSystem.writeFileString(
+        path.join(configuredWorktree, ".git"),
+        `gitdir: ${configuredGitDir}\n`,
+      );
+      yield* fileSystem.writeFileString(path.join(configuredGitDir, "commondir"), "../..\n");
+      yield* fileSystem.writeFileString(
+        path.join(configuredGitDir, "gitdir"),
+        `${path.join(configuredWorktree, ".git")}\n`,
+      );
+
+      const config = yield* ServerConfig.ServerConfig.pipe(
+        Effect.provide(ServerConfig.layerTest(configuredWorktree, baseDir)),
+      );
+      const listHistoryCalls: string[] = [];
+      const gitHandle = { kind: "git" } as VcsDriverRegistry.VcsDriverHandle;
+      const layer = GitWorkflowService.layer.pipe(
+        Layer.provide(
+          Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({
+            resolve: () => Effect.succeed(gitHandle),
+          }),
+        ),
+        Layer.provide(
+          Layer.mock(GitVcsDriver.GitVcsDriver)({
+            listHistory: ({ cwd }) =>
+              Effect.sync(() => {
+                listHistoryCalls.push(cwd);
+                return { commits: [], headSha: null, nextCursor: null };
+              }),
+          }),
+        ),
+        Layer.provide(Layer.mock(GitManager.GitManager)({})),
+        Layer.provide(ServerConfig.layer(config)),
+        Layer.provideMerge(NodeServices.layer),
+      );
+
+      yield* Effect.gen(function* () {
+        const workflow = yield* GitWorkflowService.GitWorkflowService;
+        yield* workflow.listHistory({ cwd: mainWorktree });
+
+        // A .git file alone must not let an unrelated directory impersonate a
+        // linked worktree; the private Git directory backlink must also match.
+        yield* fileSystem.writeFileString(
+          path.join(unrelatedDirectory, ".git"),
+          yield* fileSystem.readFileString(path.join(configuredWorktree, ".git")),
+        );
+        const error = yield* workflow.listHistory({ cwd: unrelatedDirectory }).pipe(Effect.flip);
+        assert.equal(error._tag, "GitCommandError");
+      }).pipe(Effect.provide(layer));
+
+      assert.deepStrictEqual(listHistoryCalls, [mainWorktree]);
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 

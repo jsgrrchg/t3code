@@ -317,7 +317,7 @@ export const make = Effect.gen(function* () {
               detail:
                 cause._tag === "WorkspaceCwdCanonicalizationError"
                   ? "Failed to resolve a path while validating the Git history workspace."
-                  : "Git history cwd must stay within the configured workspace or managed worktrees root.",
+                  : "Git history cwd must stay within the configured workspace, its linked Git worktrees, or the managed worktrees root.",
               cause,
             }),
         ),
