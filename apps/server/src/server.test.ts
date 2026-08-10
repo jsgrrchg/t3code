@@ -5318,6 +5318,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 ],
                 headSha: "0123456789abcdef0123456789abcdef01234567",
                 nextCursor: null,
+                totalCount: 1,
               }),
             createWorktree: () =>
               Effect.succeed({

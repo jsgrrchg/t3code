@@ -30,6 +30,7 @@ export interface GitHistoryAccumulation extends GitHistoryTarget {
   readonly commits: ReadonlyArray<GitHistoryCommitSummary>;
   readonly headSha: GitListHistoryResult["headSha"];
   readonly nextCursor: GitListHistoryResult["nextCursor"];
+  readonly totalCount: GitListHistoryResult["totalCount"];
 }
 
 function sameGitHistoryTarget(
@@ -63,6 +64,7 @@ export function createEmptyGitHistoryAccumulation(
     commits: [],
     headSha: null,
     nextCursor: null,
+    totalCount: null,
   };
 }
 
@@ -84,6 +86,7 @@ export function replaceGitHistoryPage(
     commits: dedupeGitHistoryCommits(page.commits),
     headSha: page.headSha,
     nextCursor: page.nextCursor,
+    totalCount: page.totalCount,
   };
 }
 
@@ -99,6 +102,7 @@ export function appendGitHistoryPage(
     ...accumulation,
     commits: dedupeGitHistoryCommits([...accumulation.commits, ...page.commits]),
     nextCursor: page.nextCursor,
+    totalCount: accumulation.totalCount ?? page.totalCount,
   };
 }
 

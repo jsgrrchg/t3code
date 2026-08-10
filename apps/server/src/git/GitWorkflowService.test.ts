@@ -238,7 +238,7 @@ describe("GitWorkflowService", () => {
             listHistory: ({ cwd }) =>
               Effect.sync(() => {
                 listHistoryCalls.push(cwd);
-                return { commits: [], headSha: null, nextCursor: null };
+                return { commits: [], headSha: null, nextCursor: null, totalCount: 0 };
               }),
           }),
         ),
@@ -262,7 +262,12 @@ describe("GitWorkflowService", () => {
         return workspace;
       }).pipe(Effect.provide(layer));
 
-      assert.deepStrictEqual(workspaceResult, { commits: [], headSha: null, nextCursor: null });
+      assert.deepStrictEqual(workspaceResult, {
+        commits: [],
+        headSha: null,
+        nextCursor: null,
+        totalCount: 0,
+      });
       assert.deepStrictEqual(resolveCalls, [workspaceRoot]);
       assert.deepStrictEqual(listHistoryCalls, [workspaceRoot]);
     }).pipe(Effect.provide(NodeServices.layer)),
@@ -310,7 +315,7 @@ describe("GitWorkflowService", () => {
             listHistory: ({ cwd }) =>
               Effect.sync(() => {
                 listHistoryCalls.push(cwd);
-                return { commits: [], headSha: null, nextCursor: null };
+                return { commits: [], headSha: null, nextCursor: null, totalCount: 0 };
               }),
           }),
         ),

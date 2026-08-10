@@ -79,6 +79,7 @@ export interface GitHistoryPanelViewProps {
   readonly commits: ReadonlyArray<GitHistoryCommitSummary>;
   readonly headSha: GitListHistoryResult["headSha"];
   readonly nextCursor: GitListHistoryResult["nextCursor"];
+  readonly totalCount: GitListHistoryResult["totalCount"];
   readonly isInitialLoading: boolean;
   readonly initialError: string | null;
   readonly isRefreshing: boolean;
@@ -233,6 +234,7 @@ export function GitHistoryPanelView({
   commits,
   headSha,
   nextCursor,
+  totalCount,
   isInitialLoading,
   initialError,
   isRefreshing,
@@ -259,6 +261,12 @@ export function GitHistoryPanelView({
       ROW_END_PADDING,
   } satisfies CSSProperties;
   const controlsPending = isInitialLoading || isRefreshing || isLoadingMore;
+  const displayedCommitLabel =
+    totalCount !== null
+      ? `${totalCount.toLocaleString()} commit${totalCount === 1 ? "" : "s"}`
+      : commits.length > 0
+        ? `${commits.length.toLocaleString()}${nextCursor === null ? "" : "+"} commit${commits.length === 1 ? "" : "s"}`
+        : "History";
 
   let content;
   if (isInitialLoading) {
@@ -349,11 +357,7 @@ export function GitHistoryPanelView({
   return (
     <section aria-label="Git commit history" className="flex h-full min-h-0 min-w-0 flex-col">
       <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border/60 px-2">
-        <span className="min-w-0 flex-1 truncate text-xs font-medium">
-          {commits.length === 0
-            ? "History"
-            : `${commits.length} commit${commits.length === 1 ? "" : "s"}`}
-        </span>
+        <span className="min-w-0 flex-1 truncate text-xs font-medium">{displayedCommitLabel}</span>
         {isRefreshing ? (
           <span className="text-[11px] text-muted-foreground" role="status">
             Refreshing…
@@ -515,6 +519,7 @@ export function GitHistoryPanel({
       isRefreshing={hasVisibleCommits && firstPage.isPending}
       loadMoreError={scopedState.loadMoreError}
       nextCursor={visibleHistory.nextCursor}
+      totalCount={visibleHistory.totalCount}
       refreshError={hasVisibleCommits ? firstPage.error : null}
       onLoadOlder={loadOlder}
       onRefresh={refresh}

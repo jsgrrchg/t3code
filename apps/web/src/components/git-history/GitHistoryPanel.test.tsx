@@ -56,6 +56,7 @@ const baseProps: GitHistoryPanelViewProps = {
   commits: [commit()],
   headSha: HEAD_SHA,
   nextCursor: null,
+  totalCount: 1,
   isInitialLoading: false,
   initialError: null,
   isRefreshing: false,
@@ -206,9 +207,10 @@ describe("GitHistoryPanelView states", () => {
   });
 
   it("shows an empty state after a successful empty page", () => {
-    const markup = renderView({ commits: [], headSha: null });
+    const markup = renderView({ commits: [], headSha: null, totalCount: 0 });
 
     expect(markup).toContain("No commits found.");
+    expect(markup).toContain("0 commits");
     expect(buttonTagBefore(markup, "Refresh history")).not.toContain('disabled=""');
   });
 
@@ -230,6 +232,13 @@ describe("GitHistoryPanelView states", () => {
     expect(markup).toContain("Render history rows");
     expect(markup).toContain("Refreshing…");
     expect(buttonTagBefore(markup, "Refreshing history")).toContain('disabled=""');
+  });
+
+  it("shows the repository total instead of only the loaded rows", () => {
+    const markup = renderView({ totalCount: 7_838 });
+
+    expect(markup).toContain("7,838 commits");
+    expect(markup).not.toContain(">1 commit<");
   });
 
   it("preserves rows while loading or retrying an older page", () => {

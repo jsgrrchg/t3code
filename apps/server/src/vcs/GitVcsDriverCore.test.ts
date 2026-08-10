@@ -40,6 +40,7 @@ describe("GitVcsDriver.listHistory", () => {
         commits: [],
         headSha: null,
         nextCursor: null,
+        totalCount: 0,
       });
     }).pipe(Effect.provide(TestLayer)),
   );
@@ -66,12 +67,14 @@ describe("GitVcsDriver.listHistory", () => {
       assert.isTrue(attachedShas.has(remoteSha));
       assert.isTrue(attachedShas.has(tagSha));
       assert.isFalse(attachedShas.has(checkpointSha));
+      assert.equal(attached.totalCount, 4);
 
       yield* git(cwd, ["checkout", "--detach", branchSha]);
       const detached = yield* driver.listHistory({ cwd });
       assert.equal(detached.headSha, branchSha);
       assert.isTrue(detached.commits.some((commit) => commit.sha === branchSha));
       assert.isFalse(detached.commits.some((commit) => commit.sha === checkpointSha));
+      assert.equal(detached.totalCount, 4);
     }).pipe(Effect.provide(TestLayer)),
   );
 
@@ -100,6 +103,7 @@ describe("GitVcsDriver.listHistory", () => {
       assert.equal(firstPage.commits[0]?.sha, mergeSha);
       assert.lengthOf(firstPage.commits[0]?.parentShas ?? [], 3);
       assert.equal(firstPage.nextCursor, 2);
+      assert.equal(firstPage.totalCount, 4);
 
       const secondPage = yield* driver.listHistory({
         cwd,
@@ -109,6 +113,7 @@ describe("GitVcsDriver.listHistory", () => {
       const allLoadedShas = [...firstPage.commits, ...secondPage.commits].map(
         (commit) => commit.sha,
       );
+      assert.isNull(secondPage.totalCount);
       assert.equal(new Set(allLoadedShas).size, allLoadedShas.length);
       for (const parentSha of firstPage.commits[0]?.parentShas ?? []) {
         const parentIndex = allLoadedShas.indexOf(parentSha);

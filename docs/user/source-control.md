@@ -58,6 +58,9 @@ graph, subjects, authors, author dates, and commit IDs. History is read-only and
 remote refs, and tags already known by the Git repository on the server. Opening it does not fetch
 from a remote or change the working tree.
 
+The header shows the total number of commits in that public history. Commit rows load in pages as
+you request older entries, so showing the total does not load every row at once.
+
 Select a commit ID to copy its full SHA. The commit ID briefly changes to **Copied** after a
 successful copy.
 

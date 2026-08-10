@@ -159,6 +159,9 @@ interface ExecuteGitOptions {
 
 const decodeGitHistoryCommitSummary = Schema.decodeUnknownEffect(GitHistoryCommitSummary);
 const decodeGitObjectId = Schema.decodeUnknownEffect(GitObjectId);
+const decodeGitHistoryTotalCount = Schema.decodeUnknownEffect(
+  Schema.NumberFromString.check(Schema.isGreaterThanOrEqualTo(0)),
+);
 
 function truncateGitHistoryField(value: string, maxLength: number): string {
   if (value.length <= maxLength) return value;
@@ -2564,7 +2567,13 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
               ),
             )
           : null;
-      const result = yield* executeGit(
+      const publicRevisionArgs = [
+        ...(headSha === null ? [] : ["HEAD"]),
+        "--branches",
+        "--remotes",
+        "--tags",
+      ];
+      const historyEffect = executeGit(
         "GitVcsDriver.listHistory.log",
         input.cwd,
         [
@@ -2577,10 +2586,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           `--skip=${cursor}`,
           `--max-count=${limit + 1}`,
           "--format=%H%x00%P%x00%s%x00%an%x00%ae%x00%aI%x00",
-          ...(headSha === null ? [] : ["HEAD"]),
-          "--branches",
-          "--remotes",
-          "--tags",
+          ...publicRevisionArgs,
         ],
         {
           timeoutMs: 30_000,
@@ -2588,6 +2594,39 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           fallbackErrorDetail: "Git history enumeration failed.",
         },
       );
+      const totalCountEffect =
+        cursor === 0
+          ? executeGit(
+              "GitVcsDriver.listHistory.count",
+              input.cwd,
+              ["rev-list", "--count", ...publicRevisionArgs],
+              {
+                timeoutMs: 5_000,
+                maxOutputBytes: 64,
+                fallbackErrorDetail: "Git history count failed.",
+              },
+            ).pipe(
+              Effect.flatMap((countResult) =>
+                decodeGitHistoryTotalCount(countResult.stdout.trim()).pipe(
+                  Effect.mapError((cause) =>
+                    malformedGitHistoryOutput(
+                      input.cwd,
+                      "Git returned an invalid history commit count.",
+                      cause,
+                    ),
+                  ),
+                ),
+              ),
+              Effect.catch((error) =>
+                Effect.logWarning(
+                  `GitVcsDriver.listHistory: commit count unavailable for ${input.cwd}: ${error.message}`,
+                ).pipe(Effect.as(null)),
+              ),
+            )
+          : Effect.succeed(null);
+      const [result, totalCount] = yield* Effect.all([historyEffect, totalCountEffect], {
+        concurrency: 2,
+      });
       const parsedCommits = yield* parseGitHistoryLogOutput({
         cwd: input.cwd,
         stdout: result.stdout,
@@ -2600,6 +2639,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         commits,
         headSha,
         nextCursor: hasNextPage ? cursor + commits.length : null,
+        totalCount,
       } satisfies GitListHistoryResult;
     },
   );

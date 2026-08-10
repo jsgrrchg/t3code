@@ -148,6 +148,7 @@ describe("GitListHistoryResult", () => {
       ],
       headSha: SHA_1,
       nextCursor: 100,
+      totalCount: 1_234,
     };
 
     const decoded = decodeListHistoryResult(input);

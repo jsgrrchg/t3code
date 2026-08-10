@@ -231,6 +231,7 @@ export const GitListHistoryResult = Schema.Struct({
   commits: Schema.Array(GitHistoryCommitSummary).check(Schema.isMaxLength(GIT_HISTORY_MAX_LIMIT)),
   headSha: Schema.NullOr(GitObjectId),
   nextCursor: Schema.NullOr(NonNegativeInt),
+  totalCount: Schema.NullOr(NonNegativeInt),
 });
 export type GitListHistoryResult = typeof GitListHistoryResult.Type;
 
