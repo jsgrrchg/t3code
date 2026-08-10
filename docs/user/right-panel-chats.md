@@ -42,6 +42,10 @@ stored by the server while the chat exists, so they survive reloads and work ove
 connections. Which tabs are open, their order, and the active tab are layout preferences local to
 each client; closing a chat tab also deletes the server-owned chat for every client.
 
+The main thread's left-sidebar status includes activity from its right-panel chats. It shows when a
+child chat is working, needs approval or input, is monitoring background work, or has an unread
+completion, without adding a separate sidebar row for that chat.
+
 The feature is available in the shared web renderer, including the desktop app and remote web
 clients. Mobile does not currently show the right panel and hides these chats from its main thread
 history. When connected to an older server that does not advertise right-panel chat support, the

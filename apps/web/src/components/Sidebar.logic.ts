@@ -1,4 +1,5 @@
 import * as React from "react";
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { isTopLevelThread, type ContextMenuItem } from "@t3tools/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import {
@@ -439,6 +440,23 @@ export type SidebarThreadStatus =
   | "failed"
   | "ready";
 
+export interface PanelChatSidebarActivity {
+  readonly status: SidebarThreadStatus;
+  readonly statusPill: ThreadStatusPill | null;
+  readonly unread: boolean;
+  readonly workingStartedAt: string | null;
+  readonly chatCount: number;
+}
+
+const SIDEBAR_THREAD_STATUS_PRIORITY: Record<SidebarThreadStatus, number> = {
+  approval: 6,
+  input: 5,
+  working: 4,
+  failed: 3,
+  monitoring: 2,
+  ready: 1,
+};
+
 type SidebarThreadStatusInput = Pick<
   SidebarThreadSummary,
   "hasPendingApprovals" | "hasPendingUserInput" | "session" | "backgroundLiveness"
@@ -468,6 +486,74 @@ export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): Si
     return "monitoring";
   }
   return "ready";
+}
+
+export function resolveSidebarThreadStatusWithPanelActivity(
+  thread: SidebarThreadStatusInput,
+  panelActivity: PanelChatSidebarActivity | null | undefined,
+): SidebarThreadStatus {
+  const threadStatus = resolveSidebarThreadStatus(thread);
+  if (!panelActivity) return threadStatus;
+  return SIDEBAR_THREAD_STATUS_PRIORITY[panelActivity.status] >
+    SIDEBAR_THREAD_STATUS_PRIORITY[threadStatus]
+    ? panelActivity.status
+    : threadStatus;
+}
+
+function earlierTimestamp(current: string | null, candidate: string | null): string | null {
+  if (candidate === null) return current;
+  if (current === null) return candidate;
+  const currentMs = Date.parse(current);
+  const candidateMs = Date.parse(candidate);
+  if (Number.isNaN(candidateMs)) return current;
+  if (Number.isNaN(currentMs)) return candidate;
+  return candidateMs < currentMs ? candidate : current;
+}
+
+/**
+ * Roll up hidden right-panel child threads once so sidebar rows can perform
+ * constant-time lookups instead of scanning every child for every parent.
+ */
+export function buildPanelChatSidebarActivityByParent(
+  threads: ReadonlyArray<SidebarThreadSummary>,
+  lastVisitedAtByThreadKey: ReadonlyMap<string, string | null | undefined>,
+): ReadonlyMap<string, PanelChatSidebarActivity> {
+  const activityByParent = new Map<string, PanelChatSidebarActivity>();
+
+  for (const thread of threads) {
+    if (thread.parentThreadId == null || thread.archivedAt !== null) continue;
+    const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+    const parentKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.parentThreadId));
+    const lastVisitedAt = lastVisitedAtByThreadKey.get(threadKey);
+    const status = resolveSidebarThreadStatus(thread);
+    const statusPill = resolveThreadStatusPill({
+      thread: {
+        ...thread,
+        ...(lastVisitedAt !== null && lastVisitedAt !== undefined ? { lastVisitedAt } : {}),
+      },
+    });
+    const unread = hasUnseenCompletion({
+      ...thread,
+      ...(lastVisitedAt !== null && lastVisitedAt !== undefined ? { lastVisitedAt } : {}),
+    });
+    const current = activityByParent.get(parentKey);
+    activityByParent.set(parentKey, {
+      status:
+        current &&
+        SIDEBAR_THREAD_STATUS_PRIORITY[current.status] >= SIDEBAR_THREAD_STATUS_PRIORITY[status]
+          ? current.status
+          : status,
+      statusPill: resolveProjectStatusIndicator([current?.statusPill ?? null, statusPill]),
+      unread: (current?.unread ?? false) || unread,
+      workingStartedAt:
+        status === "working"
+          ? earlierTimestamp(current?.workingStartedAt ?? null, resolveWorkingStartedAt(thread))
+          : (current?.workingStartedAt ?? null),
+      chatCount: (current?.chatCount ?? 0) + 1,
+    });
+  }
+
+  return activityByParent;
 }
 
 /** NaN-safe Date.parse for sort comparators: a malformed timestamp must not

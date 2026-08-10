@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import {
   archiveSelectedThreadEntries,
+  buildPanelChatSidebarActivityByParent,
   buildBulkTitleRegenerationContextMenuItem,
   buildMultiSelectThreadContextMenuItems,
   createThreadJumpHintVisibilityController,
@@ -18,6 +19,7 @@ import {
   resolveSidebarStageBadgeLabel,
   resolveThreadRowClassName,
   resolveSidebarThreadStatus,
+  resolveSidebarThreadStatusWithPanelActivity,
   resolveThreadStatusPill,
   resolveWorkingStartedAt,
   searchSidebarThreadsByTitle,
@@ -48,6 +50,7 @@ import {
   DEFAULT_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   type Project,
+  type SidebarThreadSummary,
   type Thread,
 } from "../types";
 
@@ -696,6 +699,100 @@ describe("resolveSidebarThreadStatus", () => {
 
   it("defaults to ready with no session", () => {
     expect(resolveSidebarThreadStatus({ ...idle, session: null })).toBe("ready");
+  });
+});
+
+describe("buildPanelChatSidebarActivityByParent", () => {
+  const makeShell = (overrides: Partial<SidebarThreadSummary> = {}): SidebarThreadSummary => ({
+    ...makeThread(overrides as Partial<Thread>),
+    latestUserMessageAt: null,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    hasActionableProposedPlan: false,
+    backgroundLiveness: null,
+    ...overrides,
+  });
+  const runningSession = {
+    threadId: ThreadId.make("thread-running"),
+    status: "running" as const,
+    providerName: "Codex",
+    providerInstanceId: ProviderInstanceId.make("codex"),
+    runtimeMode: DEFAULT_RUNTIME_MODE,
+    activeTurnId: "turn-running" as never,
+    lastError: null,
+    updatedAt: "2026-03-09T10:00:00.000Z",
+  };
+
+  it("rolls hidden child activity up to its scoped parent", () => {
+    const parentId = ThreadId.make("thread-parent");
+    const activityByParent = buildPanelChatSidebarActivityByParent(
+      [
+        makeShell({ id: parentId, parentThreadId: null }),
+        makeShell({
+          id: ThreadId.make("thread-running"),
+          parentThreadId: parentId,
+          session: runningSession,
+          latestTurn: makeLatestTurn({ completedAt: null, startedAt: "2026-03-09T09:58:00.000Z" }),
+        }),
+        makeShell({
+          id: ThreadId.make("thread-approval"),
+          parentThreadId: parentId,
+          hasPendingApprovals: true,
+        }),
+        makeShell({
+          id: ThreadId.make("thread-archived"),
+          parentThreadId: parentId,
+          archivedAt: "2026-03-09T11:00:00.000Z",
+          hasPendingUserInput: true,
+        }),
+      ],
+      new Map(),
+    );
+
+    expect(activityByParent.get("environment-local:thread-parent")).toMatchObject({
+      status: "approval",
+      chatCount: 2,
+      workingStartedAt: "2026-03-09T09:58:00.000Z",
+      unread: false,
+      statusPill: { label: "Pending Approval" },
+    });
+  });
+
+  it("preserves child completion state until that child is visited", () => {
+    const parentId = ThreadId.make("thread-parent");
+    const childId = ThreadId.make("thread-complete");
+    const activityByParent = buildPanelChatSidebarActivityByParent(
+      [
+        makeShell({ id: parentId, parentThreadId: null }),
+        makeShell({ id: childId, parentThreadId: parentId, latestTurn: makeLatestTurn() }),
+      ],
+      new Map([["environment-local:thread-complete", "2026-03-09T10:04:00.000Z"]]),
+    );
+
+    expect(activityByParent.get("environment-local:thread-parent")).toMatchObject({
+      status: "ready",
+      unread: true,
+      statusPill: { label: "Completed" },
+    });
+  });
+
+  it("lets child attention outrank parent work", () => {
+    expect(
+      resolveSidebarThreadStatusWithPanelActivity(
+        {
+          hasPendingApprovals: false,
+          hasPendingUserInput: false,
+          session: runningSession,
+        },
+        {
+          status: "input",
+          statusPill: null,
+          unread: false,
+          workingStartedAt: null,
+          chatCount: 1,
+        },
+      ),
+    ).toBe("input");
   });
 });
 

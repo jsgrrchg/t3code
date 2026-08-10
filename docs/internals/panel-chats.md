@@ -44,6 +44,12 @@ global key handlers. Right-panel content switches by active surface, so only the
 transcript has a mounted React tree. Inactive children remain represented by lightweight shells
 and continue running on the server.
 
+The left sidebar keeps children out of primary navigation but derives one activity summary per
+top-level parent from the shell collection. Approval, input, active work, monitoring, and unread
+completion states roll up to the parent row and project indicator. The derivation is a single
+linear pass with scoped parent keys, so rendering a row is a constant-time lookup and remote child
+updates appear without loading child transcripts.
+
 File links, turn diffs, and Agents CTAs from a child target surfaces in the parent's visible panel.
 Diff and Agents descriptors retain the source child ID while that child exists; reconciliation
 clears the source when the child is deleted locally or by another client.

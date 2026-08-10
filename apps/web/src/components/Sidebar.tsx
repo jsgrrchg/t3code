@@ -122,7 +122,9 @@ import { cn } from "~/lib/utils";
 import { buildThreadActionMenuItems, resolveThreadRevealPathLabel } from "./threadActionMenu.logic";
 import {
   buildBulkTitleRegenerationContextMenuItem,
+  buildPanelChatSidebarActivityByParent,
   formatWorkingDurationLabel,
+  firstValidTimestamp,
   firstValidTimestampMs,
   hasUnseenCompletion,
   isTrailingDoubleClick,
@@ -132,6 +134,7 @@ import {
   resolveAdjacentThreadId,
   resolveSettledTimestamp,
   resolveSidebarThreadStatus,
+  resolveSidebarThreadStatusWithPanelActivity,
   searchSidebarThreadsByTitle,
   resolveWorkingStartedAt,
   sortLogicalProjectsForSidebar,
@@ -139,6 +142,7 @@ import {
   sortPinnedThreadsForSidebar,
   sortSettledThreadsForSidebar,
   sortThreadsForSidebar,
+  type PanelChatSidebarActivity,
 } from "./Sidebar.logic";
 import { resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
 import {
@@ -655,6 +659,7 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
 
 const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   thread: SidebarThreadSummary;
+  panelChatActivity: PanelChatSidebarActivity | null;
   variant: "card" | "slim";
   // Slim rows are either settled (action: un-settle) or merely quiet
   // (seen Ready threads — action: settle).
@@ -761,8 +766,19 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
 
   // Same semantics as the legacy sidebar (never-visited counts as read):
   // switching sidebars must not light up every historical thread as unread.
-  const isUnread = hasUnseenCompletion({ ...thread, lastVisitedAt });
-  const status = resolveSidebarThreadStatus(thread);
+  const isUnread =
+    hasUnseenCompletion({ ...thread, lastVisitedAt }) || (props.panelChatActivity?.unread ?? false);
+  const status = resolveSidebarThreadStatusWithPanelActivity(thread, props.panelChatActivity);
+  const ownStatus = resolveSidebarThreadStatus(thread);
+  const workingStartedAt =
+    status === "working"
+      ? firstValidTimestamp(
+          ownStatus === "working" ? resolveWorkingStartedAt(thread) : null,
+          props.panelChatActivity?.status === "working"
+            ? props.panelChatActivity.workingStartedAt
+            : null,
+        )
+      : null;
   // A woken thread reappears at its original position (the sort is
   // deliberately static), so the pill has to carry the weight. Snoozing is
   // an explicit act, so the pill clears only when the user re-engages:
@@ -1398,7 +1414,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                         <span role="status">{topStatus.label}</span>
                         {status === "working" ? (
                           <span aria-hidden>
-                            <WorkingDuration startedAt={resolveWorkingStartedAt(thread)} />
+                            <WorkingDuration startedAt={workingStartedAt} />
                           </span>
                         ) : null}
                       </span>
@@ -1612,6 +1628,15 @@ export default function Sidebar() {
   const projects = useProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const threads = useThreadShells();
+  const threadLastVisitedAtById = useUiStateStore((state) => state.threadLastVisitedAtById);
+  const panelChatActivityByParent = useMemo(
+    () =>
+      buildPanelChatSidebarActivityByParent(
+        threads,
+        new Map(Object.entries(threadLastVisitedAtById)),
+      ),
+    [threadLastVisitedAtById, threads],
+  );
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -3735,6 +3760,7 @@ export default function Sidebar() {
                         // painted over text).
                         key={`${threadKey}:${rowVariant}`}
                         thread={thread}
+                        panelChatActivity={panelChatActivityByParent.get(threadKey) ?? null}
                         variant={rowVariant}
                         // Snoozed rows wake; settled rows un-settle (explicit
                         // settles clear the override, auto-settled rows get
