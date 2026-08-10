@@ -295,6 +295,7 @@ import {
   buildExpiredTerminalContextToastCopy,
   buildLocalDraftThread,
   buildLoadingThreadFromShell,
+  canOverrideServerThreadExecutionContext,
   chatPresentationOwnsWorkspaceChrome,
   type ChatViewPresentation,
   buildThreadTurnInterruptInput,
@@ -2739,11 +2740,13 @@ function ChatViewContent(props: ChatViewProps) {
     terminalUiLaunchContext?.threadId === activeThreadId ? terminalUiLaunchContext : null;
   // Default true while loading to avoid toolbar flicker.
   const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
-  const showComposerContextStrip = shouldShowComposerContextStrip({
-    hasActiveProject: activeProject !== null,
-    isGitRepo,
-    showEnvironmentIndicator: showComposerEnvironmentIndicator,
-  });
+  const showComposerContextStrip =
+    isWorkspacePresentation &&
+    shouldShowComposerContextStrip({
+      hasActiveProject: activeProject !== null,
+      isGitRepo,
+      showEnvironmentIndicator: showComposerEnvironmentIndicator,
+    });
   const initialDiffPanelGitScope =
     gitStatusQuery.data?.hasWorkingTreeChanges === true ? "unstaged" : "branch";
   const diffPanelGitStatusResolutionKey = gitStatusQuery.data ? "resolved" : "pending";
@@ -4255,13 +4258,15 @@ function ChatViewContent(props: ChatViewProps) {
     hasServerThread: isServerThread,
     draftThreadEnvMode: isLocalDraftThread ? draftThread?.envMode : undefined,
   });
-  const canOverrideServerThreadEnvMode = Boolean(
-    isServerThread &&
-    activeThread &&
-    activeThread.messages.length === 0 &&
-    activeThread.worktreePath === null &&
-    !envLocked,
-  );
+  const canOverrideServerThreadEnvMode =
+    activeThread != null &&
+    canOverrideServerThreadExecutionContext({
+      isServerThread,
+      messageCount: activeThread.messages.length,
+      worktreePath: activeThread.worktreePath,
+      envLocked,
+      parentThreadId: activeThread.parentThreadId,
+    });
   const envMode: DraftThreadEnvMode = canOverrideServerThreadEnvMode
     ? (pendingServerThreadEnvMode ?? draftThread?.envMode ?? derivedEnvMode)
     : derivedEnvMode;

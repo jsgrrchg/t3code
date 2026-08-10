@@ -32,6 +32,22 @@ export function chatPresentationOwnsWorkspaceChrome(presentation: ChatViewPresen
   return presentation === "workspace";
 }
 
+export function canOverrideServerThreadExecutionContext(input: {
+  readonly isServerThread: boolean;
+  readonly messageCount: number;
+  readonly worktreePath: string | null;
+  readonly envLocked: boolean;
+  readonly parentThreadId?: ThreadId | null | undefined;
+}): boolean {
+  return (
+    input.isServerThread &&
+    input.parentThreadId == null &&
+    input.messageCount === 0 &&
+    input.worktreePath === null &&
+    !input.envLocked
+  );
+}
+
 export const LastInvokedScriptByProjectSchema = Schema.Record(ProjectId, Schema.String);
 
 export function scheduleEnvironmentReconnectWarning(showWarning: () => void): () => void {

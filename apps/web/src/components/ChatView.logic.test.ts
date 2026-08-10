@@ -17,6 +17,7 @@ import {
   buildLoadingThreadFromShell,
   chatPresentationOwnsWorkspaceChrome,
   buildThreadTurnInterruptInput,
+  canOverrideServerThreadExecutionContext,
   canInterruptThreadTurn,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
@@ -46,6 +47,29 @@ describe("chat view presentation", () => {
   it("reserves global workspace chrome and effects for the primary chat", () => {
     expect(chatPresentationOwnsWorkspaceChrome("workspace")).toBe(true);
     expect(chatPresentationOwnsWorkspaceChrome("panel")).toBe(false);
+  });
+});
+
+describe("server thread execution context overrides", () => {
+  const emptyTopLevelThread = {
+    isServerThread: true,
+    messageCount: 0,
+    worktreePath: null,
+    envLocked: false,
+    parentThreadId: null,
+  } as const;
+
+  it("allows an empty top-level thread to choose its initial context", () => {
+    expect(canOverrideServerThreadExecutionContext(emptyTopLevelThread)).toBe(true);
+  });
+
+  it("keeps panel chats anchored to their parent context", () => {
+    expect(
+      canOverrideServerThreadExecutionContext({
+        ...emptyTopLevelThread,
+        parentThreadId: ThreadId.make("thread-parent"),
+      }),
+    ).toBe(false);
   });
 });
 
