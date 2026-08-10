@@ -118,6 +118,9 @@ describe("GitHistoryCommitRow", () => {
     expect(markup).toContain(item.sha.slice(0, 7));
     expect(markup).toContain(`aria-label="Copy full commit SHA ${item.sha}"`);
     expect(markup).toContain(`aria-label="Open commit ${item.sha} diff in new tab"`);
+    const openCommitButton = buttonTagBefore(markup, `Open commit ${item.sha} diff in new tab`);
+    expect(openCommitButton).toContain("hover:bg-accent");
+    expect(openCommitButton).toContain("hover:[--control-icon-color:var(--foreground)]");
     expect(markup).toContain("<button");
   });
 

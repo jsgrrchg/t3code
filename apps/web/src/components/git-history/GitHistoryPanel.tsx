@@ -295,7 +295,7 @@ export function GitHistoryCommitRow({
       <GitHistoryShaButton sha={commit.sha} />
       <Button
         aria-label={`Open commit ${commit.sha} diff in new tab`}
-        className="size-6"
+        className="size-6 hover:bg-accent hover:[--control-icon-color:var(--foreground)]"
         size="icon-xs"
         title="Open commit diff in new tab"
         variant="ghost"
