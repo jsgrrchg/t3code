@@ -33,6 +33,7 @@ import {
   Menu,
   MenuItem,
   MenuPopup,
+  MenuSeparator,
   MenuSub,
   MenuSubPopup,
   MenuSubTrigger,
@@ -46,7 +47,7 @@ import { filterPanelChatPickerItems, PANEL_CHAT_PICKER_RESULT_LIMIT } from "~/pa
 
 import { PreviewPanelShell, type PreviewPanelMode } from "./preview/PreviewPanelShell";
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
-import { resolveRightPanelTabKeyAction } from "./RightPanelTabs.logic";
+import { findNewlyOpenedChatThreadId, resolveRightPanelTabKeyAction } from "./RightPanelTabs.logic";
 
 interface RightPanelTabsProps {
   mode: PreviewPanelMode;
@@ -442,7 +443,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     () => filterPanelChatPickerItems(closedPanelChats, chatSearchQuery),
     [chatSearchQuery, closedPanelChats],
   );
-  const previousChatSurfaceIdsRef = useRef(openedChatIds);
+  const previousChatSurfaceIdsRef = useRef<ReadonlySet<string>>(new Set());
   const focusTab = useCallback((surfaceId: string) => {
     window.requestAnimationFrame(() => tabButtonRefs.current.get(surfaceId)?.focus());
   }, []);
@@ -484,6 +485,10 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     },
     [focusTab, props],
   );
+  const closeAllSurfacesAndRestoreFocus = useCallback(() => {
+    props.onCloseAllSurfaces();
+    window.requestAnimationFrame(props.onFocusOwner);
+  }, [props]);
 
   const handleTabKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLButtonElement>, surface: RightPanelSurface) => {
@@ -572,7 +577,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           if (surface.kind === "chat") props.onDeleteChat(surface.threadId);
           break;
         case "close":
-          props.onCloseSurface(surface);
+          closeSurfaceAndRestoreFocus(surface);
           break;
         case "close-others":
           props.onCloseOtherSurfaces(surface);
@@ -581,14 +586,13 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           props.onCloseSurfacesToRight(surface);
           break;
         case "close-all":
-          props.onCloseAllSurfaces();
-          window.requestAnimationFrame(props.onFocusOwner);
+          closeAllSurfacesAndRestoreFocus();
           break;
         case null:
           break;
       }
     },
-    [beginChatRename, props],
+    [beginChatRename, closeAllSurfacesAndRestoreFocus, closeSurfaceAndRestoreFocus, props],
   );
   const handleTabMouseDown = useCallback((event: ReactMouseEvent) => {
     if (event.button !== 1) return;
@@ -599,9 +603,9 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       if (event.button !== 1) return;
       event.preventDefault();
       event.stopPropagation();
-      props.onCloseSurface(surface);
+      closeSurfaceAndRestoreFocus(surface);
     },
-    [props],
+    [closeSurfaceAndRestoreFocus],
   );
 
   useEffect(() => {
@@ -611,13 +615,11 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
 
   useEffect(() => {
     const previousIds = previousChatSurfaceIdsRef.current;
-    const openedChat = props.surfaces.find(
-      (surface) => surface.kind === "chat" && !previousIds.has(surface.threadId),
-    );
+    const openedChatThreadId = findNewlyOpenedChatThreadId(props.surfaces, previousIds);
     previousChatSurfaceIdsRef.current = openedChatIds;
-    if (!openedChat || openedChat.kind !== "chat") return;
+    if (!openedChatThreadId) return;
     setAnnouncement(
-      `${props.chatTitlesById.get(openedChat.threadId) ?? "Panel chat"} opened in the right panel.`,
+      `${props.chatTitlesById.get(openedChatThreadId) ?? "Panel chat"} opened in the right panel.`,
     );
   }, [openedChatIds, props.chatTitlesById, props.surfaces]);
 
@@ -648,7 +650,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             role="tablist"
             aria-label="Right panel surfaces"
           >
-            {props.surfaces.map((surface) => {
+            {props.surfaces.map((surface, surfaceIndex) => {
               const active = surface.id === props.activeSurfaceId;
               const pending = props.pendingSurfaceIds.has(surface.id);
               const chat = surface.kind === "chat" ? panelChatById.get(surface.threadId) : null;
@@ -789,6 +791,23 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                         <MenuItem onClick={() => props.onDeleteChat(surface.threadId)}>
                           Delete chat
                         </MenuItem>
+                        <MenuSeparator />
+                        <MenuItem onClick={() => closeSurfaceAndRestoreFocus(surface)}>
+                          Close
+                        </MenuItem>
+                        <MenuItem
+                          disabled={props.surfaces.length <= 1}
+                          onClick={() => props.onCloseOtherSurfaces(surface)}
+                        >
+                          Close others
+                        </MenuItem>
+                        <MenuItem
+                          disabled={surfaceIndex >= props.surfaces.length - 1}
+                          onClick={() => props.onCloseSurfacesToRight(surface)}
+                        >
+                          Close to the right
+                        </MenuItem>
+                        <MenuItem onClick={closeAllSurfacesAndRestoreFocus}>Close all</MenuItem>
                       </MenuPopup>
                     </Menu>
                   ) : null}

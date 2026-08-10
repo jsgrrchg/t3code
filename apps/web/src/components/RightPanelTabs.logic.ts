@@ -26,3 +26,20 @@ export function resolveRightPanelTabKeyAction(input: {
   if (input.key === "End") return { kind: "activate", index: input.tabCount - 1 };
   return null;
 }
+
+export function findNewlyOpenedChatThreadId(
+  surfaces: ReadonlyArray<{
+    readonly kind: string;
+    readonly threadId?: string | null | undefined;
+  }>,
+  previousThreadIds: ReadonlySet<string>,
+): string | null {
+  return (
+    surfaces.find(
+      (surface) =>
+        surface.kind === "chat" &&
+        typeof surface.threadId === "string" &&
+        !previousThreadIds.has(surface.threadId),
+    )?.threadId ?? null
+  );
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { resolveRightPanelTabKeyAction } from "./RightPanelTabs.logic";
+import { findNewlyOpenedChatThreadId, resolveRightPanelTabKeyAction } from "./RightPanelTabs.logic";
 
 describe("resolveRightPanelTabKeyAction", () => {
   it("wraps arrow navigation and resolves home and end", () => {
@@ -33,5 +33,22 @@ describe("resolveRightPanelTabKeyAction", () => {
     expect(
       resolveRightPanelTabKeyAction({ key: "Delete", currentIndex: 0, tabCount: 1, chat: false }),
     ).toEqual({ kind: "close" });
+  });
+});
+
+describe("findNewlyOpenedChatThreadId", () => {
+  it("announces a chat that already exists on the first panel mount", () => {
+    expect(
+      findNewlyOpenedChatThreadId([{ kind: "chat", threadId: "thread-child" }], new Set()),
+    ).toBe("thread-child");
+  });
+
+  it("ignores surfaces that were already present", () => {
+    expect(
+      findNewlyOpenedChatThreadId(
+        [{ kind: "chat", threadId: "thread-child" }],
+        new Set(["thread-child"]),
+      ),
+    ).toBeNull();
   });
 });

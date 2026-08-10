@@ -3329,9 +3329,14 @@ function ChatViewContent(props: ChatViewProps) {
     useRightPanelStore.getState().open(activeThreadRef, "files");
   }, [activeProject, activeThreadRef]);
   const addAgentsSurface = useCallback(() => {
-    if (!activeThreadRef) return;
-    useRightPanelStore.getState().open(activeThreadRef, "agents");
-  }, [activeThreadRef]);
+    if (!activeThreadRef || !panelOwnerThreadRef) return;
+    useRightPanelStore
+      .getState()
+      .openThreadAgents(
+        panelOwnerThreadRef,
+        activeThreadRef.threadId === panelOwnerThreadRef.threadId ? null : activeThreadRef.threadId,
+      );
+  }, [activeThreadRef, panelOwnerThreadRef]);
   const canAddPanelChat =
     isWorkspacePresentation &&
     activeThreadRef !== null &&
@@ -6372,6 +6377,10 @@ function ChatViewContent(props: ChatViewProps) {
     activeRightPanelSurface?.kind === "diff" && activeRightPanelSurface.threadId
       ? scopeThreadRef(activeThread.environmentId, activeRightPanelSurface.threadId)
       : activeThreadRef;
+  const activeAgentsThreadRef =
+    activeRightPanelSurface?.kind === "agents" && activeRightPanelSurface.threadId
+      ? scopeThreadRef(activeThread.environmentId, activeRightPanelSurface.threadId)
+      : activeThreadRef;
   const activePanelChatThreadId = getActivePanelChatThreadId(activeRightPanelSurface);
   const rightPanelContent = activeThreadRef ? (
     activeRightPanelSurface?.kind === "preview" ? (
@@ -6415,12 +6424,8 @@ function ChatViewContent(props: ChatViewProps) {
           initialGitScope={initialDiffPanelGitScope}
         />
       </Suspense>
-    ) : activeRightPanelSurface?.kind === "agents" ? (
-      <AgentsPanel
-        model={agentPanelModel}
-        environmentId={activeThreadRef?.environmentId ?? null}
-        threadId={activeThreadRef?.threadId ?? null}
-      />
+    ) : activeRightPanelSurface?.kind === "agents" && activeAgentsThreadRef ? (
+      <ThreadAgentsPanel threadRef={activeAgentsThreadRef} />
     ) : activePanelChatThreadId ? (
       <ThreadConversationPane
         key={`${activeThread.environmentId}:${activePanelChatThreadId}`}
@@ -6989,6 +6994,27 @@ export type ThreadConversationPaneProps = {
   readonly panelOwnerThreadRef: ScopedThreadRef;
   readonly threadSyncPhase?: ThreadSyncPhase | null;
 };
+
+function ThreadAgentsPanel({ threadRef }: { readonly threadRef: ScopedThreadRef }) {
+  const thread = useThread(threadRef);
+  const activities = thread?.activities ?? EMPTY_ACTIVITIES;
+  const sessionLive = derivePhase(thread?.session ?? null) !== "disconnected";
+  const model = useMemo(
+    () =>
+      deriveAgentPanelModel({
+        agents: foldSubagentActivities(activities, { sessionLive }),
+      }),
+    [activities, sessionLive],
+  );
+
+  return (
+    <AgentsPanel
+      model={model}
+      environmentId={threadRef.environmentId}
+      threadId={threadRef.threadId}
+    />
+  );
+}
 
 /** A route-neutral conversation surface for a durable server thread. */
 export function ThreadConversationPane(props: ThreadConversationPaneProps) {

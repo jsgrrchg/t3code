@@ -26,7 +26,9 @@ empty state. Both selectors search the complete chat history while keeping the v
 bounded. Choose **Delete chat** from the tab menu to permanently remove its conversation.
 
 With focus on a panel tab, use Left and Right Arrow (or Home and End) to change tabs, `F2` to rename
-a chat, and Delete to close the tab. Escape cancels a rename and returns focus to the tab.
+a chat, and Delete to close the tab. Escape cancels a rename and returns focus to the tab. The tab
+menu also provides Close, Close others, Close to the right, and Close all in desktop and remote web
+clients.
 
 ## Where chats appear
 

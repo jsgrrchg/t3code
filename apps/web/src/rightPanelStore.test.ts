@@ -44,6 +44,24 @@ describe("rightPanelStore", () => {
     expect(state.activeSurfaceId).toBe("chat:thread-child-1");
   });
 
+  it("clears deleted child targets from diff and agents surfaces", () => {
+    const childId = ThreadId.make("thread-child");
+    useRightPanelStore.getState().openChat(refA, childId);
+    useRightPanelStore.getState().openThreadDiff(refA, childId);
+    useRightPanelStore.getState().openThreadAgents(refA, childId);
+
+    useRightPanelStore.getState().reconcileChatSurfaces(refA, []);
+
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: "agents",
+      surfaces: [
+        { id: "diff", kind: "diff", threadId: null },
+        { id: "agents", kind: "agents", threadId: null },
+      ],
+    });
+  });
+
   it("drops the legacy singleton terminal surface during migration", () => {
     expect(
       migratePersistedRightPanelState({
@@ -188,7 +206,7 @@ describe("rightPanelStore", () => {
       activeSurfaceId: "diff",
       surfaces: [
         { id: "diff", kind: "diff", threadId: null },
-        { id: "agents", kind: "agents" },
+        { id: "agents", kind: "agents", threadId: null },
       ],
     });
   });
@@ -207,6 +225,24 @@ describe("rightPanelStore", () => {
     expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
       id: "diff",
       kind: "diff",
+      threadId: null,
+    });
+  });
+
+  it("tracks the conversation whose subagents are shown in the owner's panel", () => {
+    const childId = ThreadId.make("thread-child");
+    useRightPanelStore.getState().openThreadAgents(refA, childId);
+
+    expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      id: "agents",
+      kind: "agents",
+      threadId: childId,
+    });
+
+    useRightPanelStore.getState().open(refA, "agents");
+    expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      id: "agents",
+      kind: "agents",
       threadId: null,
     });
   });
@@ -294,7 +330,7 @@ describe("rightPanelStore", () => {
     expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
       isOpen: true,
       activeSurfaceId: "agents",
-      surfaces: [{ id: "agents", kind: "agents" }],
+      surfaces: [{ id: "agents", kind: "agents", threadId: null }],
     });
 
     useRightPanelStore.getState().openFile(refB, "conductor.json");
@@ -313,7 +349,7 @@ describe("rightPanelStore", () => {
     expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
       isOpen: false,
       activeSurfaceId: "agents",
-      surfaces: [{ id: "agents", kind: "agents" }],
+      surfaces: [{ id: "agents", kind: "agents", threadId: null }],
     });
   });
 

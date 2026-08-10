@@ -45,7 +45,7 @@ export type RightPanelSurface =
       revealLine: number | null;
       revealRequestId: number;
     }
-  | { id: "agents"; kind: "agents" }
+  | { id: "agents"; kind: "agents"; threadId: ThreadId | null }
   | { id: `chat:${string}`; kind: "chat"; threadId: ThreadId };
 
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
@@ -66,6 +66,7 @@ interface RightPanelStoreState {
   openTerminal: (ref: ScopedThreadRef, terminalId: string) => void;
   openChat: (ref: ScopedThreadRef, threadId: ThreadId) => void;
   openThreadDiff: (ref: ScopedThreadRef, threadId: ThreadId | null) => void;
+  openThreadAgents: (ref: ScopedThreadRef, threadId: ThreadId | null) => void;
   splitTerminal: (
     ref: ScopedThreadRef,
     surfaceId: string,
@@ -107,7 +108,7 @@ const singletonSurface = (
     case "files":
       return { id: "files", kind };
     case "agents":
-      return { id: "agents", kind };
+      return { id: "agents", kind, threadId: null };
   }
   throw new Error(`Unsupported singleton right panel surface: ${kind}`);
 };
@@ -154,6 +155,19 @@ const openDiffSurface = (
         surface.id === "diff" ? { id: "diff", kind: "diff", threadId } : surface,
       )
     : [...current.surfaces, { id: "diff", kind: "diff", threadId }],
+});
+
+const openAgentsSurface = (
+  current: ThreadRightPanelState,
+  threadId: ThreadId | null,
+): ThreadRightPanelState => ({
+  isOpen: true,
+  activeSurfaceId: "agents",
+  surfaces: current.surfaces.some((surface) => surface.id === "agents")
+    ? current.surfaces.map((surface) =>
+        surface.id === "agents" ? { id: "agents", kind: "agents", threadId } : surface,
+      )
+    : [...current.surfaces, { id: "agents", kind: "agents", threadId }],
 });
 
 const upsertSurface = (
@@ -245,6 +259,18 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                         },
                       ];
                     }
+                    if (surface.kind === "agents") {
+                      return [
+                        {
+                          id: "agents",
+                          kind: "agents",
+                          threadId:
+                            "threadId" in surface && typeof surface.threadId === "string"
+                              ? surface.threadId
+                              : null,
+                        },
+                      ];
+                    }
                     if (surface.kind !== "terminal") return [surface];
                     if (
                       !("resourceId" in surface) ||
@@ -314,6 +340,9 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             if (kind === "diff") {
               return openDiffSurface(current, null);
             }
+            if (kind === "agents") {
+              return openAgentsSurface(current, null);
+            }
             if (kind === "preview") {
               const existing = current.surfaces.find((surface) => surface.kind === "preview");
               return upsertSurface(current, existing ?? browserSurface(null));
@@ -374,6 +403,12 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
         set((state) => ({
           byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) =>
             openDiffSurface(current, threadId),
+          ),
+        })),
+      openThreadAgents: (ref, threadId) =>
+        set((state) => ({
+          byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) =>
+            openAgentsSurface(current, threadId),
           ),
         })),
       splitTerminal: (ref, surfaceId, terminalId, direction = "horizontal") =>
@@ -566,10 +601,23 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
         set((state) => ({
           byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) => {
             const validIds = new Set(threadIds);
-            const surfaces = current.surfaces.filter(
-              (surface) => surface.kind !== "chat" || validIds.has(surface.threadId),
-            );
-            if (surfaces.length === current.surfaces.length) return current;
+            let changed = false;
+            const surfaces = current.surfaces.flatMap<RightPanelSurface>((surface) => {
+              if (surface.kind === "chat" && !validIds.has(surface.threadId)) {
+                changed = true;
+                return [];
+              }
+              if (
+                (surface.kind === "diff" || surface.kind === "agents") &&
+                surface.threadId != null &&
+                !validIds.has(surface.threadId)
+              ) {
+                changed = true;
+                return [{ ...surface, threadId: null }];
+              }
+              return [surface];
+            });
+            if (!changed) return current;
             const activeStillExists = surfaces.some(
               (surface) => surface.id === current.activeSurfaceId,
             );
@@ -610,6 +658,12 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             );
             if (current.isOpen && active?.kind === kind) {
               return { ...current, isOpen: false };
+            }
+            if (kind === "diff") {
+              return openDiffSurface(current, null);
+            }
+            if (kind === "agents") {
+              return openAgentsSurface(current, null);
             }
             if (kind === "preview") {
               const existing = current.surfaces.find((surface) => surface.kind === "preview");

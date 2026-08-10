@@ -42,6 +42,10 @@ global key handlers. Right-panel content switches by active surface, so only the
 transcript has a mounted React tree. Inactive children remain represented by lightweight shells
 and continue running on the server.
 
+File links, turn diffs, and Agents CTAs from a child target surfaces in the parent's visible panel.
+Diff and Agents descriptors retain the source child ID while that child exists; reconciliation
+clears the source when the child is deleted locally or by another client.
+
 Creation from the panel, Command Palette, and `rightPanel.newChat` converges on the workspace
 chat-action handler. The child inherits the parent's project, checkout/worktree, branch, provider
 selection, runtime mode, and interaction mode at creation time. Subsequent state evolves
