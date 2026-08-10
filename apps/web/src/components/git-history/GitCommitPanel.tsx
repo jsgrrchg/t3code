@@ -9,6 +9,8 @@ import type {
 import {
   ChevronDownIcon,
   ChevronRightIcon,
+  ChevronsDownUpIcon,
+  ChevronsUpDownIcon,
   Columns2Icon,
   CopyIcon,
   Rows3Icon,
@@ -21,6 +23,7 @@ import { useDiffPanelStore } from "~/diffPanelStore";
 import { useTheme } from "~/hooks/useTheme";
 import { useClientSettings } from "~/hooks/useSettings";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
+import { areAllDiffFilesCollapsed, toggleAllDiffFiles } from "~/lib/diffCollapse";
 import {
   buildFileDiffRenderKey,
   DIFF_SURFACE_THEME_UNSAFE_CSS,
@@ -37,6 +40,7 @@ import { DiffPanelLoadingState, DiffPanelShell } from "../DiffPanelShell";
 import { AnnotatableCodeView, type AnnotatableCodeViewHandle } from "../diffs/AnnotatableCodeView";
 import { Button } from "../ui/button";
 import { Toggle } from "../ui/toggle-group";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 type DiffThemeType = "light" | "dark";
 
@@ -61,6 +65,7 @@ export function GitCommitPanel({
   const setDiffRenderMode = useDiffPanelStore((state) => state.setDiffRenderMode);
   const [wordWrap, setWordWrap] = useState(settings.wordWrap);
   const [collapsedFileKeys, setCollapsedFileKeys] = useState<ReadonlySet<string>>(() => new Set());
+  const [codeViewRevision, setCodeViewRevision] = useState(0);
   const codeViewRef = useRef<AnnotatableCodeViewHandle>(null);
   const { copyToClipboard, isCopied } = useCopyToClipboard({ target: "commit SHA" });
   const resourceInput = useMemo(
@@ -102,6 +107,8 @@ export function GitCommitPanel({
         };
       });
   }, [collapsedFileKeys, renderablePatch]);
+  const fileKeys = useMemo(() => files.map((file) => file.fileKey), [files]);
+  const allFilesCollapsed = areAllDiffFilesCollapsed(fileKeys, collapsedFileKeys);
   const loadDiffFiles = useMemo<FileDiffContentsLoader | undefined>(() => {
     const resolvedDiff = commitDiff.data;
     if (!resolvedDiff) return undefined;
@@ -154,6 +161,33 @@ export function GitCommitPanel({
         </Button>
       </div>
       <div className="flex shrink-0 items-center gap-1">
+        {fileKeys.length > 0 ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label={allFilesCollapsed ? "Expand all files" : "Collapse all files"}
+                  onClick={() => {
+                    setCodeViewRevision((current) => current + 1);
+                    setCollapsedFileKeys((current) => toggleAllDiffFiles(fileKeys, current));
+                  }}
+                />
+              }
+            >
+              {allFilesCollapsed ? (
+                <ChevronsUpDownIcon aria-hidden="true" className="size-3.5" />
+              ) : (
+                <ChevronsDownUpIcon aria-hidden="true" className="size-3.5" />
+              )}
+            </TooltipTrigger>
+            <TooltipPopup side="top">
+              {allFilesCollapsed ? "Expand all files" : "Collapse all files"}
+            </TooltipPopup>
+          </Tooltip>
+        ) : null}
         <Button
           aria-label="Stacked diff view"
           size="icon-xs"
@@ -218,7 +252,7 @@ export function GitCommitPanel({
       ) : renderablePatch.kind === "files" ? (
         <AnnotatableCodeView
           viewerRef={codeViewRef}
-          codeViewKey={`${sha}:${commitDiff.data?.diffHash ?? "pending"}:${diffRenderMode}:${wordWrap}`}
+          codeViewKey={`${sha}:${commitDiff.data?.diffHash ?? "pending"}:${diffRenderMode}:${wordWrap}:${codeViewRevision}`}
           className="diff-render-surface h-full min-h-0 flex-1 overflow-auto"
           composerDraftTarget={composerDraftTarget}
           files={files}
