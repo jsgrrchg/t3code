@@ -13,13 +13,17 @@ function actions(historyAvailable: boolean, historyDisabledReason: string) {
     onAddTerminal: vi.fn(),
     onAddFiles: vi.fn(),
     onAddDiff: vi.fn(),
+    onAddPullRequest: vi.fn(),
     onAddHistory: vi.fn(),
     onAddAgents: vi.fn(),
     browserAvailable: true,
+    terminalAvailable: true,
     filesAvailable: true,
     diffAvailable: true,
+    pullRequestAvailable: true,
     historyAvailable,
     historyDisabledReason,
+    agentsAvailable: true,
     liveAgentCount: 0,
   });
 }
@@ -33,6 +37,7 @@ describe("History right-panel presentation", () => {
       "terminal",
       "files",
       "diff",
+      "pull-request",
       "agents",
       "history",
     ]);
@@ -41,6 +46,7 @@ describe("History right-panel presentation", () => {
       "Terminal",
       "Files",
       "Diff",
+      "Pull request",
       "Agents",
       "History",
     ]);
@@ -54,6 +60,7 @@ describe("History right-panel presentation", () => {
       "Terminal",
       "Files",
       "Diff",
+      "Pull request",
       "History",
       "Agents",
     ]);

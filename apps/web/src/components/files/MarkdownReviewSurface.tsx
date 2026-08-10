@@ -6,7 +6,7 @@ import { Button } from "~/components/ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
 
 import { nextFileCommentId } from "./fileCommentAnnotations";
-import { LocalCommentAnnotation } from "./LocalCommentAnnotation";
+import { DiffCommentAnnotation } from "../diffs/DiffCommentAnnotation";
 
 export interface MarkdownSourceRange {
   startLine: number;
@@ -197,7 +197,7 @@ export function MarkdownReviewSurface({
           <PopoverPopup align="start" side="right" className="w-80" viewportClassName="p-0">
             <div className="divide-y divide-border/30">
               {displayedComments.map((comment) => (
-                <LocalCommentAnnotation
+                <DiffCommentAnnotation
                   key={comment.id}
                   kind="comment"
                   rangeLabel={comment.rangeLabel}
@@ -208,7 +208,7 @@ export function MarkdownReviewSurface({
                 />
               ))}
               {draft && active ? (
-                <LocalCommentAnnotation
+                <DiffCommentAnnotation
                   kind="draft"
                   rangeLabel={rangeLabel(active)}
                   text={draft.text}

@@ -6,7 +6,7 @@ import { ExecutionEnvironmentDescriptor } from "./environment.ts";
 const decodeEnvironmentDescriptor = Schema.decodeUnknownSync(ExecutionEnvironmentDescriptor);
 
 describe("ExecutionEnvironmentDescriptor", () => {
-  it("decodes an older descriptor without the optional git history capability", () => {
+  it("decodes an older descriptor without optional capabilities", () => {
     const decoded = decodeEnvironmentDescriptor({
       environmentId: "environment-1",
       label: "Local",
@@ -21,5 +21,24 @@ describe("ExecutionEnvironmentDescriptor", () => {
     expect(decoded.capabilities.repositoryIdentity).toBe(false);
     expect(decoded.capabilities.gitHistory).toBeUndefined();
     expect(decoded.capabilities.gitFetchAll).toBeUndefined();
+    expect(decoded.capabilities.pullRequests).toBeUndefined();
+  });
+
+  it("preserves an advertised pull-request capability", () => {
+    const decoded = decodeEnvironmentDescriptor({
+      environmentId: "environment-1",
+      label: "Local",
+      platform: {
+        os: "darwin",
+        arch: "arm64",
+      },
+      serverVersion: "0.0.32",
+      capabilities: {
+        repositoryIdentity: true,
+        pullRequests: true,
+      },
+    });
+
+    expect(decoded.capabilities.pullRequests).toBe(true);
   });
 });

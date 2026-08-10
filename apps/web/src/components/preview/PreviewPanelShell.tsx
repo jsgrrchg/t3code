@@ -26,6 +26,15 @@ export function getPreviewPanelMaxWidth(viewportWidth: number): number {
 export function PreviewPanelShell(props: {
   mode: PreviewPanelMode;
   maximized?: boolean;
+  /**
+   * Overrides the localStorage key used to persist the panel width. Callers
+   * embedding this shell for a different surface (e.g. the pull requests
+   * page) should pass their own key so resizing one panel doesn't clobber
+   * the other's remembered width.
+   */
+  widthStorageKey?: string;
+  /** Overrides the initial width (px) before the user has resized the panel. */
+  defaultWidth?: number;
   children: ReactNode;
   onFocusCapture?: FocusEventHandler<HTMLDivElement>;
   onBlurCapture?: FocusEventHandler<HTMLDivElement>;
@@ -34,8 +43,8 @@ export function PreviewPanelShell(props: {
   const isInline = props.mode === "inline";
   const maxWidth = useViewportClampedMaxWidth();
   const { width, handlers } = useResizableWidth({
-    storageKey: PREVIEW_PANEL_WIDTH_STORAGE_KEY,
-    defaultWidth: PREVIEW_PANEL_DEFAULT_WIDTH,
+    storageKey: props.widthStorageKey ?? PREVIEW_PANEL_WIDTH_STORAGE_KEY,
+    defaultWidth: props.defaultWidth ?? PREVIEW_PANEL_DEFAULT_WIDTH,
     minWidth: PREVIEW_PANEL_MIN_WIDTH,
     maxWidth,
     edge: "left",

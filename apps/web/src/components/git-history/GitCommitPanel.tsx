@@ -26,7 +26,6 @@ import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { areAllDiffFilesCollapsed, toggleAllDiffFiles } from "~/lib/diffCollapse";
 import {
   buildFileDiffRenderKey,
-  DIFF_SURFACE_THEME_UNSAFE_CSS,
   getRenderablePatch,
   resolveDiffThemeName,
   resolveFileDiffPath,
@@ -286,16 +285,8 @@ export function GitCommitPanel({
             overflow: wordWrap ? "wrap" : "scroll",
             theme: resolveDiffThemeName(resolvedTheme),
             themeType: resolvedTheme as DiffThemeType,
-            unsafeCSS: DIFF_SURFACE_THEME_UNSAFE_CSS,
             stickyHeaders: true,
             ...(loadDiffFiles ? { loadDiffFiles } : {}),
-            itemMetrics: {
-              diffHeaderHeight: 32,
-              hunkSeparatorHeight: 24,
-              paddingTop: 0,
-              paddingBottom: 0,
-            },
-            layout: { paddingTop: 0, paddingBottom: 0, gap: 0 },
           }}
         />
       ) : (

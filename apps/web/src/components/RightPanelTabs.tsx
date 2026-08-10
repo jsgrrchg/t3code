@@ -15,13 +15,14 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type { ContextMenuItem, PreviewSessionSnapshot } from "@t3tools/contracts";
+import type { ContextMenuItem, PreviewSessionSnapshot, PullRequestState } from "@t3tools/contracts";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import {
   Bot,
   FileDiff,
   Files,
   GitGraph,
+  GitPullRequest,
   Globe2,
   GripVertical,
   MessageSquare,
@@ -84,6 +85,10 @@ import { composerMentionFromRightPanelSurface } from "./rightPanelTabDrag";
 interface RightPanelTabsProps {
   mode: PreviewPanelMode;
   maximized?: boolean;
+  /** Forwarded to PreviewPanelShell so this surface persists its own width. */
+  widthStorageKey?: string;
+  /** Forwarded to PreviewPanelShell as the initial width before a user resize. */
+  defaultWidth?: number;
   layoutControls?: ReactNode;
   surfaces: readonly RightPanelSurface[];
   activeSurfaceId: string | null;
@@ -103,6 +108,7 @@ interface RightPanelTabsProps {
   onAddDiff: () => void;
   onAddHistory: () => void;
   onAddFiles: () => void;
+  onAddPullRequest: () => void;
   onAddAgents: () => void;
   onAddChat: () => void;
   onOpenChat: (threadId: string) => void;
@@ -110,6 +116,7 @@ interface RightPanelTabsProps {
   onRegenerateChatTitle: (threadId: string) => void;
   onDeleteChat: (threadId: string) => Promise<boolean>;
   browserAvailable: boolean;
+  terminalAvailable: boolean;
   diffAvailable: boolean;
   historyAvailable: boolean;
   historyDisabledReason: string;
@@ -120,6 +127,9 @@ interface RightPanelTabsProps {
   chatOpenAnnouncement: PanelChatOpenAnnouncement | null;
   onChatOpenAnnouncementHandled: (requestId: number) => void;
   chatTitleRegenerationAvailable: boolean;
+  pullRequestAvailable: boolean;
+  agentsAvailable: boolean;
+  pullRequestStatuses?: Readonly<Record<string, PullRequestTabStatus>>;
   /** Running + waiting subagents; badges the Agents card in the empty state. */
   liveAgentCount: number;
   children: ReactNode;
@@ -156,10 +166,21 @@ export interface PanelChatOpenAnnouncement {
   readonly threadId: string;
 }
 
+export interface PullRequestTabStatus {
+  projectId: string;
+  repository: string;
+  number: number;
+  state: PullRequestState;
+  isDraft: boolean;
+}
+
 const SURFACE_DISABLED_REASONS = {
   browser: "Browser previews are only available in the T3 Code desktop app.",
+  terminal: "Terminal surfaces are only available from a project thread.",
   files: "Files are only available when a project is open.",
   diff: "Diff is only available for server threads in Git repositories.",
+  pullRequest: "This thread's branch has no pull request yet.",
+  agents: "Agents are only available from a thread.",
 } as const;
 
 interface StandardSurfaceActionsInput {
@@ -167,13 +188,17 @@ interface StandardSurfaceActionsInput {
   readonly onAddTerminal: () => void;
   readonly onAddFiles: () => void;
   readonly onAddDiff: () => void;
+  readonly onAddPullRequest: () => void;
   readonly onAddHistory: () => void;
   readonly onAddAgents: () => void;
   readonly browserAvailable: boolean;
+  readonly terminalAvailable: boolean;
   readonly filesAvailable: boolean;
   readonly diffAvailable: boolean;
+  readonly pullRequestAvailable: boolean;
   readonly historyAvailable: boolean;
   readonly historyDisabledReason: string;
+  readonly agentsAvailable: boolean;
   readonly liveAgentCount: number;
 }
 
@@ -192,8 +217,8 @@ export function buildStandardSurfaceActions(input: StandardSurfaceActionsInput) 
       label: "Terminal",
       description: "Start a shell in this workspace.",
       icon: TerminalSquare,
-      available: true,
-      disabledReason: null,
+      available: input.terminalAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.terminal,
       onClick: input.onAddTerminal,
       badgeCount: 0,
     },
@@ -215,6 +240,15 @@ export function buildStandardSurfaceActions(input: StandardSurfaceActionsInput) 
       onClick: input.onAddDiff,
       badgeCount: 0,
     },
+    "pull-request": {
+      label: "Pull request",
+      description: "Open the pull request for this thread's branch.",
+      icon: GitPullRequest,
+      available: input.pullRequestAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.pullRequest,
+      onClick: input.onAddPullRequest,
+      badgeCount: 0,
+    },
     history: {
       label: "History",
       description: "Browse the repository commit graph.",
@@ -228,8 +262,8 @@ export function buildStandardSurfaceActions(input: StandardSurfaceActionsInput) 
       label: "Agents",
       description: "Watch subagents and workflows run.",
       icon: Bot,
-      available: true,
-      disabledReason: null,
+      available: input.agentsAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.agents,
       onClick: input.onAddAgents,
       badgeCount: input.liveAgentCount,
     },
@@ -291,9 +325,11 @@ function RightPanelEmptyState(props: {
   onAddDiff: () => void;
   onAddHistory: () => void;
   onAddFiles: () => void;
+  onAddPullRequest: () => void;
   onAddAgents: () => void;
   onAddChat: () => void;
   browserAvailable: boolean;
+  terminalAvailable: boolean;
   diffAvailable: boolean;
   historyAvailable: boolean;
   historyDisabledReason: string;
@@ -301,6 +337,8 @@ function RightPanelEmptyState(props: {
   chatAvailable: boolean;
   panelChats: ReadonlyArray<PanelChatTabMetadata>;
   onOpenChat: (threadId: string) => void;
+  pullRequestAvailable: boolean;
+  agentsAvailable: boolean;
   liveAgentCount: number;
 }) {
   const [chatSearchQuery, setChatSearchQuery] = useState("");
@@ -455,6 +493,8 @@ function surfaceTitle(
         terminalLabelsById.get(surface.activeTerminalId) ??
         getTerminalLabel(surface.activeTerminalId)
       );
+    case "pull-request":
+      return `#${surface.number}`;
     case "agents":
       return "Agents";
     case "chat":
@@ -492,10 +532,12 @@ function SurfaceIcon({
   surface,
   sessions,
   theme,
+  pullRequestStatuses,
 }: {
   surface: RightPanelSurface;
   sessions: Readonly<Record<string, PreviewSessionSnapshot>>;
   theme: "light" | "dark";
+  pullRequestStatuses: Readonly<Record<string, PullRequestTabStatus>> | undefined;
 }) {
   switch (surface.kind) {
     case "preview": {
@@ -522,6 +564,20 @@ function SurfaceIcon({
       );
     case "terminal":
       return <TerminalSquare className="size-3 shrink-0" />;
+    case "pull-request": {
+      const status = pullRequestStatuses?.[surface.id] ?? null;
+      const toneClassName =
+        status?.state === "merged"
+          ? "text-violet-600 dark:text-violet-300/90"
+          : status?.state === "closed"
+            ? "text-red-600 dark:text-red-300/90"
+            : status?.isDraft
+              ? "text-zinc-500 dark:text-zinc-400/80"
+              : status?.state === "open"
+                ? "text-emerald-600 dark:text-emerald-300/90"
+                : "text-muted-foreground";
+      return <GitPullRequest className={cn("size-3 shrink-0", toneClassName)} />;
+    }
     case "agents":
       return <Bot className="size-3 shrink-0" />;
     case "chat":
@@ -831,12 +887,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           focusedSurfaceIdRef.current = null;
         }
       }}
+      {...(props.widthStorageKey !== undefined ? { widthStorageKey: props.widthStorageKey } : {})}
+      {...(props.defaultWidth !== undefined ? { defaultWidth: props.defaultWidth } : {})}
     >
       <div
         className={cn(
           "workspace-topbar gap-1 pl-2",
           props.mode !== "inline" && "[--workspace-topbar-height:--spacing(11)]",
-          props.mode === "inline" ? "pr-28" : "pr-3",
+          props.mode === "inline" && !props.layoutControls ? "pr-28" : "pr-3",
           ownsDesktopTitleBar && "wco:pr-[calc(var(--workspace-native-controls-inset)+6rem)]",
           props.mode === "inline" && props.maximized && COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
         )}
@@ -913,6 +971,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                                 surface={surface}
                                 sessions={props.previewSessions}
                                 theme={resolvedTheme}
+                                pullRequestStatuses={props.pullRequestStatuses}
                               />
                               {pending ? (
                                 <span
@@ -1179,9 +1238,11 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddDiff={props.onAddDiff}
             onAddHistory={props.onAddHistory}
             onAddFiles={props.onAddFiles}
+            onAddPullRequest={props.onAddPullRequest}
             onAddAgents={props.onAddAgents}
             onAddChat={props.onAddChat}
             browserAvailable={props.browserAvailable}
+            terminalAvailable={props.terminalAvailable}
             diffAvailable={props.diffAvailable}
             historyAvailable={props.historyAvailable}
             historyDisabledReason={props.historyDisabledReason}
@@ -1189,6 +1250,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             chatAvailable={props.chatAvailable}
             panelChats={closedPanelChats}
             onOpenChat={props.onOpenChat}
+            pullRequestAvailable={props.pullRequestAvailable}
+            agentsAvailable={props.agentsAvailable}
             liveAgentCount={props.liveAgentCount}
           />
         ) : (

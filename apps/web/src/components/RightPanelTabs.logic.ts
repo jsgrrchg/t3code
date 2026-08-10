@@ -9,6 +9,7 @@ export const RIGHT_PANEL_EMPTY_SURFACE_ORDER = [
   "terminal",
   "files",
   "diff",
+  "pull-request",
   "agents",
   "history",
 ] as const;
@@ -18,6 +19,7 @@ export const RIGHT_PANEL_ADD_MENU_SURFACE_ORDER = [
   "terminal",
   "files",
   "diff",
+  "pull-request",
   "history",
   "agents",
 ] as const;
