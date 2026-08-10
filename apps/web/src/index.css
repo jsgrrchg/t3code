@@ -975,7 +975,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --warning-foreground: var(--color-amber-400);
     --warning-surface: color-mix(in srgb, var(--warning) 16%, transparent);
     --update: var(--primary);
-    --update-foreground: var(--primary);
+    --update-foreground: var(--color-blue-400);
     --update-surface: color-mix(in srgb, var(--update) 18%, transparent);
     --sidebar: var(--card);
     --sidebar-foreground: var(--foreground);
@@ -1898,6 +1898,56 @@ label:has(> select#reasoning-effort) select {
 .chat-markdown .chat-markdown-codeblock[data-wrap="true"] pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.chat-markdown .chat-markdown-mermaid-diagram {
+  overflow: auto;
+  padding: 0.75rem 1rem 1rem;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--border) 78%, transparent) transparent;
+}
+
+.chat-markdown .chat-markdown-mermaid-diagram::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.chat-markdown .chat-markdown-mermaid-diagram::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-markdown .chat-markdown-mermaid-diagram::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 78%, transparent);
+}
+
+.chat-markdown .chat-markdown-mermaid-diagram img {
+  display: block;
+  width: auto;
+  max-width: none;
+  height: auto;
+  margin-inline: auto;
+}
+
+.chat-markdown .chat-markdown-mermaid-loading {
+  display: flex;
+  min-height: 7rem;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.chat-markdown .chat-markdown-mermaid-error {
+  border-top: 1px solid color-mix(in srgb, var(--destructive) 26%, transparent);
+  padding: 0.5rem 0.75rem;
+  color: var(--destructive-foreground);
+  font-size: 0.75rem;
+}
+
+.chat-markdown .chat-markdown-mermaid-source pre {
+  max-height: 28rem;
 }
 
 .chat-markdown .chat-markdown-shiki .shiki {

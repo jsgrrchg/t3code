@@ -16,14 +16,16 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
+  CheckIcon,
   CornerDownRightIcon,
   GripVerticalIcon,
   ImageIcon,
   ListOrderedIcon,
   PauseIcon,
+  PencilIcon,
   XIcon,
 } from "lucide-react";
-import { memo, useCallback, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import type {
   DesktopQueuedFollowUp,
@@ -51,6 +53,11 @@ function queuedEntryLabel(entry: DesktopQueuedFollowUp): string {
   }
 }
 
+function resizeQueuedMessageEditor(element: HTMLTextAreaElement): void {
+  element.style.height = "auto";
+  element.style.height = `${Math.min(element.scrollHeight, 80)}px`;
+}
+
 type SortableQueueRowBag = Pick<
   ReturnType<typeof useSortable>,
   | "attributes"
@@ -73,18 +80,30 @@ function SortableQueueRow(props: {
 export const DesktopFollowUpQueuePanel = memo(function DesktopFollowUpQueuePanel({
   entries,
   dispatchingEntryId,
+  editingEntryId,
   paused,
+  onBeginEdit,
+  onCancelEdit,
   onRemove,
   onReorder,
+  onSaveEdit,
   onSteer,
 }: {
   readonly entries: ReadonlyArray<DesktopQueuedFollowUp>;
   readonly dispatchingEntryId: string | null;
+  readonly editingEntryId: string | null;
   readonly paused: boolean;
+  readonly onBeginEdit: (entry: DesktopQueuedMessageFollowUp) => boolean;
+  readonly onCancelEdit: (entry: DesktopQueuedMessageFollowUp) => void;
   readonly onRemove: (entry: DesktopQueuedFollowUp) => void;
   readonly onReorder: (entryId: string, overEntryId: string) => void;
+  readonly onSaveEdit: (entry: DesktopQueuedMessageFollowUp, text: string) => boolean;
   readonly onSteer: (entry: DesktopQueuedMessageFollowUp) => void;
 }) {
+  const [editDraft, setEditDraft] = useState<{ readonly entryId: string; text: string } | null>(
+    null,
+  );
+  const activeEditEntryRef = useRef<DesktopQueuedMessageFollowUp | null>(null);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -96,11 +115,46 @@ export const DesktopFollowUpQueuePanel = memo(function DesktopFollowUpQueuePanel
     },
     [onReorder],
   );
+  const beginEdit = useCallback(
+    (entry: DesktopQueuedMessageFollowUp) => {
+      if (!onBeginEdit(entry)) return;
+      activeEditEntryRef.current = entry;
+      setEditDraft({ entryId: entry.id, text: entry.text });
+    },
+    [onBeginEdit],
+  );
+  const cancelEdit = useCallback(
+    (entry: DesktopQueuedMessageFollowUp) => {
+      onCancelEdit(entry);
+      activeEditEntryRef.current = null;
+      setEditDraft(null);
+    },
+    [onCancelEdit],
+  );
+  const saveEdit = useCallback(
+    (entry: DesktopQueuedMessageFollowUp) => {
+      if (editDraft?.entryId !== entry.id) return;
+      if (!editDraft.text.trim() && entry.attachments.length === 0) return;
+      if (onSaveEdit(entry, editDraft.text)) {
+        activeEditEntryRef.current = null;
+        setEditDraft(null);
+      }
+    },
+    [editDraft, onSaveEdit],
+  );
+  useEffect(
+    () => () => {
+      const editingEntry = activeEditEntryRef.current;
+      if (editingEntry) onCancelEdit(editingEntry);
+    },
+    [onCancelEdit],
+  );
 
   if (entries.length === 0) return null;
 
   const reorderingDisabled =
-    dispatchingEntryId !== null && entries.some((entry) => entry.id === dispatchingEntryId);
+    editingEntryId !== null ||
+    (dispatchingEntryId !== null && entries.some((entry) => entry.id === dispatchingEntryId));
 
   return (
     <div className="chat-composer-glass relative mt-6 rounded-xl border border-border/45 px-2 pt-2 pb-1.5 shadow-sm">
@@ -128,6 +182,8 @@ export const DesktopFollowUpQueuePanel = memo(function DesktopFollowUpQueuePanel
           <div className="scrollbar-thin max-h-32 space-y-1 overflow-y-auto">
             {entries.map((entry, index) => {
               const dispatching = dispatchingEntryId === entry.id;
+              const editing = editingEntryId === entry.id && editDraft?.entryId === entry.id;
+              const actionsDisabled = dispatching || editingEntryId !== null;
               const label = queuedEntryLabel(entry);
               return (
                 <SortableQueueRow key={entry.id} id={entry.id} disabled={reorderingDisabled}>
@@ -143,6 +199,7 @@ export const DesktopFollowUpQueuePanel = memo(function DesktopFollowUpQueuePanel
                         "bg-muted/30 text-muted-foreground",
                         sortable.isDragging && "z-10 opacity-80",
                         dispatching && "opacity-65",
+                        editing && "items-start py-1 ring-1 ring-ring/50",
                       )}
                     >
                       <button
@@ -160,42 +217,131 @@ export const DesktopFollowUpQueuePanel = memo(function DesktopFollowUpQueuePanel
                       <span className="w-3 shrink-0 text-center text-[10px] tabular-nums text-muted-foreground/65">
                         {index + 1}
                       </span>
-                      <span className="min-w-0 flex-1 truncate text-foreground/85">{label}</span>
+                      {entry.kind === "message" && editing ? (
+                        <textarea
+                          autoFocus
+                          rows={1}
+                          aria-label={`Edit queued item ${index + 1}`}
+                          value={editDraft.text}
+                          onChange={(event) =>
+                            setEditDraft({ entryId: entry.id, text: event.target.value })
+                          }
+                          onFocus={(event) => resizeQueuedMessageEditor(event.currentTarget)}
+                          onInput={(event) => resizeQueuedMessageEditor(event.currentTarget)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Escape") {
+                              event.preventDefault();
+                              cancelEdit(entry);
+                              return;
+                            }
+                            if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                              event.preventDefault();
+                              saveEdit(entry);
+                            }
+                          }}
+                          className="max-h-20 min-h-6 min-w-0 flex-1 resize-none rounded-md border border-border/60 bg-background/70 px-2 py-1 text-xs leading-4 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        />
+                      ) : (
+                        <span className="min-w-0 flex-1 truncate text-foreground/85">{label}</span>
+                      )}
                       {entry.kind === "message" && entry.attachments.length > 0 ? (
                         <span className="inline-flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground/75">
                           <ImageIcon className="size-3" />
                           {entry.attachments.length}
                         </span>
                       ) : null}
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <Button
-                              type="button"
-                              size="icon-xs"
-                              variant="ghost"
-                              aria-label="Remove queued follow-up"
-                              disabled={dispatching}
-                              onClick={() => onRemove(entry)}
-                            >
-                              <XIcon className="size-3.5" />
-                            </Button>
-                          }
-                        />
-                        <TooltipPopup side="top">Remove from queue</TooltipPopup>
-                      </Tooltip>
+                      {entry.kind === "message" && editing ? (
+                        <>
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <Button
+                                  type="button"
+                                  size="icon-xs"
+                                  variant="ghost"
+                                  aria-label="Cancel editing queued follow-up"
+                                  onClick={() => cancelEdit(entry)}
+                                >
+                                  <XIcon className="size-3.5" />
+                                </Button>
+                              }
+                            />
+                            <TooltipPopup side="top">Cancel edit</TooltipPopup>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <Button
+                                  type="button"
+                                  size="icon-xs"
+                                  variant="ghost"
+                                  aria-label="Save queued follow-up"
+                                  disabled={
+                                    !editDraft.text.trim() && entry.attachments.length === 0
+                                  }
+                                  onClick={() => saveEdit(entry)}
+                                >
+                                  <CheckIcon className="size-3.5" />
+                                </Button>
+                              }
+                            />
+                            <TooltipPopup side="top">Save edit</TooltipPopup>
+                          </Tooltip>
+                        </>
+                      ) : (
+                        <>
+                          {entry.kind === "message" ? (
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <Button
+                                    type="button"
+                                    size="icon-xs"
+                                    variant="ghost"
+                                    aria-label="Edit queued follow-up"
+                                    disabled={actionsDisabled}
+                                    onClick={() => beginEdit(entry)}
+                                  >
+                                    <PencilIcon className="size-3.5" />
+                                  </Button>
+                                }
+                              />
+                              <TooltipPopup side="top">Edit queued message</TooltipPopup>
+                            </Tooltip>
+                          ) : null}
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <Button
+                                  type="button"
+                                  size="icon-xs"
+                                  variant="ghost"
+                                  aria-label="Remove queued follow-up"
+                                  disabled={actionsDisabled}
+                                  onClick={() => onRemove(entry)}
+                                >
+                                  <XIcon className="size-3.5" />
+                                </Button>
+                              }
+                            />
+                            <TooltipPopup side="top">Remove from queue</TooltipPopup>
+                          </Tooltip>
+                        </>
+                      )}
                       {entry.kind === "message" ? (
-                        <Button
-                          type="button"
-                          size="xs"
-                          variant="ghost"
-                          className="h-6 shrink-0 gap-1 px-2 text-[11px] text-foreground/80"
-                          disabled={dispatching}
-                          onClick={() => onSteer(entry)}
-                        >
-                          <CornerDownRightIcon className="size-3" />
-                          {dispatching ? "Sending…" : "Steer"}
-                        </Button>
+                        !editing ? (
+                          <Button
+                            type="button"
+                            size="xs"
+                            variant="ghost"
+                            className="h-6 shrink-0 gap-1 px-2 text-[11px] text-foreground/80"
+                            disabled={actionsDisabled}
+                            onClick={() => onSteer(entry)}
+                          >
+                            <CornerDownRightIcon className="size-3" />
+                            {dispatching ? "Sending…" : "Steer"}
+                          </Button>
+                        ) : null
                       ) : (
                         <span className="shrink-0 px-2 text-[10px] text-muted-foreground/70">
                           Runs next

@@ -58,6 +58,11 @@ import { MarkdownReviewSurface } from "./MarkdownReviewSurface";
 import { projectFileCacheKey, projectFileEditorCacheKey } from "./fileContentRevision";
 import { fileBreadcrumbs, pathFallsWithinEntry } from "./filePath";
 import { isMarkdownPreviewFile, setMarkdownTaskChecked } from "./filePreviewMode";
+import {
+  filePreviewScrollKey,
+  getRememberedFilePreviewScroll,
+  rememberFilePreviewScroll,
+} from "./filePreviewScrollState";
 import { FileSaveCoordinator } from "./fileSaveCoordinator";
 import {
   clearProjectFileQueryData,
@@ -66,6 +71,7 @@ import {
   setProjectFileQueryData,
   useProjectFileQuery,
 } from "./projectFilesQueryState";
+import { useRememberedFilePreviewScroll } from "./useRememberedFilePreviewScroll";
 
 interface FilePreviewPanelProps {
   environmentId: EnvironmentId;
@@ -137,13 +143,21 @@ function WorkspaceImagePreview(props: {
   readonly threadRef: ScopedThreadRef;
   readonly absolutePath: string;
   readonly alt: string;
+  readonly scrollKey: string;
 }) {
+  const scrollRootRef = useRef<HTMLDivElement>(null);
   const assetUrl = useAssetUrlState(props.environmentId, {
     _tag: "workspace-file",
     threadId: props.threadRef.threadId,
     path: props.absolutePath,
   });
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const imageLoaded = assetUrl._tag === "Success" && failedUrl !== assetUrl.url;
+  useRememberedFilePreviewScroll({
+    scrollKey: props.scrollKey,
+    rootRef: scrollRootRef,
+    enabled: imageLoaded,
+  });
 
   if (assetUrl._tag === "Failure" || (assetUrl._tag === "Success" && failedUrl === assetUrl.url)) {
     return (
@@ -154,7 +168,10 @@ function WorkspaceImagePreview(props: {
   }
 
   return assetUrl._tag === "Success" ? (
-    <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4">
+    <div
+      ref={scrollRootRef}
+      className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4"
+    >
       <img
         className="max-h-full max-w-full object-contain"
         src={assetUrl.url}
@@ -223,6 +240,7 @@ function useFileLineReveal(
   relativePath: string | null,
   revealLine: number | null,
   revealRequestId: number,
+  sourceScrollKey: string | null,
 ): FilePostRender {
   const [revealStatesByPath] = useState(() => new Map<string, FileRevealState>());
 
@@ -275,6 +293,13 @@ function useFileLineReveal(
       fileContainer.style.minHeight = `${Math.ceil(
         Math.max(instance.height, scrollContainer.clientHeight),
       )}px`;
+
+      if (
+        sourceScrollKey !== null &&
+        getRememberedFilePreviewScroll(sourceScrollKey)?.revealRequestId === revealRequestId
+      ) {
+        state.handledRequestId = revealRequestId;
+      }
 
       if (state.handledRequestId === revealRequestId || state.frameId !== null) {
         return;
@@ -376,13 +401,24 @@ function useFileLineReveal(
 
           scrollContainer.scrollTop = targetTop;
           state.handledRequestId = revealRequestId;
+          if (sourceScrollKey !== null) {
+            // Mark the request only after Pierre produced a real scroll target.
+            // Cleanup can then distinguish a consumed reveal from an interrupted one.
+            rememberFilePreviewScroll(sourceScrollKey, {
+              position: {
+                top: scrollContainer.scrollTop,
+                left: scrollContainer.scrollLeft,
+              },
+              revealRequestId,
+            });
+          }
           guardScrollTarget(line);
         });
       };
 
       scheduleReveal(0);
     },
-    [revealStatesByPath, relativePath, revealLine, revealRequestId],
+    [revealStatesByPath, relativePath, revealLine, revealRequestId, sourceScrollKey],
   );
 }
 
@@ -393,7 +429,9 @@ interface EditableFileSurfaceProps {
   composerDraftTarget: ScopedThreadRef | DraftId;
   contents: string;
   resolvedTheme: "light" | "dark";
+  revealLine: number | null;
   revealRequestId: number;
+  scrollKey: string;
   wordWrap: boolean;
   onPostRender: FilePostRender;
   onPendingChange: (relativePath: string, pending: boolean) => void;
@@ -450,7 +488,9 @@ function EditableFileSurface({
   composerDraftTarget,
   contents,
   resolvedTheme,
+  revealLine,
   revealRequestId,
+  scrollKey,
   wordWrap,
   onPostRender,
   onPendingChange,
@@ -474,6 +514,13 @@ function EditableFileSurface({
   );
   const surfaceRef = useRef<HTMLDivElement>(null);
   const selectionFrameRef = useRef<number | null>(null);
+  useRememberedFilePreviewScroll({
+    scrollKey,
+    rootRef: surfaceRef,
+    viewportSelector: ".file-preview-virtualizer",
+    revealRequestId,
+    ...(revealLine === null ? {} : { restoreForRevealRequestId: revealRequestId }),
+  });
   const saveCoordinator = useFileSaveCoordinator({
     environmentId,
     cwd,
@@ -691,6 +738,68 @@ function EditableFileSurface({
   );
 }
 
+interface TruncatedFileSurfaceProps {
+  readonly cwd: string;
+  readonly relativePath: string;
+  readonly contents: string;
+  readonly resolvedTheme: "light" | "dark";
+  readonly revealLine: number | null;
+  readonly revealRequestId: number;
+  readonly scrollKey: string;
+  readonly wordWrap: boolean;
+  readonly onPostRender: FilePostRender;
+}
+
+function TruncatedFileSurface({
+  cwd,
+  relativePath,
+  contents,
+  resolvedTheme,
+  revealLine,
+  revealRequestId,
+  scrollKey,
+  wordWrap,
+  onPostRender,
+}: TruncatedFileSurfaceProps) {
+  const surfaceRef = useRef<HTMLDivElement>(null);
+  useRememberedFilePreviewScroll({
+    scrollKey,
+    rootRef: surfaceRef,
+    viewportSelector: ".file-preview-virtualizer",
+    revealRequestId,
+    ...(revealLine === null ? {} : { restoreForRevealRequestId: revealRequestId }),
+  });
+
+  return (
+    <div ref={surfaceRef} className="flex min-h-0 flex-1">
+      <Virtualizer
+        className="file-preview-virtualizer min-h-0 flex-1 overflow-auto"
+        config={{
+          overscrollSize: 600,
+          intersectionObserverMargin: 1200,
+        }}
+      >
+        <File
+          file={{
+            name: relativePath,
+            contents,
+            cacheKey: projectFileCacheKey(cwd, relativePath, contents),
+          }}
+          options={{
+            disableFileHeader: true,
+            overflow: wordWrap ? "wrap" : "scroll",
+            theme: resolveDiffThemeName(resolvedTheme),
+            themeType: resolvedTheme,
+            unsafeCSS: FILE_LINK_REVEAL_UNSAFE_CSS,
+            onPostRender,
+          }}
+          className="min-h-full"
+        />
+      </Virtualizer>
+    </div>
+  );
+}
+
 function RenderedMarkdownSurface({
   environmentId,
   cwd,
@@ -702,10 +811,11 @@ function RenderedMarkdownSurface({
   onSaveCoordinatorChange,
 }: Omit<
   EditableFileSurfaceProps,
-  "resolvedTheme" | "revealLine" | "revealRequestId" | "wordWrap" | "onPostRender"
+  "resolvedTheme" | "revealLine" | "revealRequestId" | "scrollKey" | "wordWrap" | "onPostRender"
 > & {
   threadRef: ScopedThreadRef;
 }) {
+  const scrollRootRef = useRef<HTMLDivElement>(null);
   const addReviewComment = useComposerDraftStore((store) => store.addReviewComment);
   const removeReviewComment = useComposerDraftStore((store) => store.removeReviewComment);
   const reviewComments = useComposerDraftStore(
@@ -722,9 +832,19 @@ function RenderedMarkdownSurface({
     onPendingChange,
     onSaveCoordinatorChange,
   });
+  useRememberedFilePreviewScroll({
+    scrollKey: filePreviewScrollKey({
+      threadRef,
+      cwd,
+      relativePath,
+      mode: "markdown",
+    }),
+    rootRef: scrollRootRef,
+    viewportSelector: '[data-slot="scroll-area-viewport"]',
+  });
 
   return (
-    <ScrollArea className="min-h-0 flex-1">
+    <ScrollArea ref={scrollRootRef} className="min-h-0 flex-1">
       <div className="mx-auto max-w-4xl px-6 py-5">
         <MarkdownReviewSurface
           comments={fileReviewComments}
@@ -749,6 +869,7 @@ function RenderedMarkdownSurface({
             threadRef={threadRef}
             className="pl-7"
             annotateSourceBlocks
+            renderMermaid
             onTaskListChange={({ markerOffset, checked }) => {
               const currentContents =
                 getOptimisticProjectFileQueryData(environmentId, cwd, relativePath)?.contents ??
@@ -826,11 +947,19 @@ export default function FilePreviewPanel({
   const canOpenInBrowser =
     relativePath !== null && isPreviewSupportedInRuntime() && isBrowserPreviewFile(relativePath);
   const absolutePath = relativePath ? resolvePathLinkTarget(relativePath, cwd) : null;
+  const sourceScrollKey = relativePath
+    ? filePreviewScrollKey({ threadRef, cwd, relativePath, mode: "source" })
+    : null;
   const breadcrumbs = useMemo(
     () => (relativePath ? fileBreadcrumbs(projectName, relativePath) : []),
     [projectName, relativePath],
   );
-  const onFilePostRender = useFileLineReveal(relativePath, revealLine, revealRequestId);
+  const onFilePostRender = useFileLineReveal(
+    relativePath,
+    revealLine,
+    revealRequestId,
+    sourceScrollKey,
+  );
   const saveCoordinatorRef = useRef<FileSaveCoordinator | null>(null);
   const handleSaveCoordinatorChange = useCallback((coordinator: FileSaveCoordinator | null) => {
     saveCoordinatorRef.current = coordinator;
@@ -1036,6 +1165,12 @@ export default function FilePreviewPanel({
               threadRef={threadRef}
               absolutePath={absolutePath}
               alt={relativePath}
+              scrollKey={filePreviewScrollKey({
+                threadRef,
+                cwd,
+                relativePath,
+                mode: "image",
+              })}
             />
           ) : relativePath && file.error && file.data === null ? (
             <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-xs leading-relaxed text-destructive">
@@ -1058,31 +1193,23 @@ export default function FilePreviewPanel({
                 onSaveCoordinatorChange={handleSaveCoordinatorChange}
               />
             ) : file.data.truncated ? (
-              <Virtualizer
+              <TruncatedFileSurface
                 key={`${relativePath}:${resolvedTheme}:${file.data.byteLength}`}
-                className="file-preview-virtualizer min-h-0 flex-1 overflow-auto"
-                config={{
-                  overscrollSize: 600,
-                  intersectionObserverMargin: 1200,
-                }}
-              >
-                <File
-                  file={{
-                    name: relativePath,
-                    contents: file.data.contents,
-                    cacheKey: projectFileCacheKey(cwd, relativePath, file.data.contents),
-                  }}
-                  options={{
-                    disableFileHeader: true,
-                    overflow: wordWrap ? "wrap" : "scroll",
-                    theme: resolveDiffThemeName(resolvedTheme),
-                    themeType: resolvedTheme,
-                    unsafeCSS: FILE_LINK_REVEAL_UNSAFE_CSS,
-                    onPostRender: onFilePostRender,
-                  }}
-                  className="min-h-full"
-                />
-              </Virtualizer>
+                cwd={cwd}
+                relativePath={relativePath}
+                contents={file.data.contents}
+                resolvedTheme={resolvedTheme}
+                revealLine={revealLine}
+                revealRequestId={revealRequestId}
+                scrollKey={filePreviewScrollKey({
+                  threadRef,
+                  cwd,
+                  relativePath,
+                  mode: "source",
+                })}
+                wordWrap={wordWrap}
+                onPostRender={onFilePostRender}
+              />
             ) : (
               <EditableFileSurface
                 key={`${relativePath}:${resolvedTheme}`}
@@ -1092,7 +1219,14 @@ export default function FilePreviewPanel({
                 composerDraftTarget={composerDraftTarget}
                 contents={file.data.contents}
                 resolvedTheme={resolvedTheme}
+                revealLine={revealLine}
                 revealRequestId={revealRequestId}
+                scrollKey={filePreviewScrollKey({
+                  threadRef,
+                  cwd,
+                  relativePath,
+                  mode: "source",
+                })}
                 wordWrap={wordWrap}
                 onPostRender={onFilePostRender}
                 onPendingChange={onPendingChange}

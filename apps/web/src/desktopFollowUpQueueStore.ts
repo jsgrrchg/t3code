@@ -1,3 +1,5 @@
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+import { hasQueuedTurnStart } from "@t3tools/client-runtime/state/thread-settled";
 import {
   CommandId,
   EnvironmentId,
@@ -61,6 +63,86 @@ export const DesktopQueuedFollowUp = Schema.Union([
 ]);
 export type DesktopQueuedFollowUp = typeof DesktopQueuedFollowUp.Type;
 
+type DesktopFollowUpQueueThreadLifecycle = Pick<
+  EnvironmentThreadShell,
+  "environmentId" | "id" | "latestUserMessageAt" | "latestTurn" | "session"
+>;
+
+export interface DesktopFollowUpQueueBarrier {
+  readonly key: string;
+  readonly kind: DesktopQueuedFollowUp["kind"];
+  readonly baselineSessionUpdatedAt: string | null;
+  readonly baselineLatestTurn: string | null;
+}
+
+function latestTurnFingerprint(thread: DesktopFollowUpQueueThreadLifecycle): string | null {
+  const turn = thread.latestTurn;
+  return turn === null
+    ? null
+    : JSON.stringify([turn.turnId, turn.state, turn.requestedAt, turn.startedAt, turn.completedAt]);
+}
+
+export function desktopFollowUpQueueThreadKey(
+  thread: Pick<EnvironmentThreadShell, "environmentId" | "id">,
+): string {
+  return JSON.stringify([thread.environmentId, thread.id]);
+}
+
+export function createDesktopFollowUpQueueBarrier(
+  entry: DesktopQueuedFollowUp,
+  thread: DesktopFollowUpQueueThreadLifecycle,
+): DesktopFollowUpQueueBarrier {
+  return {
+    key: desktopFollowUpQueueThreadKey(thread),
+    kind: entry.kind,
+    baselineSessionUpdatedAt: thread.session?.updatedAt ?? null,
+    baselineLatestTurn: latestTurnFingerprint(thread),
+  };
+}
+
+/**
+ * A successful command receipt only proves persistence. Keep the thread
+ * blocked until its provider lifecycle advances and returns to a terminal
+ * state, otherwise the next local queue item can become a same-turn steer.
+ */
+export function desktopFollowUpQueueBarrierCompleted(
+  barrier: DesktopFollowUpQueueBarrier,
+  thread: DesktopFollowUpQueueThreadLifecycle,
+  options: { readonly now: string },
+): boolean {
+  const sessionStatus = thread.session?.status ?? null;
+  if (
+    sessionStatus === "starting" ||
+    sessionStatus === "running" ||
+    thread.latestTurn?.state === "running" ||
+    hasQueuedTurnStart(thread, options)
+  ) {
+    return false;
+  }
+
+  const sessionAdvanced = (thread.session?.updatedAt ?? null) !== barrier.baselineSessionUpdatedAt;
+  const latestTurnAdvanced = latestTurnFingerprint(thread) !== barrier.baselineLatestTurn;
+  const latestTurnCompleted = thread.latestTurn?.state === "completed";
+  const sessionReachedFailureState =
+    sessionStatus === "error" || sessionStatus === "stopped" || sessionStatus === "interrupted";
+
+  if (barrier.kind === "message") {
+    const lifecycleCompleted =
+      (latestTurnAdvanced && latestTurnCompleted) ||
+      (sessionAdvanced && sessionReachedFailureState);
+    if (lifecycleCompleted) return true;
+  } else {
+    // Provider actions do not create a user message, so their completion may
+    // only be visible through the session returning to ready.
+    const lifecycleCompleted =
+      (sessionAdvanced && sessionStatus !== null) ||
+      (latestTurnAdvanced && thread.latestTurn !== null);
+    if (lifecycleCompleted) return true;
+  }
+
+  return false;
+}
+
 const PersistedDesktopFollowUpQueue = Schema.Struct({
   entries: Schema.Array(DesktopQueuedFollowUp),
 });
@@ -109,9 +191,13 @@ function persistEntries(entries: ReadonlyArray<DesktopQueuedFollowUp>): boolean 
 interface DesktopFollowUpQueueState {
   readonly entries: ReadonlyArray<DesktopQueuedFollowUp>;
   readonly dispatchingEntryId: string | null;
+  readonly editingEntryId: string | null;
   enqueue: (entry: DesktopQueuedFollowUp) => boolean;
   remove: (entryId: string) => void;
   reorder: (entryId: string, overEntryId: string) => boolean;
+  beginEdit: (entryId: string) => boolean;
+  cancelEdit: (entryId: string) => void;
+  updateMessageText: (entryId: string, text: string) => boolean;
   claim: (entryId: string) => boolean;
   release: (entryId: string) => void;
 }
@@ -159,6 +245,7 @@ function reorderEntriesWithinThread(
 export const useDesktopFollowUpQueueStore = create<DesktopFollowUpQueueState>()((set, get) => ({
   entries: readEntries(),
   dispatchingEntryId: null,
+  editingEntryId: null,
   enqueue: (entry) => {
     if (get().entries.length >= MAX_QUEUED_FOLLOW_UPS) return false;
     const nextEntries = [...get().entries, entry];
@@ -172,10 +259,12 @@ export const useDesktopFollowUpQueueStore = create<DesktopFollowUpQueueState>()(
     set((state) => ({
       entries: nextEntries,
       dispatchingEntryId: state.dispatchingEntryId === entryId ? null : state.dispatchingEntryId,
+      editingEntryId: state.editingEntryId === entryId ? null : state.editingEntryId,
     }));
   },
   reorder: (entryId, overEntryId) => {
     const state = get();
+    if (state.editingEntryId !== null) return false;
     const dispatchingEntry =
       state.dispatchingEntryId === null
         ? undefined
@@ -190,8 +279,37 @@ export const useDesktopFollowUpQueueStore = create<DesktopFollowUpQueueState>()(
     set({ entries: nextEntries });
     return true;
   },
+  beginEdit: (entryId) => {
+    const state = get();
+    if (state.editingEntryId !== null || state.dispatchingEntryId === entryId) return false;
+    if (!state.entries.some((entry) => entry.id === entryId && entry.kind === "message")) {
+      return false;
+    }
+    set({ editingEntryId: entryId });
+    return true;
+  },
+  cancelEdit: (entryId) => {
+    set((state) => ({
+      editingEntryId: state.editingEntryId === entryId ? null : state.editingEntryId,
+    }));
+  },
+  updateMessageText: (entryId, text) => {
+    const state = get();
+    if (state.editingEntryId !== entryId || state.dispatchingEntryId === entryId) return false;
+
+    const entry = state.entries.find((candidate) => candidate.id === entryId);
+    if (!entry || entry.kind !== "message") return false;
+    if (!text.trim() && entry.attachments.length === 0) return false;
+
+    const nextEntries = state.entries.map((candidate) =>
+      candidate.id === entryId ? { ...entry, text } : candidate,
+    );
+    if (!persistEntries(nextEntries)) return false;
+    set({ entries: nextEntries, editingEntryId: null });
+    return true;
+  },
   claim: (entryId) => {
-    if (get().dispatchingEntryId !== null) return false;
+    if (get().dispatchingEntryId !== null || get().editingEntryId !== null) return false;
     if (!get().entries.some((entry) => entry.id === entryId)) return false;
     set({ dispatchingEntryId: entryId });
     return true;
@@ -229,20 +347,31 @@ export function shouldQueueDesktopFollowUp(input: {
 export function canDispatchDesktopQueuedFollowUp(input: {
   readonly sessionStatus: string | null;
   readonly latestTurnState: string | null;
+  readonly hasQueuedTurnStart: boolean;
 }): boolean {
   return (
     input.sessionStatus !== "running" &&
     input.sessionStatus !== "starting" &&
-    input.latestTurnState !== "interrupted"
+    input.sessionStatus !== "interrupted" &&
+    input.latestTurnState !== "interrupted" &&
+    !input.hasQueuedTurnStart
   );
 }
 
 export function writeDesktopFollowUpQueueStorageForTest(raw: string): void {
   if (raw) queueStorage.setItem(DESKTOP_FOLLOW_UP_QUEUE_STORAGE_KEY, raw);
   else queueStorage.removeItem(DESKTOP_FOLLOW_UP_QUEUE_STORAGE_KEY);
-  useDesktopFollowUpQueueStore.setState({ entries: readEntries(), dispatchingEntryId: null });
+  useDesktopFollowUpQueueStore.setState({
+    entries: readEntries(),
+    dispatchingEntryId: null,
+    editingEntryId: null,
+  });
 }
 
 export function reloadDesktopFollowUpQueueForTest(): void {
-  useDesktopFollowUpQueueStore.setState({ entries: readEntries(), dispatchingEntryId: null });
+  useDesktopFollowUpQueueStore.setState({
+    entries: readEntries(),
+    dispatchingEntryId: null,
+    editingEntryId: null,
+  });
 }
