@@ -1,3 +1,20 @@
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import { restrictToFirstScrollableAncestor, restrictToHorizontalAxis } from "@dnd-kit/modifiers";
+import {
+  SortableContext,
+  horizontalListSortingStrategy,
+  sortableKeyboardCoordinates,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import type { ContextMenuItem, PreviewSessionSnapshot } from "@t3tools/contracts";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import {
@@ -6,6 +23,7 @@ import {
   Files,
   GitGraph,
   Globe2,
+  GripVertical,
   MessageSquare,
   MoreHorizontal,
   Plus,
@@ -73,6 +91,7 @@ interface RightPanelTabsProps {
   previewSessions: Readonly<Record<string, PreviewSessionSnapshot>>;
   terminalLabelsById: ReadonlyMap<string, string>;
   onActivate: (surface: RightPanelSurface) => void;
+  onReorder: (surfaceId: string, overSurfaceId: string) => void;
   onCloseSurface: (surface: RightPanelSurface) => Promise<boolean>;
   onCloseOtherSurfaces: (surface: RightPanelSurface) => Promise<boolean>;
   onCloseSurfacesToRight: (surface: RightPanelSurface) => Promise<boolean>;
@@ -104,6 +123,24 @@ interface RightPanelTabsProps {
   /** Running + waiting subagents; badges the Agents card in the empty state. */
   liveAgentCount: number;
   children: ReactNode;
+}
+
+type SortableRightPanelTabBag = Pick<
+  ReturnType<typeof useSortable>,
+  | "attributes"
+  | "listeners"
+  | "setActivatorNodeRef"
+  | "setNodeRef"
+  | "transform"
+  | "transition"
+  | "isDragging"
+>;
+
+function SortableRightPanelTab(props: {
+  readonly id: string;
+  readonly children: (bag: SortableRightPanelTabBag) => ReactNode;
+}) {
+  return props.children(useSortable({ id: props.id }));
 }
 
 export interface PanelChatTabMetadata {
@@ -502,6 +539,10 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   const [chatSearchQuery, setChatSearchQuery] = useState("");
   const [announcement, setAnnouncement] = useState("");
   const focusedSurfaceIdRef = useRef<string | null>(null);
+  const reorderSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
   const previousSurfaceIdsRef = useRef(
     new Set<string>(props.surfaces.map((surface) => surface.id)),
   );
@@ -718,6 +759,16 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     },
     [],
   );
+  const handleTabReorderEnd = useCallback(
+    (event: DragEndEvent) => {
+      const surfaceId = String(event.active.id);
+      const overSurfaceId = event.over === null ? null : String(event.over.id);
+      if (overSurfaceId === null || surfaceId === overSurfaceId) return;
+      props.onReorder(surfaceId, overSurfaceId);
+      focusTab(surfaceId);
+    },
+    [focusTab, props],
+  );
 
   useEffect(() => {
     const activeTab = tabListRef.current?.querySelector<HTMLElement>("[data-active-tab='true']");
@@ -798,270 +849,314 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           className={cn("min-w-0 flex-1 rounded-none", ownsDesktopTitleBar && "drag-region")}
           data-right-panel-tab-list
         >
-          <div
-            className="flex h-full w-max min-w-full items-center gap-1"
-            role="tablist"
-            aria-label="Right panel surfaces"
+          <DndContext
+            sensors={reorderSensors}
+            collisionDetection={closestCenter}
+            modifiers={[restrictToHorizontalAxis, restrictToFirstScrollableAncestor]}
+            onDragEnd={handleTabReorderEnd}
           >
-            {props.surfaces.map((surface, surfaceIndex) => {
-              const active = surface.id === props.activeSurfaceId;
-              const pending = props.pendingSurfaceIds.has(surface.id);
-              const chat = surface.kind === "chat" ? panelChatById.get(surface.threadId) : null;
-              const title = surfaceTitle(
-                surface,
-                props.previewSessions,
-                props.terminalLabelsById,
-                props.chatTitlesById,
-              );
-              const composerMention = composerMentionFromRightPanelSurface(surface);
-              return (
-                <div
-                  key={surface.id}
-                  data-right-panel-focus-surface-id={surface.id}
-                  role="presentation"
-                  data-active-tab={active}
-                  onMouseDown={handleTabMouseDown}
-                  onAuxClick={(event) => handleTabAuxClick(event, surface)}
-                  onContextMenu={(event) => void handleTabContextMenu(event, surface)}
-                  className={cn(
-                    "cursor-pointer group/tab flex h-6 max-w-36 shrink-0 items-center gap-0.5 rounded-md pr-2 pl-1.5 text-xs",
-                    active
-                      ? "bg-accent text-foreground"
-                      : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-                  )}
-                >
-                  <button
-                    type="button"
-                    className="cursor-pointer group/close relative flex size-4 shrink-0 items-center justify-center rounded-sm hover:bg-muted"
-                    aria-label={
-                      surface.kind === "chat" ? `Close and delete ${title}` : `Close ${title}`
-                    }
-                    onClick={() => void closeSurfaceAndRestoreFocus(surface)}
-                  >
-                    <span className="relative flex size-3 items-center justify-center group-hover/tab:hidden group-focus-visible/close:hidden">
-                      <SurfaceIcon
-                        surface={surface}
-                        sessions={props.previewSessions}
-                        theme={resolvedTheme}
-                      />
-                      {pending ? (
-                        <span
-                          className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-current"
-                          aria-hidden
-                        />
-                      ) : null}
-                    </span>
-                    <X className="hidden size-3 group-hover/tab:block group-focus-visible/close:block" />
-                  </button>
-                  {surface.kind === "chat" && renamingChatId === surface.threadId ? (
-                    <input
-                      autoFocus
-                      aria-label="Rename panel chat"
-                      value={renamingChatTitle}
-                      onChange={(event) => setRenamingChatTitle(event.target.value)}
-                      onBlur={commitChatRename}
-                      onClick={(event) => event.stopPropagation()}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          commitChatRename();
-                        } else if (event.key === "Escape") {
-                          event.preventDefault();
-                          cancelChatRename();
-                        }
-                      }}
-                      className="h-5 min-w-16 max-w-28 rounded border border-border bg-background px-1 text-xs outline-none focus:ring-1 focus:ring-ring"
-                    />
-                  ) : (
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={
+            <div
+              className="flex h-full w-max min-w-full items-center gap-1"
+              role="tablist"
+              aria-label="Right panel surfaces"
+            >
+              <SortableContext
+                items={props.surfaces.map((surface) => surface.id)}
+                strategy={horizontalListSortingStrategy}
+              >
+                {props.surfaces.map((surface, surfaceIndex) => {
+                  const active = surface.id === props.activeSurfaceId;
+                  const pending = props.pendingSurfaceIds.has(surface.id);
+                  const chat = surface.kind === "chat" ? panelChatById.get(surface.threadId) : null;
+                  const title = surfaceTitle(
+                    surface,
+                    props.previewSessions,
+                    props.terminalLabelsById,
+                    props.chatTitlesById,
+                  );
+                  const composerMention = composerMentionFromRightPanelSurface(surface);
+                  return (
+                    <SortableRightPanelTab key={surface.id} id={surface.id}>
+                      {(sortable) => (
+                        <div
+                          ref={sortable.setNodeRef}
+                          style={{
+                            transform: CSS.Translate.toString(sortable.transform),
+                            transition: sortable.transition,
+                          }}
+                          data-right-panel-focus-surface-id={surface.id}
+                          role="presentation"
+                          data-active-tab={active}
+                          onMouseDown={handleTabMouseDown}
+                          onAuxClick={(event) => handleTabAuxClick(event, surface)}
+                          onContextMenu={(event) => void handleTabContextMenu(event, surface)}
+                          className={cn(
+                            "cursor-pointer group/tab flex h-6 max-w-36 shrink-0 items-center gap-0.5 rounded-md pr-2 pl-1.5 text-xs",
+                            active
+                              ? "bg-accent text-foreground"
+                              : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+                            sortable.isDragging && "z-10 opacity-80",
+                          )}
+                        >
                           <button
                             type="button"
-                            ref={(element) => {
-                              if (element) tabButtonRefs.current.set(surface.id, element);
-                              else tabButtonRefs.current.delete(surface.id);
-                            }}
-                            id={`right-panel-tab-${encodeURIComponent(surface.id)}`}
-                            role="tab"
-                            aria-selected={active}
-                            aria-controls="right-panel-active-surface"
-                            tabIndex={active ? 0 : -1}
-                            className="cursor-pointer flex min-w-0 items-center"
-                            draggable={composerMention !== null}
-                            onDragStart={(event) => handleTabDragStart(event, composerMention)}
-                            onClick={() => props.onActivate(surface)}
-                            onKeyDown={(event) => handleTabKeyDown(event, surface)}
-                            onDoubleClick={() => {
-                              if (surface.kind === "chat") beginChatRename(surface.threadId);
-                            }}
+                            className="cursor-pointer group/close relative flex size-4 shrink-0 items-center justify-center rounded-sm hover:bg-muted"
+                            aria-label={
+                              surface.kind === "chat"
+                                ? `Close and delete ${title}`
+                                : `Close ${title}`
+                            }
+                            onClick={() => void closeSurfaceAndRestoreFocus(surface)}
                           >
-                            <span className="truncate">{title}</span>
+                            <span className="relative flex size-3 items-center justify-center group-hover/tab:hidden group-focus-visible/close:hidden">
+                              <SurfaceIcon
+                                surface={surface}
+                                sessions={props.previewSessions}
+                                theme={resolvedTheme}
+                              />
+                              {pending ? (
+                                <span
+                                  className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-current"
+                                  aria-hidden
+                                />
+                              ) : null}
+                            </span>
+                            <X className="hidden size-3 group-hover/tab:block group-focus-visible/close:block" />
                           </button>
-                        }
-                      />
-                      <TooltipPopup>{title}</TooltipPopup>
-                    </Tooltip>
-                  )}
-                  {chat?.running || chat?.needsAttention || chat?.unread ? (
-                    <span
-                      className={cn(
-                        "ml-1 size-1.5 shrink-0 rounded-full",
-                        chat.needsAttention
-                          ? "bg-warning"
-                          : chat.running
-                            ? "bg-info"
-                            : "bg-foreground",
-                      )}
-                      title={
-                        chat.needsAttention
-                          ? "Needs attention"
-                          : chat.running
-                            ? "Running"
-                            : "Unread"
-                      }
-                      aria-label={
-                        chat.needsAttention
-                          ? "Needs attention"
-                          : chat.running
-                            ? "Running"
-                            : "Unread"
-                      }
-                    />
-                  ) : null}
-                  {surface.kind === "chat" ? (
-                    <Menu>
-                      <MenuTrigger
-                        className="cursor-pointer inline-flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover/tab:opacity-100"
-                        aria-label={`Manage ${title}`}
-                      >
-                        <MoreHorizontal className="size-3" />
-                      </MenuTrigger>
-                      <MenuPopup align="start" side="bottom" sideOffset={6} className="min-w-44">
-                        <MenuItem onClick={() => beginChatRename(surface.threadId)}>
-                          Rename
-                        </MenuItem>
-                        <MenuItem
-                          disabled={!props.chatTitleRegenerationAvailable}
-                          onClick={() => props.onRegenerateChatTitle(surface.threadId)}
-                        >
-                          Regenerate title
-                        </MenuItem>
-                        <MenuItem onClick={() => void deleteChatAndRestoreFocus(surface)}>
-                          Delete chat
-                        </MenuItem>
-                        <MenuSeparator />
-                        <MenuItem onClick={() => void closeSurfaceAndRestoreFocus(surface)}>
-                          Close and delete
-                        </MenuItem>
-                        <MenuItem
-                          disabled={props.surfaces.length <= 1}
-                          onClick={() => void props.onCloseOtherSurfaces(surface)}
-                        >
-                          Close others
-                        </MenuItem>
-                        <MenuItem
-                          disabled={surfaceIndex >= props.surfaces.length - 1}
-                          onClick={() => void props.onCloseSurfacesToRight(surface)}
-                        >
-                          Close to the right
-                        </MenuItem>
-                        <MenuItem onClick={() => void closeAllSurfacesAndRestoreFocus()}>
-                          Close all
-                        </MenuItem>
-                      </MenuPopup>
-                    </Menu>
-                  ) : null}
-                </div>
-              );
-            })}
-            {props.surfaces.length > 0 ? (
-              <Menu>
-                <MenuTrigger
-                  className="cursor-pointer relative inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-                  aria-label="Add panel surface"
-                >
-                  <Plus className="size-3.5" />
-                </MenuTrigger>
-                <MenuPopup align="start" side="bottom" sideOffset={6} className="min-w-44">
-                  {RIGHT_PANEL_ADD_MENU_SURFACE_ORDER.map((kind) => {
-                    const action = standardActions[kind];
-                    const Icon = action.icon;
-                    return (
-                      <SurfaceMenuItem
-                        key={kind}
-                        available={action.available}
-                        {...(action.disabledReason === null
-                          ? {}
-                          : { disabledReason: action.disabledReason })}
-                        onClick={action.onClick}
-                      >
-                        <Icon />
-                        {action.label}
-                      </SurfaceMenuItem>
-                    );
-                  })}
-                  {props.chatAvailable ? (
-                    <>
-                      <SurfaceMenuItem available onClick={props.onAddChat}>
-                        <MessageSquare />
-                        New Chat
-                      </SurfaceMenuItem>
-                      {closedPanelChats.length > 0 ? (
-                        <MenuSub>
-                          <MenuSubTrigger>
-                            <MessageSquare />
-                            Open chat
-                          </MenuSubTrigger>
-                          <MenuSubPopup className="min-w-64">
-                            <div
-                              className="relative m-1"
+                          {surface.kind === "chat" && renamingChatId === surface.threadId ? (
+                            <input
+                              autoFocus
+                              aria-label="Rename panel chat"
+                              value={renamingChatTitle}
+                              onChange={(event) => setRenamingChatTitle(event.target.value)}
+                              onBlur={commitChatRename}
                               onClick={(event) => event.stopPropagation()}
-                            >
-                              <Search
-                                aria-hidden
-                                className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground"
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  event.preventDefault();
+                                  commitChatRename();
+                                } else if (event.key === "Escape") {
+                                  event.preventDefault();
+                                  cancelChatRename();
+                                }
+                              }}
+                              className="h-5 min-w-16 max-w-28 rounded border border-border bg-background px-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+                            />
+                          ) : (
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <button
+                                    type="button"
+                                    ref={(element) => {
+                                      if (element) tabButtonRefs.current.set(surface.id, element);
+                                      else tabButtonRefs.current.delete(surface.id);
+                                    }}
+                                    id={`right-panel-tab-${encodeURIComponent(surface.id)}`}
+                                    role="tab"
+                                    aria-selected={active}
+                                    aria-controls="right-panel-active-surface"
+                                    tabIndex={active ? 0 : -1}
+                                    className="cursor-pointer flex min-w-0 items-center"
+                                    draggable={composerMention !== null}
+                                    onDragStart={(event) =>
+                                      handleTabDragStart(event, composerMention)
+                                    }
+                                    onClick={() => props.onActivate(surface)}
+                                    onKeyDown={(event) => handleTabKeyDown(event, surface)}
+                                    onDoubleClick={() => {
+                                      if (surface.kind === "chat")
+                                        beginChatRename(surface.threadId);
+                                    }}
+                                  >
+                                    <span className="truncate">{title}</span>
+                                  </button>
+                                }
                               />
-                              <input
-                                type="search"
-                                value={chatSearchQuery}
-                                onChange={(event) => setChatSearchQuery(event.currentTarget.value)}
-                                onKeyDown={(event) => event.stopPropagation()}
-                                placeholder="Search chats"
-                                aria-label="Search panel chats"
-                                className="h-8 w-full rounded-md border border-border bg-background pr-2 pl-7 text-xs outline-none focus:ring-1 focus:ring-ring"
-                              />
-                            </div>
-                            <div className="max-h-64 overflow-y-auto">
-                              {visibleClosedPanelChats.map((chat) => (
-                                <MenuItem
-                                  key={chat.threadId}
-                                  onClick={() => props.onOpenChat(chat.threadId)}
-                                >
-                                  <span className="truncate">{chat.title}</span>
+                              <TooltipPopup>{title}</TooltipPopup>
+                            </Tooltip>
+                          )}
+                          <button
+                            ref={sortable.setActivatorNodeRef}
+                            type="button"
+                            {...sortable.attributes}
+                            {...sortable.listeners}
+                            aria-label={`Reorder ${title}`}
+                            title="Drag to reorder"
+                            className="inline-flex size-4 shrink-0 cursor-grab items-center justify-center rounded-sm text-muted-foreground/60 opacity-0 outline-none hover:bg-muted hover:text-foreground group-hover/tab:opacity-100 active:cursor-grabbing focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-ring"
+                          >
+                            <GripVertical aria-hidden className="size-3" />
+                          </button>
+                          {chat?.running || chat?.needsAttention || chat?.unread ? (
+                            <span
+                              className={cn(
+                                "ml-1 size-1.5 shrink-0 rounded-full",
+                                chat.needsAttention
+                                  ? "bg-warning"
+                                  : chat.running
+                                    ? "bg-info"
+                                    : "bg-foreground",
+                              )}
+                              title={
+                                chat.needsAttention
+                                  ? "Needs attention"
+                                  : chat.running
+                                    ? "Running"
+                                    : "Unread"
+                              }
+                              aria-label={
+                                chat.needsAttention
+                                  ? "Needs attention"
+                                  : chat.running
+                                    ? "Running"
+                                    : "Unread"
+                              }
+                            />
+                          ) : null}
+                          {surface.kind === "chat" ? (
+                            <Menu>
+                              <MenuTrigger
+                                className="cursor-pointer inline-flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover/tab:opacity-100"
+                                aria-label={`Manage ${title}`}
+                              >
+                                <MoreHorizontal className="size-3" />
+                              </MenuTrigger>
+                              <MenuPopup
+                                align="start"
+                                side="bottom"
+                                sideOffset={6}
+                                className="min-w-44"
+                              >
+                                <MenuItem onClick={() => beginChatRename(surface.threadId)}>
+                                  Rename
                                 </MenuItem>
-                              ))}
-                            </div>
-                            {visibleClosedPanelChats.length === 0 ? (
-                              <p className="px-3 py-2 text-xs text-muted-foreground">
-                                No matching chats.
-                              </p>
-                            ) : null}
-                            {chatSearchQuery.length === 0 &&
-                            closedPanelChats.length > PANEL_CHAT_PICKER_RESULT_LIMIT ? (
-                              <p className="px-3 py-1 text-[11px] text-muted-foreground">
-                                Search to find older chats.
-                              </p>
-                            ) : null}
-                          </MenuSubPopup>
-                        </MenuSub>
-                      ) : null}
-                    </>
-                  ) : null}
-                </MenuPopup>
-              </Menu>
-            ) : null}
-          </div>
+                                <MenuItem
+                                  disabled={!props.chatTitleRegenerationAvailable}
+                                  onClick={() => props.onRegenerateChatTitle(surface.threadId)}
+                                >
+                                  Regenerate title
+                                </MenuItem>
+                                <MenuItem onClick={() => void deleteChatAndRestoreFocus(surface)}>
+                                  Delete chat
+                                </MenuItem>
+                                <MenuSeparator />
+                                <MenuItem onClick={() => void closeSurfaceAndRestoreFocus(surface)}>
+                                  Close and delete
+                                </MenuItem>
+                                <MenuItem
+                                  disabled={props.surfaces.length <= 1}
+                                  onClick={() => void props.onCloseOtherSurfaces(surface)}
+                                >
+                                  Close others
+                                </MenuItem>
+                                <MenuItem
+                                  disabled={surfaceIndex >= props.surfaces.length - 1}
+                                  onClick={() => void props.onCloseSurfacesToRight(surface)}
+                                >
+                                  Close to the right
+                                </MenuItem>
+                                <MenuItem onClick={() => void closeAllSurfacesAndRestoreFocus()}>
+                                  Close all
+                                </MenuItem>
+                              </MenuPopup>
+                            </Menu>
+                          ) : null}
+                        </div>
+                      )}
+                    </SortableRightPanelTab>
+                  );
+                })}
+              </SortableContext>
+              {props.surfaces.length > 0 ? (
+                <Menu>
+                  <MenuTrigger
+                    className="cursor-pointer relative inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                    aria-label="Add panel surface"
+                  >
+                    <Plus className="size-3.5" />
+                  </MenuTrigger>
+                  <MenuPopup align="start" side="bottom" sideOffset={6} className="min-w-44">
+                    {RIGHT_PANEL_ADD_MENU_SURFACE_ORDER.map((kind) => {
+                      const action = standardActions[kind];
+                      const Icon = action.icon;
+                      return (
+                        <SurfaceMenuItem
+                          key={kind}
+                          available={action.available}
+                          {...(action.disabledReason === null
+                            ? {}
+                            : { disabledReason: action.disabledReason })}
+                          onClick={action.onClick}
+                        >
+                          <Icon />
+                          {action.label}
+                        </SurfaceMenuItem>
+                      );
+                    })}
+                    {props.chatAvailable ? (
+                      <>
+                        <SurfaceMenuItem available onClick={props.onAddChat}>
+                          <MessageSquare />
+                          New Chat
+                        </SurfaceMenuItem>
+                        {closedPanelChats.length > 0 ? (
+                          <MenuSub>
+                            <MenuSubTrigger>
+                              <MessageSquare />
+                              Open chat
+                            </MenuSubTrigger>
+                            <MenuSubPopup className="min-w-64">
+                              <div
+                                className="relative m-1"
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                <Search
+                                  aria-hidden
+                                  className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground"
+                                />
+                                <input
+                                  type="search"
+                                  value={chatSearchQuery}
+                                  onChange={(event) =>
+                                    setChatSearchQuery(event.currentTarget.value)
+                                  }
+                                  onKeyDown={(event) => event.stopPropagation()}
+                                  placeholder="Search chats"
+                                  aria-label="Search panel chats"
+                                  className="h-8 w-full rounded-md border border-border bg-background pr-2 pl-7 text-xs outline-none focus:ring-1 focus:ring-ring"
+                                />
+                              </div>
+                              <div className="max-h-64 overflow-y-auto">
+                                {visibleClosedPanelChats.map((chat) => (
+                                  <MenuItem
+                                    key={chat.threadId}
+                                    onClick={() => props.onOpenChat(chat.threadId)}
+                                  >
+                                    <span className="truncate">{chat.title}</span>
+                                  </MenuItem>
+                                ))}
+                              </div>
+                              {visibleClosedPanelChats.length === 0 ? (
+                                <p className="px-3 py-2 text-xs text-muted-foreground">
+                                  No matching chats.
+                                </p>
+                              ) : null}
+                              {chatSearchQuery.length === 0 &&
+                              closedPanelChats.length > PANEL_CHAT_PICKER_RESULT_LIMIT ? (
+                                <p className="px-3 py-1 text-[11px] text-muted-foreground">
+                                  Search to find older chats.
+                                </p>
+                              ) : null}
+                            </MenuSubPopup>
+                          </MenuSub>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </MenuPopup>
+                </Menu>
+              ) : null}
+            </div>
+          </DndContext>
         </ScrollArea>
         {props.layoutControls}
       </div>

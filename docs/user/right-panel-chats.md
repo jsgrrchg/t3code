@@ -11,7 +11,8 @@ Palette, or with the configurable `rightPanel.newChat` shortcut. Its default sho
 Each chat appears as a tab in the right panel. Only the selected chat's conversation is rendered,
 but other chats keep their history and can continue running in the background. A blue status dot
 means a chat is running, an amber dot means it needs attention, and a foreground dot marks an
-unread completion.
+unread completion. Use the drag handle on any right-panel tab to rearrange the tabs for that main
+thread; their order is stored on the current client.
 
 ## Titles and history
 

@@ -317,6 +317,31 @@ describe("rightPanelStore", () => {
     });
   });
 
+  it("reorders surfaces without changing the active surface or another thread", () => {
+    useRightPanelStore.getState().open(refA, "diff");
+    useRightPanelStore.getState().open(refA, "history");
+    useRightPanelStore.getState().open(refA, "agents");
+    useRightPanelStore.getState().open(refB, "files");
+
+    useRightPanelStore.getState().moveSurface(refA, "agents", "diff");
+
+    const stateA = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
+    expect(stateA.surfaces.map((surface) => surface.id)).toEqual(["agents", "diff", "history"]);
+    expect(stateA.activeSurfaceId).toBe("agents");
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refB)).toEqual({
+      isOpen: true,
+      activeSurfaceId: "files",
+      surfaces: [{ id: "files", kind: "files" }],
+    });
+
+    useRightPanelStore.getState().moveSurface(refA, "missing", "diff");
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces.map(
+        (surface) => surface.id,
+      ),
+    ).toEqual(["agents", "diff", "history"]);
+  });
+
   it("tracks the conversation whose turn diff is shown in the owner's panel", () => {
     const childId = ThreadId.make("thread-child");
     useRightPanelStore.getState().openThreadDiff(refA, childId);
@@ -666,5 +691,20 @@ describe("rightPanelStore", () => {
         (surface) => surface.id,
       ),
     ).toEqual(["terminal:term-1", "browser:tab-b", "browser:tab-c"]);
+  });
+
+  it("preserves user placement when reconciling browser surfaces", () => {
+    useRightPanelStore.getState().openBrowser(refA, "tab-a");
+    useRightPanelStore.getState().open(refA, "diff");
+    useRightPanelStore.getState().openBrowser(refA, "tab-b");
+    useRightPanelStore.getState().moveSurface(refA, "browser:tab-b", "diff");
+
+    useRightPanelStore.getState().reconcileBrowserSurfaces(refA, ["tab-a", "tab-b", "tab-c"]);
+
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces.map(
+        (surface) => surface.id,
+      ),
+    ).toEqual(["browser:tab-a", "browser:tab-b", "diff", "browser:tab-c"]);
   });
 });
