@@ -84,6 +84,10 @@ describe("searchSettings", () => {
       to: "/settings/appearance",
       targetId: "appearance",
     });
+    expect(searchSettings("chat width")[0]).toMatchObject({
+      id: "chat-width",
+      to: "/settings/appearance",
+    });
   });
 
   it("indexes the desktop follow-up behavior setting", () => {

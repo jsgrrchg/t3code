@@ -49,6 +49,24 @@ describe("ClientSettings glass opacity", () => {
   });
 });
 
+describe("ClientSettings chat content width", () => {
+  it("defaults to the current chat width", () => {
+    expect(decodeClientSettings({}).chatContentMaxWidth).toBe(768);
+  });
+
+  it.each([639, 1025, 767.5])("rejects an invalid chat content width: %s", (value) => {
+    expect(() => decodeClientSettings({ chatContentMaxWidth: value })).toThrow();
+    expect(() => decodeClientSettingsPatch({ chatContentMaxWidth: value })).toThrow();
+  });
+
+  it.each([640, 768, 1024])("accepts a supported chat content width: %s", (value) => {
+    expect(decodeClientSettings({ chatContentMaxWidth: value }).chatContentMaxWidth).toBe(value);
+    expect(decodeClientSettingsPatch({ chatContentMaxWidth: value }).chatContentMaxWidth).toBe(
+      value,
+    );
+  });
+});
+
 describe("ClientSettings environment identification", () => {
   it("defaults to artwork and accepts each presentation mode", () => {
     expect(decodeClientSettings({}).environmentIdentificationMode).toBe("artwork");

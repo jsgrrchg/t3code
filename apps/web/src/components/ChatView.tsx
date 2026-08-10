@@ -50,6 +50,7 @@ import { nextTerminalId, resolveTerminalSessionLabel } from "@t3tools/shared/ter
 import { Debouncer } from "@tanstack/react-pacer";
 import { useAtomValue } from "@effect/atom-react";
 import {
+  type CSSProperties,
   lazy,
   memo,
   Suspense,
@@ -1695,6 +1696,7 @@ function ChatViewContent(props: ChatViewProps) {
     ? `${activeProject.environmentId}:${activeProject.workspaceRoot}`
     : null;
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
+  const chatContentMaxWidth = useClientSettings((settings) => settings.chatContentMaxWidth);
   const clientSettingsHydrated = useClientSettingsHydrated();
   const [pendingFileSurfaceIdsByProject, setPendingFileSurfaceIdsByProject] = useState<
     ReadonlyMap<string, ReadonlySet<string>>
@@ -6210,7 +6212,10 @@ function ChatViewContent(props: ChatViewProps) {
   ) : null;
 
   return (
-    <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
+    <div
+      className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"
+      style={{ "--chat-content-max-width": `${chatContentMaxWidth}px` } as CSSProperties}
+    >
       {rightPanelOpen && !shouldUseRightPanelSheet ? panelLayoutControls : null}
       <div
         className={cn(
@@ -6390,7 +6395,7 @@ function ChatViewContent(props: ChatViewProps) {
                     }
                   >
                     {activeQueuedFollowUps.length > 0 ? (
-                      <div className="mx-auto mb-2 w-full max-w-3xl">
+                      <div className="mx-auto mb-2 w-full max-w-(--chat-content-max-width)">
                         <DesktopFollowUpQueuePanel
                           entries={activeQueuedFollowUps}
                           paused={activeQueuePaused}
@@ -6403,7 +6408,7 @@ function ChatViewContent(props: ChatViewProps) {
                     ) : null}
                     <div
                       className={cn(
-                        "chat-composer-glass-shell relative mx-auto w-full max-w-3xl",
+                        "chat-composer-glass-shell relative mx-auto w-full max-w-(--chat-content-max-width)",
                         showComposerContextStrip && "chat-composer-glass-shell-with-context",
                       )}
                     >

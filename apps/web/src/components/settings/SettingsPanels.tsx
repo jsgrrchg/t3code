@@ -21,12 +21,14 @@ import {
   DEFAULT_FOLLOW_UP_MESSAGE_BEHAVIOR,
   DEFAULT_UNIFIED_SETTINGS,
   type EnvironmentIdentificationMode,
+  MAX_CHAT_CONTENT_MAX_WIDTH,
   MAX_CODE_FONT_SIZE,
   MAX_GLASS_OPACITY,
   MAX_INTERFACE_FONT_SIZE,
   MAX_PROMPT_FONT_SIZE,
   MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
   MAX_TERMINAL_FONT_SIZE,
+  MIN_CHAT_CONTENT_MAX_WIDTH,
   MIN_CODE_FONT_SIZE,
   MIN_GLASS_OPACITY,
   MIN_INTERFACE_FONT_SIZE,
@@ -148,6 +150,8 @@ const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, s
   pill: "Version pill",
   none: "None",
 };
+
+const CHAT_CONTENT_MAX_WIDTH_STEP = 32;
 
 const TIMESTAMP_FORMAT_LABELS = {
   locale: "System default",
@@ -453,6 +457,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(!followSystem ? ["Follow system"] : []),
       ...(themeHalves !== null ? ["Theme mix"] : []),
       ...(settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? ["Glass opacity"] : []),
+      ...(settings.chatContentMaxWidth !== DEFAULT_UNIFIED_SETTINGS.chatContentMaxWidth
+        ? ["Chat width"]
+        : []),
       ...(settings.environmentIdentificationMode !==
       DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode
         ? ["Environment identification"]
@@ -517,6 +524,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       isBackgroundActivityDirty,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
+      settings.chatContentMaxWidth,
       settings.addProjectBaseDirectory,
       settings.defaultThreadEnvMode,
       settings.newWorktreesStartFromOrigin,
@@ -610,6 +618,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
+      chatContentMaxWidth: DEFAULT_UNIFIED_SETTINGS.chatContentMaxWidth,
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
       sidebarAutoSettleAfterDays: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays,
@@ -939,6 +948,13 @@ export function AppearanceSettingsPanel() {
     "--settings-slider-progress": `${glassOpacityRatio * 100}%`,
     "--settings-slider-fill-offset": `${0.5 - glassOpacityRatio}rem`,
   } as CSSProperties;
+  const chatContentMaxWidthRatio =
+    (settings.chatContentMaxWidth - MIN_CHAT_CONTENT_MAX_WIDTH) /
+    (MAX_CHAT_CONTENT_MAX_WIDTH - MIN_CHAT_CONTENT_MAX_WIDTH);
+  const chatContentMaxWidthSliderStyle = {
+    "--settings-slider-progress": `${chatContentMaxWidthRatio * 100}%`,
+    "--settings-slider-fill-offset": `${0.5 - chatContentMaxWidthRatio}rem`,
+  } as CSSProperties;
 
   return (
     <SettingsPageContainer>
@@ -1000,6 +1016,54 @@ export function AppearanceSettingsPanel() {
                 style={glassOpacitySliderStyle}
                 type="range"
                 value={settings.glassOpacity}
+              />
+            </div>
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("chat-width")}
+          description="Set the maximum width of messages and the composer on larger screens."
+          resetAction={
+            settings.chatContentMaxWidth !== DEFAULT_UNIFIED_SETTINGS.chatContentMaxWidth ? (
+              <SettingResetButton
+                label="chat width"
+                onClick={() =>
+                  updateSettings({
+                    chatContentMaxWidth: DEFAULT_UNIFIED_SETTINGS.chatContentMaxWidth,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <div className="flex w-full items-center gap-3 sm:w-52">
+              <output
+                className="min-w-16 rounded-md bg-muted px-2 py-1 text-center font-mono text-xs font-medium tabular-nums text-foreground"
+                htmlFor="chat-content-max-width"
+              >
+                {settings.chatContentMaxWidth} px
+              </output>
+              <input
+                aria-label="Chat width"
+                className="settings-slider min-w-0 flex-1"
+                id="chat-content-max-width"
+                max={MAX_CHAT_CONTENT_MAX_WIDTH}
+                min={MIN_CHAT_CONTENT_MAX_WIDTH}
+                onChange={(event) => {
+                  const chatContentMaxWidth = Number(event.currentTarget.value);
+                  if (
+                    Number.isInteger(chatContentMaxWidth) &&
+                    chatContentMaxWidth >= MIN_CHAT_CONTENT_MAX_WIDTH &&
+                    chatContentMaxWidth <= MAX_CHAT_CONTENT_MAX_WIDTH
+                  ) {
+                    updateSettings({ chatContentMaxWidth });
+                  }
+                }}
+                step={CHAT_CONTENT_MAX_WIDTH_STEP}
+                style={chatContentMaxWidthSliderStyle}
+                type="range"
+                value={settings.chatContentMaxWidth}
               />
             </div>
           }
