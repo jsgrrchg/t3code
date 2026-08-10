@@ -8,6 +8,7 @@ import {
   MessageSquare,
   MoreHorizontal,
   Plus,
+  Search,
   TerminalSquare,
   X,
 } from "lucide-react";
@@ -41,9 +42,11 @@ import { ScrollArea } from "~/components/ui/scroll-area";
 import { faviconUrlForOrigin } from "~/lib/favicon";
 import { useTheme } from "~/hooks/useTheme";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
+import { filterPanelChatPickerItems, PANEL_CHAT_PICKER_RESULT_LIMIT } from "~/panelChats";
 
 import { PreviewPanelShell, type PreviewPanelMode } from "./preview/PreviewPanelShell";
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
+import { resolveRightPanelTabKeyAction } from "./RightPanelTabs.logic";
 
 interface RightPanelTabsProps {
   mode: PreviewPanelMode;
@@ -59,6 +62,7 @@ interface RightPanelTabsProps {
   onCloseOtherSurfaces: (surface: RightPanelSurface) => void;
   onCloseSurfacesToRight: (surface: RightPanelSurface) => void;
   onCloseAllSurfaces: () => void;
+  onFocusOwner: () => void;
   onCopyFilePath: (relativePath: string) => void;
   onAddBrowser: () => void;
   onAddTerminal: () => void;
@@ -87,6 +91,7 @@ export interface PanelChatTabMetadata {
   readonly title: string;
   readonly running: boolean;
   readonly needsAttention: boolean;
+  readonly unread: boolean;
 }
 
 const SURFACE_DISABLED_REASONS = {
@@ -148,6 +153,11 @@ function RightPanelEmptyState(props: {
   onOpenChat: (threadId: string) => void;
   liveAgentCount: number;
 }) {
+  const [chatSearchQuery, setChatSearchQuery] = useState("");
+  const visiblePanelChats = useMemo(
+    () => filterPanelChatPickerItems(props.panelChats, chatSearchQuery),
+    [chatSearchQuery, props.panelChats],
+  );
   const actions = [
     ...(props.chatAvailable
       ? [
@@ -273,8 +283,22 @@ function RightPanelEmptyState(props: {
         {props.chatAvailable && props.panelChats.length > 0 ? (
           <div className="mt-5">
             <p className="mb-2 text-xs font-medium text-muted-foreground">Open a panel chat</p>
+            <label className="relative mb-2 block">
+              <Search
+                aria-hidden
+                className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
+              />
+              <input
+                type="search"
+                value={chatSearchQuery}
+                onChange={(event) => setChatSearchQuery(event.currentTarget.value)}
+                placeholder="Search chats"
+                aria-label="Search panel chats"
+                className="h-8 w-full rounded-md border border-border bg-background pr-3 pl-8 text-sm outline-none focus:ring-1 focus:ring-ring"
+              />
+            </label>
             <div className="flex max-h-40 flex-col gap-1 overflow-y-auto">
-              {props.panelChats.map((chat) => (
+              {visiblePanelChats.map((chat) => (
                 <button
                   key={chat.threadId}
                   type="button"
@@ -285,7 +309,16 @@ function RightPanelEmptyState(props: {
                   <span className="min-w-0 flex-1 truncate">{chat.title}</span>
                 </button>
               ))}
+              {visiblePanelChats.length === 0 ? (
+                <p className="px-3 py-2 text-xs text-muted-foreground">No matching chats.</p>
+              ) : null}
             </div>
+            {chatSearchQuery.length === 0 &&
+            props.panelChats.length > PANEL_CHAT_PICKER_RESULT_LIMIT ? (
+              <p className="mt-1 px-3 text-[11px] text-muted-foreground">
+                Search to find older chats.
+              </p>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -388,6 +421,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   const tabButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const [renamingChatId, setRenamingChatId] = useState<string | null>(null);
   const [renamingChatTitle, setRenamingChatTitle] = useState("");
+  const [chatSearchQuery, setChatSearchQuery] = useState("");
   const [announcement, setAnnouncement] = useState("");
   const panelChatById = useMemo(
     () => new Map(props.panelChats.map((chat) => [chat.threadId, chat] as const)),
@@ -403,6 +437,10 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   const closedPanelChats = useMemo(
     () => props.panelChats.filter((chat) => !openedChatIds.has(chat.threadId)),
     [openedChatIds, props.panelChats],
+  );
+  const visibleClosedPanelChats = useMemo(
+    () => filterPanelChatPickerItems(closedPanelChats, chatSearchQuery),
+    [chatSearchQuery, closedPanelChats],
   );
   const previousChatSurfaceIdsRef = useRef(openedChatIds);
   const focusTab = useCallback((surfaceId: string) => {
@@ -442,6 +480,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
         props.surfaces[surfaceIndex + 1] ?? props.surfaces[surfaceIndex - 1] ?? null;
       props.onCloseSurface(surface);
       if (focusTarget) focusTab(focusTarget.id);
+      else window.requestAnimationFrame(props.onFocusOwner);
     },
     [focusTab, props],
   );
@@ -449,31 +488,24 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   const handleTabKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLButtonElement>, surface: RightPanelSurface) => {
       const surfaceIndex = props.surfaces.findIndex((entry) => entry.id === surface.id);
-      if (surfaceIndex < 0) return;
-
-      if (event.key === "F2" && surface.kind === "chat") {
-        event.preventDefault();
-        beginChatRename(surface.threadId);
+      const action = resolveRightPanelTabKeyAction({
+        key: event.key,
+        currentIndex: surfaceIndex,
+        tabCount: props.surfaces.length,
+        chat: surface.kind === "chat",
+      });
+      if (!action) return;
+      event.preventDefault();
+      if (action.kind === "rename") {
+        if (surface.kind === "chat") beginChatRename(surface.threadId);
         return;
       }
-      if (event.key === "Delete") {
-        event.preventDefault();
+      if (action.kind === "close") {
         closeSurfaceAndRestoreFocus(surface);
         return;
       }
-
-      let target: RightPanelSurface | undefined;
-      if (event.key === "ArrowLeft") {
-        target = props.surfaces[(surfaceIndex - 1 + props.surfaces.length) % props.surfaces.length];
-      } else if (event.key === "ArrowRight") {
-        target = props.surfaces[(surfaceIndex + 1) % props.surfaces.length];
-      } else if (event.key === "Home") {
-        target = props.surfaces[0];
-      } else if (event.key === "End") {
-        target = props.surfaces.at(-1);
-      }
+      const target = props.surfaces[action.index];
       if (!target) return;
-      event.preventDefault();
       props.onActivate(target);
       focusTab(target.id);
     },
@@ -550,6 +582,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           break;
         case "close-all":
           props.onCloseAllSurfaces();
+          window.requestAnimationFrame(props.onFocusOwner);
           break;
         case null:
           break;
@@ -709,14 +742,30 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                       <TooltipPopup>{title}</TooltipPopup>
                     </Tooltip>
                   )}
-                  {chat?.running || chat?.needsAttention ? (
+                  {chat?.running || chat?.needsAttention || chat?.unread ? (
                     <span
                       className={cn(
                         "ml-1 size-1.5 shrink-0 rounded-full",
-                        chat.needsAttention ? "bg-warning" : "bg-info",
+                        chat.needsAttention
+                          ? "bg-warning"
+                          : chat.running
+                            ? "bg-info"
+                            : "bg-foreground",
                       )}
-                      title={chat.needsAttention ? "Needs attention" : "Running"}
-                      aria-label={chat.needsAttention ? "Needs attention" : "Running"}
+                      title={
+                        chat.needsAttention
+                          ? "Needs attention"
+                          : chat.running
+                            ? "Running"
+                            : "Unread"
+                      }
+                      aria-label={
+                        chat.needsAttention
+                          ? "Needs attention"
+                          : chat.running
+                            ? "Running"
+                            : "Unread"
+                      }
                     />
                   ) : null}
                   {surface.kind === "chat" ? (
@@ -799,15 +848,46 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                             <MessageSquare />
                             Open chat
                           </MenuSubTrigger>
-                          <MenuSubPopup className="min-w-56">
-                            {closedPanelChats.map((chat) => (
-                              <MenuItem
-                                key={chat.threadId}
-                                onClick={() => props.onOpenChat(chat.threadId)}
-                              >
-                                <span className="truncate">{chat.title}</span>
-                              </MenuItem>
-                            ))}
+                          <MenuSubPopup className="min-w-64">
+                            <div
+                              className="relative m-1"
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              <Search
+                                aria-hidden
+                                className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground"
+                              />
+                              <input
+                                type="search"
+                                value={chatSearchQuery}
+                                onChange={(event) => setChatSearchQuery(event.currentTarget.value)}
+                                onKeyDown={(event) => event.stopPropagation()}
+                                placeholder="Search chats"
+                                aria-label="Search panel chats"
+                                className="h-8 w-full rounded-md border border-border bg-background pr-2 pl-7 text-xs outline-none focus:ring-1 focus:ring-ring"
+                              />
+                            </div>
+                            <div className="max-h-64 overflow-y-auto">
+                              {visibleClosedPanelChats.map((chat) => (
+                                <MenuItem
+                                  key={chat.threadId}
+                                  onClick={() => props.onOpenChat(chat.threadId)}
+                                >
+                                  <span className="truncate">{chat.title}</span>
+                                </MenuItem>
+                              ))}
+                            </div>
+                            {visibleClosedPanelChats.length === 0 ? (
+                              <p className="px-3 py-2 text-xs text-muted-foreground">
+                                No matching chats.
+                              </p>
+                            ) : null}
+                            {chatSearchQuery.length === 0 &&
+                            closedPanelChats.length > PANEL_CHAT_PICKER_RESULT_LIMIT ? (
+                              <p className="px-3 py-1 text-[11px] text-muted-foreground">
+                                Search to find older chats.
+                              </p>
+                            ) : null}
                           </MenuSubPopup>
                         </MenuSub>
                       ) : null}

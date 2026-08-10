@@ -10,7 +10,8 @@ Palette, or with the configurable `rightPanel.newChat` shortcut. Its default sho
 
 Each chat appears as a tab in the right panel. Only the selected chat's conversation is rendered,
 but other chats keep their history and can continue running in the background. A blue status dot
-means a hidden chat is running; an amber dot means it needs attention.
+means a chat is running, an amber dot means it needs attention, and a foreground dot marks an
+unread completion.
 
 ## Titles and history
 
@@ -21,7 +22,8 @@ title.
 
 Closing a tab only removes it from the current right-panel layout. It does not delete the chat or
 stop a running turn. Reopen it from **Open chat** in the right-panel **+** menu or from the panel's
-empty state. Choose **Delete chat** from the tab menu to permanently remove its conversation.
+empty state. Both selectors search the complete chat history while keeping the visible result list
+bounded. Choose **Delete chat** from the tab menu to permanently remove its conversation.
 
 With focus on a panel tab, use Left and Right Arrow (or Home and End) to change tabs, `F2` to rename
 a chat, and Delete to close the tab. Escape cancels a rename and returns focus to the tab.

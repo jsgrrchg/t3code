@@ -2,6 +2,25 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/model
 import type { CreateThreadInput } from "@t3tools/client-runtime/operations";
 import type { OrchestrationThreadShell, ThreadId } from "@t3tools/contracts";
 
+export const PANEL_CHAT_PICKER_RESULT_LIMIT = 50;
+
+export function getActivePanelChatThreadId(
+  surface: { readonly kind: string; readonly threadId?: ThreadId | null } | null | undefined,
+): ThreadId | null {
+  return surface?.kind === "chat" ? (surface.threadId ?? null) : null;
+}
+
+export function filterPanelChatPickerItems<
+  TChat extends { readonly threadId: string; readonly title: string },
+>(chats: ReadonlyArray<TChat>, query: string, limit = PANEL_CHAT_PICKER_RESULT_LIMIT): TChat[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const matchingChats =
+    normalizedQuery.length === 0
+      ? chats
+      : chats.filter((chat) => chat.title.toLocaleLowerCase().includes(normalizedQuery));
+  return matchingChats.slice(0, Math.max(0, limit));
+}
+
 export function buildPanelChatCreateInput(input: {
   readonly parent: Pick<
     OrchestrationThreadShell,

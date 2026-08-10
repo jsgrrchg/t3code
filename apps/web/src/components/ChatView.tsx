@@ -146,6 +146,7 @@ import {
   usePreviewMiniPlayerStore,
 } from "../previewMiniPlayerStore";
 import { RightPanelTabs, type PanelChatTabMetadata } from "./RightPanelTabs";
+import { hasUnseenCompletion } from "./Sidebar.logic";
 import { AgentsPanel } from "./AgentsPanel";
 import {
   deriveAgentPanelModel,
@@ -244,7 +245,11 @@ import {
   useThreadStatus,
   useAllEnvironmentShellsBootstrapped,
 } from "../state/entities";
-import { buildPanelChatCreateInput, panelChatShellsForParent } from "../panelChats";
+import {
+  buildPanelChatCreateInput,
+  getActivePanelChatThreadId,
+  panelChatShellsForParent,
+} from "../panelChats";
 import { environmentShell } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { DesktopFollowUpQueuePanel } from "./chat/DesktopFollowUpQueuePanel";
@@ -1617,18 +1622,24 @@ function ChatViewContent(props: ChatViewProps) {
     () => new Map(panelChatShells.map((thread) => [thread.id, thread.title] as const)),
     [panelChatShells],
   );
+  const threadLastVisitedAtById = useUiStateStore((store) => store.threadLastVisitedAtById);
   const panelChatTabMetadata = useMemo<ReadonlyArray<PanelChatTabMetadata>>(
     () =>
-      panelChatShells.map((thread) => ({
-        threadId: thread.id,
-        title: thread.title,
-        running:
-          thread.session?.status === "starting" ||
-          thread.session?.status === "running" ||
-          thread.latestTurn?.state === "running",
-        needsAttention: thread.hasPendingApprovals || thread.hasPendingUserInput,
-      })),
-    [panelChatShells],
+      panelChatShells.map((thread) => {
+        const lastVisitedAt =
+          threadLastVisitedAtById[scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))];
+        return {
+          threadId: thread.id,
+          title: thread.title,
+          running:
+            thread.session?.status === "starting" ||
+            thread.session?.status === "running" ||
+            thread.latestTurn?.state === "running",
+          needsAttention: thread.hasPendingApprovals || thread.hasPendingUserInput,
+          unread: hasUnseenCompletion({ ...thread, lastVisitedAt }),
+        };
+      }),
+    [panelChatShells, threadLastVisitedAtById],
   );
   const [timelineAnchor, setTimelineAnchor] = useState<{
     readonly threadKey: string | null;
@@ -6361,6 +6372,7 @@ function ChatViewContent(props: ChatViewProps) {
     activeRightPanelSurface?.kind === "diff" && activeRightPanelSurface.threadId
       ? scopeThreadRef(activeThread.environmentId, activeRightPanelSurface.threadId)
       : activeThreadRef;
+  const activePanelChatThreadId = getActivePanelChatThreadId(activeRightPanelSurface);
   const rightPanelContent = activeThreadRef ? (
     activeRightPanelSurface?.kind === "preview" ? (
       <Suspense fallback={null}>
@@ -6409,11 +6421,11 @@ function ChatViewContent(props: ChatViewProps) {
         environmentId={activeThreadRef?.environmentId ?? null}
         threadId={activeThreadRef?.threadId ?? null}
       />
-    ) : activeRightPanelSurface?.kind === "chat" ? (
+    ) : activePanelChatThreadId ? (
       <ThreadConversationPane
-        key={`${activeThread.environmentId}:${activeRightPanelSurface.threadId}`}
+        key={`${activeThread.environmentId}:${activePanelChatThreadId}`}
         environmentId={activeThread.environmentId}
-        threadId={activeRightPanelSurface.threadId}
+        threadId={activePanelChatThreadId}
         panelOwnerThreadRef={activeThreadRef}
       />
     ) : (activeRightPanelSurface?.kind === "files" || activeRightPanelSurface?.kind === "file") &&
@@ -6873,6 +6885,7 @@ function ChatViewContent(props: ChatViewProps) {
           onCloseOtherSurfaces={closeOtherRightPanelSurfaces}
           onCloseSurfacesToRight={closeRightPanelSurfacesToRight}
           onCloseAllSurfaces={closeAllRightPanelSurfaces}
+          onFocusOwner={scheduleComposerFocus}
           onCopyFilePath={copyRightPanelFilePath}
           onAddBrowser={createBrowserSurface}
           onAddTerminal={addTerminalSurface}
@@ -6918,6 +6931,7 @@ function ChatViewContent(props: ChatViewProps) {
             onCloseOtherSurfaces={closeOtherRightPanelSurfaces}
             onCloseSurfacesToRight={closeRightPanelSurfacesToRight}
             onCloseAllSurfaces={closeAllRightPanelSurfaces}
+            onFocusOwner={scheduleComposerFocus}
             onCopyFilePath={copyRightPanelFilePath}
             onAddBrowser={createBrowserSurface}
             onAddTerminal={addTerminalSurface}

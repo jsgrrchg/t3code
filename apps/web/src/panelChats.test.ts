@@ -2,7 +2,13 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/model
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildPanelChatCreateInput, panelChatShellsForParent } from "./panelChats";
+import {
+  buildPanelChatCreateInput,
+  filterPanelChatPickerItems,
+  getActivePanelChatThreadId,
+  PANEL_CHAT_PICKER_RESULT_LIMIT,
+  panelChatShellsForParent,
+} from "./panelChats";
 
 function makeShell(input: {
   id: string;
@@ -70,5 +76,28 @@ describe("panel chats", () => {
         (thread) => thread.id,
       ),
     ).toEqual([child.id]);
+  });
+
+  it("searches the full chat history while bounding rendered picker rows", () => {
+    const chats = Array.from({ length: PANEL_CHAT_PICKER_RESULT_LIMIT + 10 }, (_, index) => ({
+      threadId: `thread-${index}`,
+      title:
+        index === PANEL_CHAT_PICKER_RESULT_LIMIT + 5 ? "Release investigation" : `Chat ${index}`,
+    }));
+
+    expect(filterPanelChatPickerItems(chats, "")).toHaveLength(PANEL_CHAT_PICKER_RESULT_LIMIT);
+    expect(filterPanelChatPickerItems(chats, "release")).toEqual([
+      {
+        threadId: `thread-${PANEL_CHAT_PICKER_RESULT_LIMIT + 5}`,
+        title: "Release investigation",
+      },
+    ]);
+  });
+
+  it("selects a transcript only for the active chat surface", () => {
+    const childId = ThreadId.make("thread-child");
+    expect(getActivePanelChatThreadId({ kind: "chat", threadId: childId })).toBe(childId);
+    expect(getActivePanelChatThreadId({ kind: "diff", threadId: childId })).toBeNull();
+    expect(getActivePanelChatThreadId(null)).toBeNull();
   });
 });

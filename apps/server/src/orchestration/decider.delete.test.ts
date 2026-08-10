@@ -183,6 +183,91 @@ it.layer(NodeServices.layer)("decider deletion flows", (it) => {
     }),
   );
 
+  it.effect("rejects missing, deleted, and cross-project panel chat parents", () =>
+    Effect.gen(function* () {
+      const readModel = yield* seedReadModel;
+      const baseCommand = {
+        type: "thread.create",
+        commandId: asCommandId("cmd-panel-chat-invalid-parent"),
+        threadId: asThreadId("thread-panel-chat-invalid"),
+        projectId: asProjectId("project-delete"),
+        parentThreadId: asThreadId("thread-missing"),
+        title: "New chat",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5-codex",
+        },
+        runtimeMode: "approval-required",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        branch: null,
+        worktreePath: null,
+        createdAt: "2026-01-01T00:00:01.000Z",
+      } satisfies Extract<OrchestrationCommand, { type: "thread.create" }>;
+
+      const missingError = yield* Effect.flip(
+        decideOrchestrationCommand({ command: baseCommand, readModel }),
+      );
+      expect(missingError.message).toContain("does not exist");
+
+      const withDeletedParent = yield* projectEvent(readModel, {
+        sequence: 4,
+        eventId: asEventId("evt-parent-delete"),
+        aggregateKind: "thread",
+        aggregateId: asThreadId("thread-delete-1"),
+        type: "thread.deleted",
+        occurredAt: "2026-01-01T00:00:02.000Z",
+        commandId: asCommandId("cmd-parent-delete"),
+        causationEventId: null,
+        correlationId: asCommandId("cmd-parent-delete"),
+        metadata: {},
+        payload: {
+          threadId: asThreadId("thread-delete-1"),
+          deletedAt: "2026-01-01T00:00:02.000Z",
+        },
+      });
+      const deletedError = yield* Effect.flip(
+        decideOrchestrationCommand({
+          command: { ...baseCommand, parentThreadId: asThreadId("thread-delete-1") },
+          readModel: withDeletedParent,
+        }),
+      );
+      expect(deletedError.message).toContain("is deleted");
+
+      const withOtherProject = yield* projectEvent(readModel, {
+        sequence: 4,
+        eventId: asEventId("evt-other-project-create"),
+        aggregateKind: "project",
+        aggregateId: asProjectId("project-other"),
+        type: "project.created",
+        occurredAt: "2026-01-01T00:00:02.000Z",
+        commandId: asCommandId("cmd-other-project-create"),
+        causationEventId: null,
+        correlationId: asCommandId("cmd-other-project-create"),
+        metadata: {},
+        payload: {
+          projectId: asProjectId("project-other"),
+          title: "Other Project",
+          workspaceRoot: "/tmp/project-other",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: "2026-01-01T00:00:02.000Z",
+          updatedAt: "2026-01-01T00:00:02.000Z",
+        },
+      });
+      const crossProjectError = yield* Effect.flip(
+        decideOrchestrationCommand({
+          command: {
+            ...baseCommand,
+            projectId: asProjectId("project-other"),
+            parentThreadId: asThreadId("thread-delete-1"),
+          },
+          readModel: withOtherProject,
+        }),
+      );
+      expect(crossProjectError.message).toContain("different project");
+    }),
+  );
+
   it.effect("deletes panel chat children before their parent", () =>
     Effect.gen(function* () {
       const readModel = yield* seedReadModel;
@@ -223,6 +308,49 @@ it.layer(NodeServices.layer)("decider deletion flows", (it) => {
       expect(normalizeDeleteEvent(deleted).map((event) => event.payload)).toEqual([
         { threadId: asThreadId("thread-panel-chat") },
         { threadId: asThreadId("thread-delete-1") },
+      ]);
+    }),
+  );
+
+  it.effect("deletes an individual panel chat without deleting its parent", () =>
+    Effect.gen(function* () {
+      const readModel = yield* seedReadModel;
+      const childCreated = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.create",
+          commandId: asCommandId("cmd-panel-chat-create-individual"),
+          threadId: asThreadId("thread-panel-chat-individual"),
+          projectId: asProjectId("project-delete"),
+          parentThreadId: asThreadId("thread-delete-1"),
+          title: "New chat",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "approval-required",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          branch: null,
+          worktreePath: null,
+          createdAt: "2026-01-01T00:00:01.000Z",
+        },
+        readModel,
+      });
+      if (!("type" in childCreated)) return;
+      const withChild = yield* projectEvent(readModel, {
+        ...childCreated,
+        sequence: 4,
+      } as OrchestrationEvent);
+      const deleted = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.delete",
+          commandId: asCommandId("cmd-panel-chat-delete-individual"),
+          threadId: asThreadId("thread-panel-chat-individual"),
+        },
+        readModel: withChild,
+      });
+
+      expect(normalizeDeleteEvent(deleted).map((event) => event.payload)).toEqual([
+        { threadId: asThreadId("thread-panel-chat-individual") },
       ]);
     }),
   );
