@@ -86,6 +86,17 @@ export function GitHistoryGraphCell({
           vectorEffect="non-scaling-stroke"
         />
       ))}
+      {row.isHead ? (
+        <circle
+          cx={laneX(row.nodeLane)}
+          cy={rowHeight / 2}
+          fill="var(--background)"
+          r={GIT_HISTORY_GRAPH_NODE_RADIUS + 2.25}
+          stroke={colorForId(row.nodeColorId)}
+          strokeWidth={GIT_HISTORY_GRAPH_STROKE_WIDTH}
+          vectorEffect="non-scaling-stroke"
+        />
+      ) : null}
       <circle
         cx={laneX(row.nodeLane)}
         cy={rowHeight / 2}
