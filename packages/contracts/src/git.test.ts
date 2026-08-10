@@ -7,6 +7,7 @@ import {
   GIT_HISTORY_AUTHORED_AT_MAX_LENGTH,
   GIT_HISTORY_CWD_MAX_LENGTH,
   GIT_HISTORY_MAX_LIMIT,
+  GIT_HISTORY_REF_LABEL_MAX_LENGTH,
   GIT_HISTORY_SUBJECT_MAX_LENGTH,
   GitHistoryCommitSummary,
   GitListHistoryInput,
@@ -93,6 +94,11 @@ describe("GitHistoryCommitSummary", () => {
       authorName: "José 李",
       authorEmail: "josé@example.com",
       authoredAt: "2026-08-09T14:30:00-04:00",
+      refs: [
+        { kind: "branch", label: "feat/history" },
+        { kind: "remote", label: "origin/main" },
+        { kind: "tag", label: "v1.0.0" },
+      ],
     };
 
     const decoded = decodeHistoryCommitSummary(input);
@@ -100,17 +106,42 @@ describe("GitHistoryCommitSummary", () => {
     expect(encodeHistoryCommitSummary(decoded)).toEqual(input);
   });
 
-  it("keeps empty subject and author fields representable", () => {
-    expect(
+  it("keeps empty display fields representable and defaults legacy refs", () => {
+    const decoded = decodeHistoryCommitSummary({
+      sha: SHA_1,
+      parentShas: [],
+      subject: "",
+      authorName: "",
+      authorEmail: "",
+      authoredAt: "2026-08-09T14:30:00Z",
+    });
+
+    expect(decoded).toMatchObject({ subject: "", authorName: "", authorEmail: "" });
+    expect(decoded.refs).toEqual([]);
+  });
+
+  it("rejects invalid or oversized refs", () => {
+    const input = {
+      sha: SHA_1,
+      parentShas: [],
+      subject: "subject",
+      authorName: "author",
+      authorEmail: "author@example.com",
+      authoredAt: "2026-08-09T14:30:00Z",
+    };
+
+    expect(() =>
       decodeHistoryCommitSummary({
-        sha: SHA_1,
-        parentShas: [],
-        subject: "",
-        authorName: "",
-        authorEmail: "",
-        authoredAt: "2026-08-09T14:30:00Z",
+        ...input,
+        refs: [{ kind: "other", label: "main" }],
       }),
-    ).toMatchObject({ subject: "", authorName: "", authorEmail: "" });
+    ).toThrow();
+    expect(() =>
+      decodeHistoryCommitSummary({
+        ...input,
+        refs: [{ kind: "branch", label: "x".repeat(GIT_HISTORY_REF_LABEL_MAX_LENGTH + 1) }],
+      }),
+    ).toThrow();
   });
 
   it.each([
@@ -144,6 +175,7 @@ describe("GitListHistoryResult", () => {
           authorName: "T3 Code",
           authorEmail: "dev@example.com",
           authoredAt: "2026-08-09T14:30:00Z",
+          refs: [{ kind: "branch", label: "main" }],
         },
       ],
       headSha: SHA_1,

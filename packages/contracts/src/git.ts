@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
   NonNegativeInt,
@@ -18,6 +19,7 @@ export const GIT_HISTORY_SUBJECT_MAX_LENGTH = 4_096;
 export const GIT_HISTORY_AUTHOR_NAME_MAX_LENGTH = 1_024;
 export const GIT_HISTORY_AUTHOR_EMAIL_MAX_LENGTH = 1_024;
 export const GIT_HISTORY_AUTHORED_AT_MAX_LENGTH = 64;
+export const GIT_HISTORY_REF_LABEL_MAX_LENGTH = 4_096;
 
 // Domain Types
 
@@ -91,6 +93,12 @@ export const GitObjectId = Schema.String.check(
 );
 export type GitObjectId = typeof GitObjectId.Type;
 
+export const GitHistoryRef = Schema.Struct({
+  kind: Schema.Literals(["branch", "remote", "tag"]),
+  label: TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(GIT_HISTORY_REF_LABEL_MAX_LENGTH)),
+});
+export type GitHistoryRef = typeof GitHistoryRef.Type;
+
 export const GitHistoryCommitSummary = Schema.Struct({
   sha: GitObjectId,
   parentShas: Schema.Array(GitObjectId),
@@ -98,6 +106,7 @@ export const GitHistoryCommitSummary = Schema.Struct({
   authorName: Schema.String.check(Schema.isMaxLength(GIT_HISTORY_AUTHOR_NAME_MAX_LENGTH)),
   authorEmail: Schema.String.check(Schema.isMaxLength(GIT_HISTORY_AUTHOR_EMAIL_MAX_LENGTH)),
   authoredAt: Schema.String.check(Schema.isMaxLength(GIT_HISTORY_AUTHORED_AT_MAX_LENGTH)),
+  refs: Schema.Array(GitHistoryRef).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
 });
 export type GitHistoryCommitSummary = typeof GitHistoryCommitSummary.Type;
 

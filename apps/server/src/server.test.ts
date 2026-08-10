@@ -5314,6 +5314,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                     authorName: "Test",
                     authorEmail: "test@example.com",
                     authoredAt: "2026-08-10T00:00:00Z",
+                    refs: [],
                   },
                 ],
                 headSha: "0123456789abcdef0123456789abcdef01234567",

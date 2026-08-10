@@ -19,6 +19,7 @@ import { ServerConfig } from "../config.ts";
 import {
   makeGitVcsDriverCore,
   parseGitHistoryLogOutput,
+  parseGitHistoryRefsOutput,
   splitNullSeparatedGitStdoutPaths,
 } from "./GitVcsDriverCore.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
@@ -49,7 +50,8 @@ describe("GitVcsDriver.listHistory", () => {
     Effect.gen(function* () {
       const driver = yield* GitVcsDriver.GitVcsDriver;
       const cwd = yield* makeTmpDir("git-history-public-refs-");
-      yield* initRepoWithCommit(cwd);
+      const { initialBranch } = yield* initRepoWithCommit(cwd);
+      const headSha = yield* git(cwd, ["rev-parse", "HEAD"]);
       const tree = yield* git(cwd, ["write-tree"]);
       const makeRootCommit = (subject: string) => git(cwd, ["commit-tree", tree, "-m", subject]);
       const branchSha = yield* makeRootCommit("secondary branch root");
@@ -59,6 +61,8 @@ describe("GitVcsDriver.listHistory", () => {
       yield* git(cwd, ["update-ref", "refs/heads/secondary", branchSha]);
       yield* git(cwd, ["update-ref", "refs/remotes/origin/history", remoteSha]);
       yield* git(cwd, ["update-ref", "refs/tags/history-v1", tagSha]);
+      yield* git(cwd, ["tag", "-a", "history-v2", branchSha, "-m", "annotated history tag"]);
+      yield* git(cwd, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/history"]);
       yield* git(cwd, ["update-ref", "refs/t3/checkpoints/test/turn/1", checkpointSha]);
 
       const attached = yield* driver.listHistory({ cwd });
@@ -68,6 +72,22 @@ describe("GitVcsDriver.listHistory", () => {
       assert.isTrue(attachedShas.has(tagSha));
       assert.isFalse(attachedShas.has(checkpointSha));
       assert.equal(attached.totalCount, 4);
+      assert.deepStrictEqual(attached.commits.find((commit) => commit.sha === headSha)?.refs, [
+        { kind: "branch", label: initialBranch },
+      ]);
+      assert.deepStrictEqual(attached.commits.find((commit) => commit.sha === branchSha)?.refs, [
+        { kind: "branch", label: "secondary" },
+        { kind: "tag", label: "history-v2" },
+      ]);
+      assert.deepStrictEqual(attached.commits.find((commit) => commit.sha === remoteSha)?.refs, [
+        { kind: "remote", label: "origin/history" },
+      ]);
+      assert.deepStrictEqual(attached.commits.find((commit) => commit.sha === tagSha)?.refs, [
+        { kind: "tag", label: "history-v1" },
+      ]);
+      assert.isFalse(
+        attached.commits.some((commit) => commit.refs.some((ref) => ref.label === "origin/HEAD")),
+      );
 
       yield* git(cwd, ["checkout", "--detach", branchSha]);
       const detached = yield* driver.listHistory({ cwd });
@@ -161,6 +181,59 @@ describe("GitVcsDriver.listHistory", () => {
       const incomplete = yield* parseGitHistoryLogOutput({
         cwd: "/repo",
         stdout: "0123456789abcdef0123456789abcdef01234567\0",
+        stdoutTruncated: false,
+      }).pipe(Effect.flip);
+      assert.equal(incomplete._tag, "GitCommandError");
+      assert.match(incomplete.detail, /incomplete/);
+    }),
+  );
+
+  it.effect("parses commit refs and ignores symbolic, internal, and non-commit refs", () =>
+    Effect.gen(function* () {
+      const commitSha = "1111111111111111111111111111111111111111";
+      const tagObjectSha = "2222222222222222222222222222222222222222";
+      const treeSha = "3333333333333333333333333333333333333333";
+      const record = (fields: ReadonlyArray<string>) => `${fields.join("\0")}\0\n`;
+      const refs = yield* parseGitHistoryRefsOutput({
+        cwd: "/repo",
+        stdout:
+          record(["refs/heads/main", commitSha, "commit", "", "", ""]) +
+          record(["refs/tags/v1", tagObjectSha, "tag", commitSha, "commit", ""]) +
+          record(["refs/tags/lightweight", commitSha, "commit", "", "", ""]) +
+          record([
+            "refs/remotes/origin/HEAD",
+            commitSha,
+            "commit",
+            "",
+            "",
+            "refs/remotes/origin/main",
+          ]) +
+          record(["refs/tags/tree", treeSha, "tree", "", "", ""]) +
+          record(["refs/t3/checkpoints/internal", commitSha, "commit", "", "", ""]),
+        stdoutTruncated: false,
+      });
+
+      assert.deepStrictEqual(refs, [
+        { targetSha: commitSha, ref: { kind: "branch", label: "main" } },
+        { targetSha: commitSha, ref: { kind: "tag", label: "v1" } },
+        { targetSha: commitSha, ref: { kind: "tag", label: "lightweight" } },
+      ]);
+    }),
+  );
+
+  it.effect("rejects truncated and incomplete Git history ref records", () =>
+    Effect.gen(function* () {
+      const truncated = yield* parseGitHistoryRefsOutput({
+        cwd: "/repo",
+        stdout: "",
+        stdoutTruncated: true,
+      }).pipe(Effect.flip);
+      assert.equal(truncated._tag, "GitCommandError");
+      assert.match(truncated.detail, /exceeded/);
+
+      const incomplete = yield* parseGitHistoryRefsOutput({
+        cwd: "/repo",
+        stdout: "refs/heads/main\0",
         stdoutTruncated: false,
       }).pipe(Effect.flip);
       assert.equal(incomplete._tag, "GitCommandError");

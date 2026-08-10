@@ -3,6 +3,7 @@ import {
   GIT_HISTORY_DEFAULT_LIMIT,
   type EnvironmentId,
   type GitHistoryCommitSummary,
+  type GitHistoryRef,
   type GitListHistoryResult,
   type ProjectId,
   type ThreadId,
@@ -15,11 +16,12 @@ import {
   type GitHistoryTarget,
 } from "@t3tools/client-runtime/state/git";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import { RefreshCwIcon } from "lucide-react";
+import { CloudIcon, GitBranchIcon, RefreshCwIcon, TagIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import { Button } from "~/components/ui/button";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
+import { cn } from "~/lib/utils";
 import { gitEnvironment } from "~/state/git";
 import { useEnvironmentQuery } from "~/state/query";
 import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
@@ -35,6 +37,7 @@ const AUTHOR_MIN_WIDTH = 64;
 const DATE_COLUMN_WIDTH = 96;
 const SHA_COLUMN_WIDTH = 76;
 const ROW_END_PADDING = 8;
+const HISTORY_VISIBLE_REF_LIMIT = 2;
 const SKELETON_ROW_IDS = ["one", "two", "three", "four", "five", "six", "seven"] as const;
 const HISTORY_DATE_FORMATTER = new Intl.DateTimeFormat(undefined, {
   day: "numeric",
@@ -137,6 +140,84 @@ function GitHistoryShaButton({ sha }: { readonly sha: string }) {
   );
 }
 
+const HISTORY_REF_KIND_ORDER = {
+  branch: 0,
+  tag: 1,
+  remote: 2,
+} satisfies Record<GitHistoryRef["kind"], number>;
+
+/** Produces the accessible and tooltip label shared by each ref presentation. */
+function historyRefDescription(ref: GitHistoryRef): string {
+  switch (ref.kind) {
+    case "branch":
+      return `Branch: ${ref.label}`;
+    case "remote":
+      return `Remote branch: ${ref.label}`;
+    case "tag":
+      return `Tag: ${ref.label}`;
+  }
+}
+
+/** Maps each ref kind to the compact decorative icon used inside a ref pill. */
+function GitHistoryRefIcon({ kind }: { readonly kind: GitHistoryRef["kind"] }) {
+  const className = cn(
+    "size-2.5 shrink-0",
+    kind === "branch" && "text-primary/75",
+    kind === "remote" && "text-info/75",
+    kind === "tag" && "text-warning/80",
+  );
+  if (kind === "remote") return <CloudIcon aria-hidden="true" className={className} />;
+  if (kind === "tag") return <TagIcon aria-hidden="true" className={className} />;
+  return <GitBranchIcon aria-hidden="true" className={className} />;
+}
+
+/** Renders one labeled ref while preserving its full description in the tooltip. */
+function GitHistoryRefPill({ reference }: { readonly reference: GitHistoryRef }) {
+  return (
+    <span
+      className="inline-flex h-4 min-w-0 max-w-28 shrink items-center gap-0.5 rounded-sm border border-border/55 bg-muted/40 px-1 text-[10px] leading-none text-muted-foreground"
+      data-history-ref-kind={reference.kind}
+      title={historyRefDescription(reference)}
+    >
+      <GitHistoryRefIcon kind={reference.kind} />
+      <span className="min-w-0 truncate">{reference.label}</span>
+    </span>
+  );
+}
+
+/** Sorts commit refs consistently and collapses additional refs into an overflow indicator. */
+function GitHistoryCommitRefs({ refs }: { readonly refs: ReadonlyArray<GitHistoryRef> }) {
+  if (refs.length === 0) return null;
+  const orderedRefs = refs.toSorted(
+    (left, right) =>
+      HISTORY_REF_KIND_ORDER[left.kind] - HISTORY_REF_KIND_ORDER[right.kind] ||
+      left.label.localeCompare(right.label),
+  );
+  const visibleRefs = orderedRefs.slice(0, HISTORY_VISIBLE_REF_LIMIT);
+  const hiddenRefs = orderedRefs.slice(HISTORY_VISIBLE_REF_LIMIT);
+
+  return (
+    <span
+      aria-hidden="true"
+      className="flex min-w-0 max-w-[45%] shrink-0 items-center gap-1 overflow-hidden whitespace-nowrap"
+      data-history-refs="true"
+    >
+      {visibleRefs.map((reference) => (
+        <GitHistoryRefPill key={`${reference.kind}:${reference.label}`} reference={reference} />
+      ))}
+      {hiddenRefs.length > 0 ? (
+        <span
+          className="inline-flex h-4 shrink-0 items-center rounded-sm border border-border/45 px-1 text-[10px] leading-none text-muted-foreground/70"
+          data-history-ref-overflow="true"
+          title={hiddenRefs.map(historyRefDescription).join("\n")}
+        >
+          +{hiddenRefs.length}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 export function GitHistoryCommitRow({
   commit,
   graphRow,
@@ -146,10 +227,20 @@ export function GitHistoryCommitRow({
   const subject = commit.subject || "(no subject)";
   const author = commit.authorName || "Unknown author";
   const authoredDate = formatHistoryDate(commit.authoredAt);
-  const headLabel = graphRow.isHead ? "HEAD, " : "";
-  const accessibleName = `${headLabel}${subject}, ${author} <${commit.authorEmail}>, ${commit.authoredAt}, commit ${commit.sha}`;
+  const referenceDescriptions = commit.refs.map(historyRefDescription);
+  const accessibleName = [
+    graphRow.isHead ? "HEAD" : null,
+    ...referenceDescriptions,
+    subject,
+    `${author} <${commit.authorEmail}>`,
+    commit.authoredAt,
+    `commit ${commit.sha}`,
+  ]
+    .filter((value) => value !== null)
+    .join(", ");
   const tooltip = [
     graphRow.isHead ? "HEAD" : null,
+    ...referenceDescriptions,
     subject,
     `${author} <${commit.authorEmail}>`,
     commit.authoredAt,
@@ -172,12 +263,15 @@ export function GitHistoryCommitRow({
         row={graphRow}
         rowHeight={HISTORY_ROW_HEIGHT}
       />
-      <span
-        className="min-w-0 truncate pe-2 font-medium text-foreground"
-        data-history-subject="true"
-      >
-        {subject}
-      </span>
+      <div className="flex min-w-0 items-center gap-1.5 pe-2">
+        <span
+          className="min-w-0 flex-1 truncate font-medium text-foreground"
+          data-history-subject="true"
+        >
+          {subject}
+        </span>
+        <GitHistoryCommitRefs refs={commit.refs} />
+      </div>
       <span className="min-w-0 truncate pe-2 text-muted-foreground" data-history-author="true">
         {author}
       </span>

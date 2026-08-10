@@ -18,6 +18,7 @@ describe("GitHistoryGraphCell", () => {
         authorName: "Test Author",
         authorEmail: "test@example.com",
         authoredAt: "2026-08-10T00:00:00Z",
+        refs: [],
       },
     ]);
     const html = renderToStaticMarkup(

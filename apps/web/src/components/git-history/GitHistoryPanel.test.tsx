@@ -41,6 +41,7 @@ function commit(
   sha = HEAD_SHA,
   subject = "Render history rows",
   authorName = "Ada Lovelace",
+  refs: GitHistoryCommitSummary["refs"] = [],
 ): GitHistoryCommitSummary {
   return {
     sha,
@@ -49,6 +50,7 @@ function commit(
     authorName,
     authorEmail: "ada@example.com",
     authoredAt: "2026-08-10T12:34:56Z",
+    refs,
   };
 }
 
@@ -155,6 +157,39 @@ describe("GitHistoryCommitRow", () => {
     expect(markup).toContain('data-history-date="true"');
     expect(markup).toContain('data-history-sha="true"');
     expect(markup.match(/truncate/g)?.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("shows compact branch and tag refs without growing or wrapping the row", () => {
+    const item = commit(HEAD_SHA, "Keep history dense", "Ada Lovelace", [
+      { kind: "remote", label: "upstream/feature/very-long-remote-name" },
+      { kind: "tag", label: "v1.2.3" },
+      { kind: "branch", label: "feature/history" },
+      { kind: "remote", label: "origin/feature/history" },
+    ]);
+    const graph = layoutGitHistoryGraph([item], { headSha: item.sha });
+    const markup = renderToStaticMarkup(
+      <GitHistoryCommitRow
+        commit={item}
+        graphLaneCount={graph.maxLaneCount}
+        graphRow={graph.rows[0]!}
+        gridTemplateColumns={GRID_TEMPLATE_COLUMNS}
+      />,
+    );
+
+    const branchIndex = markup.indexOf('data-history-ref-kind="branch"');
+    const tagIndex = markup.indexOf('data-history-ref-kind="tag"');
+    const subjectIndex = markup.indexOf('data-history-subject="true"');
+    expect(branchIndex).toBeGreaterThan(-1);
+    expect(subjectIndex).toBeLessThan(branchIndex);
+    expect(branchIndex).toBeLessThan(tagIndex);
+    expect(markup).not.toContain('data-history-ref-kind="remote"');
+    expect(markup).toContain('data-history-ref-overflow="true"');
+    expect(markup).toContain(">+2</span>");
+    expect(markup).toContain("Remote branch: origin/feature/history");
+    expect(markup).toContain("Remote branch: upstream/feature/very-long-remote-name");
+    expect(markup).toContain("h-[34px]");
+    expect(markup).toContain("h-4");
+    expect(markup.match(/<button/g)).toHaveLength(1);
   });
 
   it("renders an em dash when the author date is invalid", () => {

@@ -27,7 +27,9 @@ import {
   GIT_HISTORY_SUBJECT_MAX_LENGTH,
   GitCommandError,
   GitHistoryCommitSummary,
+  GitHistoryRef,
   GitObjectId,
+  type GitHistoryRef as GitHistoryRefType,
   type GitListHistoryResult,
   type ReviewDiffFileContentsInput,
   type ReviewDiffPreviewInput,
@@ -158,6 +160,7 @@ interface ExecuteGitOptions {
 }
 
 const decodeGitHistoryCommitSummary = Schema.decodeUnknownEffect(GitHistoryCommitSummary);
+const decodeGitHistoryRef = Schema.decodeUnknownEffect(GitHistoryRef);
 const decodeGitObjectId = Schema.decodeUnknownEffect(GitObjectId);
 const decodeGitHistoryTotalCount = Schema.decodeUnknownEffect(
   Schema.NumberFromString.check(Schema.isGreaterThanOrEqualTo(0)),
@@ -174,6 +177,21 @@ function malformedGitHistoryOutput(cwd: string, detail: string, cause?: unknown)
   return new GitCommandError({
     operation: "GitVcsDriver.listHistory",
     command: "git log",
+    cwd,
+    detail,
+    ...(cause === undefined ? {} : { cause }),
+  });
+}
+
+/** Builds a list-history error that attributes malformed ref data to `git for-each-ref`. */
+function malformedGitHistoryRefsOutput(
+  cwd: string,
+  detail: string,
+  cause?: unknown,
+): GitCommandError {
+  return new GitCommandError({
+    operation: "GitVcsDriver.listHistory",
+    command: "git for-each-ref",
     cwd,
     detail,
     ...(cause === undefined ? {} : { cause }),
@@ -244,6 +262,122 @@ export const parseGitHistoryLogOutput = Effect.fn("parseGitHistoryLogOutput")(fu
 
   return commits;
 });
+
+/** Parses public Git refs and resolves direct or annotated-tag targets to commit IDs. */
+export const parseGitHistoryRefsOutput = Effect.fn("parseGitHistoryRefsOutput")(function* (input: {
+  readonly cwd: string;
+  readonly stdout: string;
+  readonly stdoutTruncated: boolean;
+}) {
+  if (input.stdoutTruncated) {
+    return yield* malformedGitHistoryRefsOutput(
+      input.cwd,
+      "Git history ref output exceeded the configured response limit.",
+    );
+  }
+
+  const fields = input.stdout.split("\0");
+  const tail = fields.pop() ?? "";
+  if ((tail !== "" && tail !== "\n" && tail !== "\r\n") || fields.length % 6 !== 0) {
+    return yield* malformedGitHistoryRefsOutput(
+      input.cwd,
+      "Git history ref output ended with an incomplete record.",
+    );
+  }
+
+  const refs: Array<{ readonly targetSha: string; readonly ref: GitHistoryRefType }> = [];
+  for (let index = 0; index < fields.length; index += 6) {
+    const rawFullRefName = fields[index] ?? "";
+    const fullRefName =
+      index === 0
+        ? rawFullRefName
+        : rawFullRefName.startsWith("\r\n")
+          ? rawFullRefName.slice(2)
+          : rawFullRefName.startsWith("\n")
+            ? rawFullRefName.slice(1)
+            : "";
+    const objectSha = fields[index + 1] ?? "";
+    const objectType = fields[index + 2] ?? "";
+    const peeledObjectSha = fields[index + 3] ?? "";
+    const peeledObjectType = fields[index + 4] ?? "";
+    const symbolicTarget = fields[index + 5] ?? "";
+    if (symbolicTarget.length > 0) continue;
+
+    let kind: GitHistoryRefType["kind"];
+    let label: string;
+    if (fullRefName.startsWith("refs/heads/")) {
+      kind = "branch";
+      label = fullRefName.slice("refs/heads/".length);
+    } else if (fullRefName.startsWith("refs/remotes/")) {
+      kind = "remote";
+      label = fullRefName.slice("refs/remotes/".length);
+    } else if (fullRefName.startsWith("refs/tags/")) {
+      kind = "tag";
+      label = fullRefName.slice("refs/tags/".length);
+    } else {
+      continue;
+    }
+
+    const targetShaRaw =
+      objectType === "commit"
+        ? objectSha
+        : kind === "tag" && peeledObjectType === "commit"
+          ? peeledObjectSha
+          : null;
+    if (targetShaRaw === null) continue;
+
+    const targetSha = yield* decodeGitObjectId(targetShaRaw).pipe(
+      Effect.mapError((cause) =>
+        malformedGitHistoryRefsOutput(
+          input.cwd,
+          "Git history ref output contained an invalid target object ID.",
+          cause,
+        ),
+      ),
+    );
+    const ref = yield* decodeGitHistoryRef({ kind, label }).pipe(
+      Effect.mapError((cause) =>
+        malformedGitHistoryRefsOutput(
+          input.cwd,
+          "Git history ref output contained an invalid ref.",
+          cause,
+        ),
+      ),
+    );
+    refs.push({ targetSha, ref });
+  }
+
+  return refs;
+});
+
+function indexGitHistoryRefs(
+  refs: ReadonlyArray<{ readonly targetSha: string; readonly ref: GitHistoryRefType }>,
+): ReadonlyMap<string, ReadonlyArray<GitHistoryRefType>> {
+  const refsBySha = new Map<string, GitHistoryRefType[]>();
+  for (const { targetSha, ref } of refs) {
+    const commitRefs = refsBySha.get(targetSha);
+    if (commitRefs) {
+      commitRefs.push(ref);
+    } else {
+      refsBySha.set(targetSha, [ref]);
+    }
+  }
+
+  const kindOrder = { branch: 0, tag: 1, remote: 2 } satisfies Record<
+    GitHistoryRefType["kind"],
+    number
+  >;
+  for (const [sha, commitRefs] of refsBySha) {
+    refsBySha.set(
+      sha,
+      commitRefs.toSorted(
+        (left, right) =>
+          kindOrder[left.kind] - kindOrder[right.kind] || left.label.localeCompare(right.label),
+      ),
+    );
+  }
+  return refsBySha;
+}
 
 function parseBranchAb(value: string): { ahead: number; behind: number } {
   const match = value.match(/^\+(\d+)\s+-(\d+)$/);
@@ -2594,6 +2728,22 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           fallbackErrorDetail: "Git history enumeration failed.",
         },
       );
+      const refsEffect = executeGit(
+        "GitVcsDriver.listHistory.refs",
+        input.cwd,
+        [
+          "for-each-ref",
+          "--format=%(refname)%00%(objectname)%00%(objecttype)%00%(*objectname)%00%(*objecttype)%00%(symref)%00",
+          "refs/heads",
+          "refs/remotes",
+          "refs/tags",
+        ],
+        {
+          timeoutMs: 30_000,
+          maxOutputBytes: GIT_HISTORY_MAX_OUTPUT_BYTES,
+          fallbackErrorDetail: "Git history ref enumeration failed.",
+        },
+      );
       const totalCountEffect =
         cursor === 0
           ? executeGit(
@@ -2624,8 +2774,16 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
               ),
             )
           : Effect.succeed(null);
-      const [result, totalCount] = yield* Effect.all([historyEffect, totalCountEffect], {
-        concurrency: 2,
+      const [result, refsResult, totalCount] = yield* Effect.all(
+        [historyEffect, refsEffect, totalCountEffect],
+        {
+          concurrency: 3,
+        },
+      );
+      const parsedRefs = yield* parseGitHistoryRefsOutput({
+        cwd: input.cwd,
+        stdout: refsResult.stdout,
+        stdoutTruncated: refsResult.stdoutTruncated,
       });
       const parsedCommits = yield* parseGitHistoryLogOutput({
         cwd: input.cwd,
@@ -2633,7 +2791,11 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         stdoutTruncated: result.stdoutTruncated,
       });
       const hasNextPage = parsedCommits.length > limit;
-      const commits = parsedCommits.slice(0, limit);
+      const refsBySha = indexGitHistoryRefs(parsedRefs);
+      const commits = parsedCommits.slice(0, limit).map((commit) => ({
+        ...commit,
+        refs: refsBySha.get(commit.sha) ?? [],
+      }));
 
       return {
         commits,

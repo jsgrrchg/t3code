@@ -31,6 +31,7 @@ function commit(sha: GitHistoryCommitSummary["sha"], subject: string): GitHistor
     authorName: "Test",
     authorEmail: "test@example.com",
     authoredAt: "2026-08-10T00:00:00Z",
+    refs: [],
   };
 }
 

@@ -58,6 +58,10 @@ graph, subjects, authors, author dates, and commit IDs. History is read-only and
 remote refs, and tags already known by the Git repository on the server. Opening it does not fetch
 from a remote or change the working tree.
 
+Branch, remote-branch, and tag labels appear beside the subject on the commit each ref currently
+points to. Rows stay on one line; when a commit has several refs, the remaining labels are grouped
+behind a compact **+N** indicator and remain available in its tooltip.
+
 The header shows the total number of commits in that public history. Commit rows load in pages as
 you request older entries, so showing the total does not load every row at once.
 
