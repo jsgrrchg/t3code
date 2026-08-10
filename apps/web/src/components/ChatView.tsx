@@ -5425,6 +5425,10 @@ function ChatViewContent(props: ChatViewProps) {
     useDesktopFollowUpQueueStore.getState().remove(entry.id);
   }, []);
 
+  const onReorderQueuedFollowUp = useCallback((entryId: string, overEntryId: string) => {
+    useDesktopFollowUpQueueStore.getState().reorder(entryId, overEntryId);
+  }, []);
+
   const onSteerQueuedFollowUp = useCallback(
     async (entry: DesktopQueuedMessageFollowUp) => {
       if (!activeServerThread) return;
@@ -6392,6 +6396,7 @@ function ChatViewContent(props: ChatViewProps) {
                           paused={activeQueuePaused}
                           dispatchingEntryId={desktopQueueDispatchingEntryId}
                           onRemove={onRemoveQueuedFollowUp}
+                          onReorder={onReorderQueuedFollowUp}
                           onSteer={(entry) => void onSteerQueuedFollowUp(entry)}
                         />
                       </div>

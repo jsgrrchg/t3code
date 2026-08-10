@@ -7,7 +7,7 @@ Choose the behavior under **Settings → General → Follow-up behavior**:
 - **Queue** saves messages sent while the agent is working and sends them in order as each turn finishes. Native Codex review and compact commands wait in the same queue.
 - **Steer** sends follow-ups directly into the current turn.
 
-Queued work appears above the composer. Remove an entry if it is no longer needed, or select **Steer** on a queued message to send it to the active turn immediately. The queue is stored locally and survives an app restart.
+Queued work appears above the composer. Drag an entry by its handle to change when it runs; the handle also supports keyboard reordering. Remove an entry if it is no longer needed, or select **Steer** on a queued message to send it to the active turn immediately. The queue is stored locally and survives an app restart.
 
 Stopping the active turn pauses its queue instead of sending the next entry. The queue remains paused across restarts. The next message sent manually starts immediately; after that turn finishes, queued work resumes from the oldest entry.
 

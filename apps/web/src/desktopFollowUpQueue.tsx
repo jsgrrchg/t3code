@@ -57,6 +57,10 @@ export function useDispatchDesktopQueuedFollowUp() {
     async (entry: DesktopQueuedFollowUp, thread: QueueDispatchThread): Promise<boolean> => {
       const queue = useDesktopFollowUpQueueStore.getState();
       if (!queue.claim(entry.id)) return false;
+      // Queue entries retain when the user enqueued them, but orchestration
+      // timelines sort by command time. Dispatch time keeps execution order
+      // truthful after pauses and manual reordering.
+      const dispatchCreatedAt = new Date().toISOString();
 
       try {
         if (entry.kind === "provider-action") {
@@ -66,7 +70,7 @@ export function useDispatchDesktopQueuedFollowUp() {
               commandId: entry.commandId,
               threadId: entry.threadId,
               action: entry.action,
-              createdAt: entry.createdAt,
+              createdAt: dispatchCreatedAt,
             },
           });
           if (result._tag === "Failure") return false;
@@ -102,7 +106,7 @@ export function useDispatchDesktopQueuedFollowUp() {
               commandId: CommandId.make(`${entry.commandId}:runtime-mode`),
               threadId: entry.threadId,
               runtimeMode: entry.runtimeMode,
-              createdAt: entry.createdAt,
+              createdAt: dispatchCreatedAt,
             },
           });
           if (result._tag === "Failure") return false;
@@ -115,7 +119,7 @@ export function useDispatchDesktopQueuedFollowUp() {
               commandId: CommandId.make(`${entry.commandId}:interaction-mode`),
               threadId: entry.threadId,
               interactionMode: entry.interactionMode,
-              createdAt: entry.createdAt,
+              createdAt: dispatchCreatedAt,
             },
           });
           if (result._tag === "Failure") return false;
@@ -136,7 +140,7 @@ export function useDispatchDesktopQueuedFollowUp() {
             titleSeed: entry.titleSeed,
             runtimeMode: entry.runtimeMode,
             interactionMode: entry.interactionMode,
-            createdAt: entry.createdAt,
+            createdAt: dispatchCreatedAt,
           },
         });
         if (result._tag === "Failure") return false;
