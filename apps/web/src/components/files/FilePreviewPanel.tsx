@@ -58,6 +58,7 @@ import { MarkdownReviewSurface } from "./MarkdownReviewSurface";
 import { projectFileCacheKey, projectFileEditorCacheKey } from "./fileContentRevision";
 import { fileBreadcrumbs, pathFallsWithinEntry } from "./filePath";
 import { isMarkdownPreviewFile, setMarkdownTaskChecked } from "./filePreviewMode";
+import { filePreviewScrollKey } from "./filePreviewScrollState";
 import { FileSaveCoordinator } from "./fileSaveCoordinator";
 import {
   clearProjectFileQueryData,
@@ -66,6 +67,7 @@ import {
   setProjectFileQueryData,
   useProjectFileQuery,
 } from "./projectFilesQueryState";
+import { useRememberedFilePreviewScroll } from "./useRememberedFilePreviewScroll";
 
 interface FilePreviewPanelProps {
   environmentId: EnvironmentId;
@@ -706,6 +708,7 @@ function RenderedMarkdownSurface({
 > & {
   threadRef: ScopedThreadRef;
 }) {
+  const scrollRootRef = useRef<HTMLDivElement>(null);
   const addReviewComment = useComposerDraftStore((store) => store.addReviewComment);
   const removeReviewComment = useComposerDraftStore((store) => store.removeReviewComment);
   const reviewComments = useComposerDraftStore(
@@ -722,9 +725,19 @@ function RenderedMarkdownSurface({
     onPendingChange,
     onSaveCoordinatorChange,
   });
+  useRememberedFilePreviewScroll({
+    scrollKey: filePreviewScrollKey({
+      threadRef,
+      cwd,
+      relativePath,
+      mode: "markdown",
+    }),
+    rootRef: scrollRootRef,
+    viewportSelector: '[data-slot="scroll-area-viewport"]',
+  });
 
   return (
-    <ScrollArea className="min-h-0 flex-1">
+    <ScrollArea ref={scrollRootRef} className="min-h-0 flex-1">
       <div className="mx-auto max-w-4xl px-6 py-5">
         <MarkdownReviewSurface
           comments={fileReviewComments}
