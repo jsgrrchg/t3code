@@ -180,7 +180,7 @@ function RightPanelEmptyState(props: {
     ...(props.chatAvailable
       ? [
           {
-            label: "Chat",
+            label: "New Chat",
             description: "Start a focused conversation in this workspace.",
             icon: MessageSquare,
             available: true,
@@ -955,7 +955,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     <>
                       <SurfaceMenuItem available onClick={props.onAddChat}>
                         <MessageSquare />
-                        New chat
+                        New Chat
                       </SurfaceMenuItem>
                       {closedPanelChats.length > 0 ? (
                         <MenuSub>
