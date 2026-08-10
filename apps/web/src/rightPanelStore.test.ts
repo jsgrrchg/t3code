@@ -86,6 +86,34 @@ describe("rightPanelStore", () => {
     });
   });
 
+  it("normalizes v10 Diff and Agents surfaces without source thread ids", () => {
+    expect(
+      migratePersistedRightPanelState({
+        byThreadKey: {
+          "env-1:thread-A": {
+            isOpen: true,
+            activeSurfaceId: "agents",
+            surfaces: [
+              { id: "diff", kind: "diff" },
+              { id: "agents", kind: "agents" },
+            ],
+          },
+        },
+      }),
+    ).toEqual({
+      byThreadKey: {
+        "env-1:thread-A": {
+          isOpen: true,
+          activeSurfaceId: "agents",
+          surfaces: [
+            { id: "diff", kind: "diff", threadId: null },
+            { id: "agents", kind: "agents", threadId: null },
+          ],
+        },
+      },
+    });
+  });
+
   it("upgrades saved single-session terminal surfaces to split-capable surfaces", () => {
     expect(
       migratePersistedRightPanelState({

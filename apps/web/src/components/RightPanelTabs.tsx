@@ -19,6 +19,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -47,7 +48,11 @@ import { filterPanelChatPickerItems, PANEL_CHAT_PICKER_RESULT_LIMIT } from "~/pa
 
 import { PreviewPanelShell, type PreviewPanelMode } from "./preview/PreviewPanelShell";
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
-import { findNewlyOpenedChatThreadId, resolveRightPanelTabKeyAction } from "./RightPanelTabs.logic";
+import {
+  resolvePanelChatOpenAnnouncementThreadId,
+  resolveFocusTargetAfterRemoteSurfaceRemoval,
+  resolveRightPanelTabKeyAction,
+} from "./RightPanelTabs.logic";
 
 interface RightPanelTabsProps {
   mode: PreviewPanelMode;
@@ -74,13 +79,15 @@ interface RightPanelTabsProps {
   onOpenChat: (threadId: string) => void;
   onRenameChat: (threadId: string, title: string) => void;
   onRegenerateChatTitle: (threadId: string) => void;
-  onDeleteChat: (threadId: string) => void;
+  onDeleteChat: (threadId: string) => Promise<boolean>;
   browserAvailable: boolean;
   diffAvailable: boolean;
   filesAvailable: boolean;
   chatAvailable: boolean;
   chatTitlesById: ReadonlyMap<string, string>;
   panelChats: ReadonlyArray<PanelChatTabMetadata>;
+  chatOpenAnnouncement: PanelChatOpenAnnouncement | null;
+  onChatOpenAnnouncementHandled: (requestId: number) => void;
   chatTitleRegenerationAvailable: boolean;
   /** Running + waiting subagents; badges the Agents card in the empty state. */
   liveAgentCount: number;
@@ -93,6 +100,11 @@ export interface PanelChatTabMetadata {
   readonly running: boolean;
   readonly needsAttention: boolean;
   readonly unread: boolean;
+}
+
+export interface PanelChatOpenAnnouncement {
+  readonly requestId: number;
+  readonly threadId: string;
 }
 
 const SURFACE_DISABLED_REASONS = {
@@ -424,6 +436,10 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   const [renamingChatTitle, setRenamingChatTitle] = useState("");
   const [chatSearchQuery, setChatSearchQuery] = useState("");
   const [announcement, setAnnouncement] = useState("");
+  const focusedSurfaceIdRef = useRef<string | null>(null);
+  const previousSurfaceIdsRef = useRef(
+    new Set<string>(props.surfaces.map((surface) => surface.id)),
+  );
   const panelChatById = useMemo(
     () => new Map(props.panelChats.map((chat) => [chat.threadId, chat] as const)),
     [props.panelChats],
@@ -443,7 +459,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     () => filterPanelChatPickerItems(closedPanelChats, chatSearchQuery),
     [chatSearchQuery, closedPanelChats],
   );
-  const previousChatSurfaceIdsRef = useRef<ReadonlySet<string>>(new Set());
   const focusTab = useCallback((surfaceId: string) => {
     window.requestAnimationFrame(() => tabButtonRefs.current.get(surfaceId)?.focus());
   }, []);
@@ -474,16 +489,32 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     focusTab(renamedSurfaceId);
   }, [focusTab, renamingChatId]);
 
-  const closeSurfaceAndRestoreFocus = useCallback(
+  const restoreFocusAfterSurfaceRemoval = useCallback(
     (surface: RightPanelSurface) => {
       const surfaceIndex = props.surfaces.findIndex((entry) => entry.id === surface.id);
       const focusTarget =
         props.surfaces[surfaceIndex + 1] ?? props.surfaces[surfaceIndex - 1] ?? null;
-      props.onCloseSurface(surface);
       if (focusTarget) focusTab(focusTarget.id);
       else window.requestAnimationFrame(props.onFocusOwner);
     },
     [focusTab, props],
+  );
+  const closeSurfaceAndRestoreFocus = useCallback(
+    (surface: RightPanelSurface) => {
+      props.onCloseSurface(surface);
+      restoreFocusAfterSurfaceRemoval(surface);
+    },
+    [props, restoreFocusAfterSurfaceRemoval],
+  );
+  const deleteChatAndRestoreFocus = useCallback(
+    async (surface: Extract<RightPanelSurface, { kind: "chat" }>) => {
+      const shouldRestoreFocus =
+        focusedSurfaceIdRef.current === surface.id || props.activeSurfaceId === surface.id;
+      if (shouldRestoreFocus) focusedSurfaceIdRef.current = null;
+      const deleted = await props.onDeleteChat(surface.threadId);
+      if (deleted && shouldRestoreFocus) restoreFocusAfterSurfaceRemoval(surface);
+    },
+    [props, restoreFocusAfterSurfaceRemoval],
   );
   const closeAllSurfacesAndRestoreFocus = useCallback(() => {
     props.onCloseAllSurfaces();
@@ -574,7 +605,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           if (surface.kind === "chat") props.onRegenerateChatTitle(surface.threadId);
           break;
         case "delete-chat":
-          if (surface.kind === "chat") props.onDeleteChat(surface.threadId);
+          if (surface.kind === "chat") await deleteChatAndRestoreFocus(surface);
           break;
         case "close":
           closeSurfaceAndRestoreFocus(surface);
@@ -592,7 +623,13 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           break;
       }
     },
-    [beginChatRename, closeAllSurfacesAndRestoreFocus, closeSurfaceAndRestoreFocus, props],
+    [
+      beginChatRename,
+      closeAllSurfacesAndRestoreFocus,
+      closeSurfaceAndRestoreFocus,
+      deleteChatAndRestoreFocus,
+      props,
+    ],
   );
   const handleTabMouseDown = useCallback((event: ReactMouseEvent) => {
     if (event.button !== 1) return;
@@ -613,20 +650,60 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     activeTab?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [props.activeSurfaceId]);
 
+  useLayoutEffect(() => {
+    const previousSurfaceIds = previousSurfaceIdsRef.current;
+    const currentSurfaceIds = new Set(props.surfaces.map((surface) => surface.id));
+    previousSurfaceIdsRef.current = currentSurfaceIds;
+    const focusTarget = resolveFocusTargetAfterRemoteSurfaceRemoval({
+      previousSurfaceIds,
+      currentSurfaceIds,
+      focusedSurfaceId: focusedSurfaceIdRef.current,
+      activeSurfaceId: props.activeSurfaceId,
+    });
+    if (!focusTarget) return;
+    focusedSurfaceIdRef.current = null;
+    if (focusTarget.kind === "surface") focusTab(focusTarget.surfaceId);
+    else window.requestAnimationFrame(props.onFocusOwner);
+  }, [focusTab, props.activeSurfaceId, props.onFocusOwner, props.surfaces]);
+
   useEffect(() => {
-    const previousIds = previousChatSurfaceIdsRef.current;
-    const openedChatThreadId = findNewlyOpenedChatThreadId(props.surfaces, previousIds);
-    previousChatSurfaceIdsRef.current = openedChatIds;
+    const openAnnouncement = props.chatOpenAnnouncement;
+    if (!openAnnouncement) return;
+    const openedChatThreadId = resolvePanelChatOpenAnnouncementThreadId({
+      requestedThreadId: openAnnouncement.threadId,
+      surfaces: props.surfaces,
+    });
+    props.onChatOpenAnnouncementHandled(openAnnouncement.requestId);
     if (!openedChatThreadId) return;
     setAnnouncement(
       `${props.chatTitlesById.get(openedChatThreadId) ?? "Panel chat"} opened in the right panel.`,
     );
-  }, [openedChatIds, props.chatTitlesById, props.surfaces]);
+  }, [
+    props.chatOpenAnnouncement,
+    props.chatTitlesById,
+    props.onChatOpenAnnouncementHandled,
+    props.surfaces,
+  ]);
 
   return (
     <PreviewPanelShell
       mode={props.mode}
       {...(props.maximized !== undefined ? { maximized: props.maximized } : {})}
+      onFocusCapture={(event) => {
+        const focusOwner = (event.target as HTMLElement).closest<HTMLElement>(
+          "[data-right-panel-focus-surface-id]",
+        );
+        focusedSurfaceIdRef.current =
+          focusOwner?.dataset.rightPanelFocusSurfaceId ?? props.activeSurfaceId;
+      }}
+      onBlurCapture={(event) => {
+        if (
+          event.relatedTarget instanceof Node &&
+          !event.currentTarget.contains(event.relatedTarget)
+        ) {
+          focusedSurfaceIdRef.current = null;
+        }
+      }}
     >
       <div
         className={cn(
@@ -663,6 +740,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
               return (
                 <div
                   key={surface.id}
+                  data-right-panel-focus-surface-id={surface.id}
                   role="presentation"
                   data-active-tab={active}
                   onMouseDown={handleTabMouseDown}
@@ -788,7 +866,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                         >
                           Regenerate title
                         </MenuItem>
-                        <MenuItem onClick={() => props.onDeleteChat(surface.threadId)}>
+                        <MenuItem onClick={() => void deleteChatAndRestoreFocus(surface)}>
                           Delete chat
                         </MenuItem>
                         <MenuSeparator />
@@ -923,6 +1001,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
         id="right-panel-active-surface"
         className="flex min-h-0 flex-1 flex-col"
         data-right-panel-surface-content
+        data-right-panel-focus-surface-id={props.activeSurfaceId ?? undefined}
         role={props.activeSurfaceId === null ? undefined : "tabpanel"}
         aria-labelledby={
           props.activeSurfaceId === null

@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState } from "react";
+import { type FocusEventHandler, type ReactNode, useEffect, useState } from "react";
 
 import { isElectron } from "~/env";
 import { useResizableWidth } from "~/hooks/useResizableWidth";
@@ -27,6 +27,8 @@ export function PreviewPanelShell(props: {
   mode: PreviewPanelMode;
   maximized?: boolean;
   children: ReactNode;
+  onFocusCapture?: FocusEventHandler<HTMLDivElement>;
+  onBlurCapture?: FocusEventHandler<HTMLDivElement>;
 }) {
   const useDragRegion = isElectron && props.mode !== "sheet" && props.mode !== "embedded";
   const isInline = props.mode === "inline";
@@ -52,6 +54,8 @@ export function PreviewPanelShell(props: {
       style={isInline && !props.maximized ? { width: `${width}px` } : undefined}
       data-preview-panel-mode={props.mode}
       data-preview-panel-maximized={props.maximized ? "true" : "false"}
+      onFocusCapture={props.onFocusCapture}
+      onBlurCapture={props.onBlurCapture}
     >
       {isInline && !props.maximized ? <RightPanelResizeHandle handlers={handlers} /> : null}
       {useDragRegion ? <div className="electron-drag-region h-0 w-full" aria-hidden /> : null}

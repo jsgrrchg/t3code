@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { findNewlyOpenedChatThreadId, resolveRightPanelTabKeyAction } from "./RightPanelTabs.logic";
+import {
+  resolvePanelChatOpenAnnouncementThreadId,
+  resolveFocusTargetAfterRemoteSurfaceRemoval,
+  resolveRightPanelTabKeyAction,
+} from "./RightPanelTabs.logic";
 
 describe("resolveRightPanelTabKeyAction", () => {
   it("wraps arrow navigation and resolves home and end", () => {
@@ -36,19 +40,50 @@ describe("resolveRightPanelTabKeyAction", () => {
   });
 });
 
-describe("findNewlyOpenedChatThreadId", () => {
-  it("announces a chat that already exists on the first panel mount", () => {
+describe("resolvePanelChatOpenAnnouncementThreadId", () => {
+  it("uses the one-shot request instead of the first historical chat", () => {
     expect(
-      findNewlyOpenedChatThreadId([{ kind: "chat", threadId: "thread-child" }], new Set()),
-    ).toBe("thread-child");
+      resolvePanelChatOpenAnnouncementThreadId({
+        requestedThreadId: "thread-c",
+        surfaces: [
+          { kind: "chat", threadId: "thread-a" },
+          { kind: "chat", threadId: "thread-b" },
+          { kind: "chat", threadId: "thread-c" },
+        ],
+      }),
+    ).toBe("thread-c");
   });
 
-  it("ignores surfaces that were already present", () => {
+  it("does not announce a stale request", () => {
     expect(
-      findNewlyOpenedChatThreadId(
-        [{ kind: "chat", threadId: "thread-child" }],
-        new Set(["thread-child"]),
-      ),
+      resolvePanelChatOpenAnnouncementThreadId({
+        requestedThreadId: "thread-deleted",
+        surfaces: [{ kind: "chat", threadId: "thread-a" }],
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("resolveFocusTargetAfterRemoteSurfaceRemoval", () => {
+  it("moves focus to the server-selected fallback when the focused tab disappears", () => {
+    expect(
+      resolveFocusTargetAfterRemoteSurfaceRemoval({
+        previousSurfaceIds: new Set(["chat:child", "diff"]),
+        currentSurfaceIds: new Set(["diff"]),
+        focusedSurfaceId: "chat:child",
+        activeSurfaceId: "diff",
+      }),
+    ).toEqual({ kind: "surface", surfaceId: "diff" });
+  });
+
+  it("does not steal focus when it no longer belongs to the removed surface", () => {
+    expect(
+      resolveFocusTargetAfterRemoteSurfaceRemoval({
+        previousSurfaceIds: new Set(["chat:child", "diff"]),
+        currentSurfaceIds: new Set(["diff"]),
+        focusedSurfaceId: null,
+        activeSurfaceId: "diff",
+      }),
     ).toBeNull();
   });
 });

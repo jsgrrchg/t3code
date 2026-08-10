@@ -27,19 +27,35 @@ export function resolveRightPanelTabKeyAction(input: {
   return null;
 }
 
-export function findNewlyOpenedChatThreadId(
-  surfaces: ReadonlyArray<{
+export function resolvePanelChatOpenAnnouncementThreadId(input: {
+  readonly requestedThreadId: string | null | undefined;
+  readonly surfaces: ReadonlyArray<{
     readonly kind: string;
     readonly threadId?: string | null | undefined;
-  }>,
-  previousThreadIds: ReadonlySet<string>,
-): string | null {
-  return (
-    surfaces.find(
-      (surface) =>
-        surface.kind === "chat" &&
-        typeof surface.threadId === "string" &&
-        !previousThreadIds.has(surface.threadId),
-    )?.threadId ?? null
-  );
+  }>;
+}): string | null {
+  if (!input.requestedThreadId) return null;
+  return input.surfaces.some(
+    (surface) => surface.kind === "chat" && surface.threadId === input.requestedThreadId,
+  )
+    ? input.requestedThreadId
+    : null;
+}
+
+export function resolveFocusTargetAfterRemoteSurfaceRemoval(input: {
+  readonly previousSurfaceIds: ReadonlySet<string>;
+  readonly currentSurfaceIds: ReadonlySet<string>;
+  readonly focusedSurfaceId: string | null;
+  readonly activeSurfaceId: string | null;
+}): { readonly kind: "owner" } | { readonly kind: "surface"; readonly surfaceId: string } | null {
+  if (
+    !input.focusedSurfaceId ||
+    !input.previousSurfaceIds.has(input.focusedSurfaceId) ||
+    input.currentSurfaceIds.has(input.focusedSurfaceId)
+  ) {
+    return null;
+  }
+  return input.activeSurfaceId
+    ? { kind: "surface", surfaceId: input.activeSurfaceId }
+    : { kind: "owner" };
 }

@@ -49,8 +49,8 @@ export type RightPanelSurface =
   | { id: `chat:${string}`; kind: "chat"; threadId: ThreadId };
 
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
-// v10 adds durable thread-backed chat surfaces.
-const RIGHT_PANEL_STORAGE_VERSION = 10;
+// v11 normalizes Diff and Agents source thread ids for child-owned actions.
+const RIGHT_PANEL_STORAGE_VERSION = 11;
 
 export interface ThreadRightPanelState {
   isOpen: boolean;

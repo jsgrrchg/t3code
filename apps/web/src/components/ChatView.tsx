@@ -145,7 +145,11 @@ import {
   selectThreadPreviewMiniPlayer,
   usePreviewMiniPlayerStore,
 } from "../previewMiniPlayerStore";
-import { RightPanelTabs, type PanelChatTabMetadata } from "./RightPanelTabs";
+import {
+  RightPanelTabs,
+  type PanelChatOpenAnnouncement,
+  type PanelChatTabMetadata,
+} from "./RightPanelTabs";
 import { hasUnseenCompletion } from "./Sidebar.logic";
 import { AgentsPanel } from "./AgentsPanel";
 import {
@@ -1622,6 +1626,19 @@ function ChatViewContent(props: ChatViewProps) {
     () => new Map(panelChatShells.map((thread) => [thread.id, thread.title] as const)),
     [panelChatShells],
   );
+  const panelChatOpenAnnouncementRequestIdRef = useRef(0);
+  const [panelChatOpenAnnouncement, setPanelChatOpenAnnouncement] =
+    useState<PanelChatOpenAnnouncement | null>(null);
+  const announcePanelChatOpen = useCallback((threadId: ThreadId) => {
+    panelChatOpenAnnouncementRequestIdRef.current += 1;
+    setPanelChatOpenAnnouncement({
+      requestId: panelChatOpenAnnouncementRequestIdRef.current,
+      threadId,
+    });
+  }, []);
+  const acknowledgePanelChatOpenAnnouncement = useCallback((requestId: number) => {
+    setPanelChatOpenAnnouncement((current) => (current?.requestId === requestId ? null : current));
+  }, []);
   const threadLastVisitedAtById = useUiStateStore((store) => store.threadLastVisitedAtById);
   const panelChatTabMetadata = useMemo<ReadonlyArray<PanelChatTabMetadata>>(
     () =>
@@ -3382,15 +3399,17 @@ function ChatViewContent(props: ChatViewProps) {
     }
 
     useRightPanelStore.getState().openChat(activeThreadRef, nextThreadId);
-  }, [activeThread, activeThreadRef, canAddPanelChat, createThread]);
+    announcePanelChatOpen(nextThreadId);
+  }, [activeThread, activeThreadRef, announcePanelChatOpen, canAddPanelChat, createThread]);
   const openPanelChatSurface = useCallback(
     (threadId: string) => {
       if (!activeThreadRef) return;
       const panelChat = panelChatShells.find((thread) => thread.id === threadId);
       if (!panelChat) return;
       useRightPanelStore.getState().openChat(activeThreadRef, panelChat.id);
+      announcePanelChatOpen(panelChat.id);
     },
-    [activeThreadRef, panelChatShells],
+    [activeThreadRef, announcePanelChatOpen, panelChatShells],
   );
   const renamePanelChat = useCallback(
     (threadId: string, title: string) => {
@@ -3435,40 +3454,39 @@ function ChatViewContent(props: ChatViewProps) {
     [panelChatShells, updateThreadMetadata],
   );
   const deletePanelChat = useCallback(
-    (threadId: string) => {
+    async (threadId: string): Promise<boolean> => {
       const panelChat = panelChatShells.find((thread) => thread.id === threadId);
-      if (!panelChat || !activeThreadRef) return;
-      void (async () => {
-        const api = readLocalApi();
-        const confirmationMessage = [
-          `Delete panel chat "${panelChat.title}"?`,
-          "This permanently clears its conversation history.",
-        ].join("\n");
-        if (api) {
-          const confirmed = await settlePromise(() => api.dialogs.confirm(confirmationMessage));
-          if (confirmed._tag === "Failure" || !confirmed.value) return;
-        } else if (!globalThis.confirm(confirmationMessage)) {
-          return;
-        }
+      if (!panelChat || !activeThreadRef) return false;
+      const api = readLocalApi();
+      const confirmationMessage = [
+        `Delete panel chat "${panelChat.title}"?`,
+        "This permanently clears its conversation history.",
+      ].join("\n");
+      if (api) {
+        const confirmed = await settlePromise(() => api.dialogs.confirm(confirmationMessage));
+        if (confirmed._tag === "Failure" || !confirmed.value) return false;
+      } else if (!globalThis.confirm(confirmationMessage)) {
+        return false;
+      }
 
-        const result = await deleteThread({
-          environmentId: panelChat.environmentId,
-          input: { threadId: panelChat.id },
-        });
-        if (result._tag === "Failure") {
-          if (!isAtomCommandInterrupted(result)) {
-            toastManager.add(
-              stackedThreadToast({
-                type: "error",
-                title: "Failed to delete panel chat",
-                description: chatActionErrorMessage(squashAtomCommandFailure(result)),
-              }),
-            );
-          }
-          return;
+      const result = await deleteThread({
+        environmentId: panelChat.environmentId,
+        input: { threadId: panelChat.id },
+      });
+      if (result._tag === "Failure") {
+        if (!isAtomCommandInterrupted(result)) {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Failed to delete panel chat",
+              description: chatActionErrorMessage(squashAtomCommandFailure(result)),
+            }),
+          );
         }
-        useRightPanelStore.getState().closeSurface(activeThreadRef, `chat:${panelChat.id}`);
-      })();
+        return false;
+      }
+      useRightPanelStore.getState().closeSurface(activeThreadRef, `chat:${panelChat.id}`);
+      return true;
     },
     [activeThreadRef, deleteThread, panelChatShells],
   );
@@ -6913,6 +6931,8 @@ function ChatViewContent(props: ChatViewProps) {
           }
           chatTitlesById={panelChatTitlesById}
           panelChats={panelChatTabMetadata}
+          chatOpenAnnouncement={panelChatOpenAnnouncement}
+          onChatOpenAnnouncementHandled={acknowledgePanelChatOpenAnnouncement}
           chatTitleRegenerationAvailable={
             serverConfig?.environment.capabilities.threadTitleRegeneration === true
           }
@@ -6959,6 +6979,8 @@ function ChatViewContent(props: ChatViewProps) {
             }
             chatTitlesById={panelChatTitlesById}
             panelChats={panelChatTabMetadata}
+            chatOpenAnnouncement={panelChatOpenAnnouncement}
+            onChatOpenAnnouncementHandled={acknowledgePanelChatOpenAnnouncement}
             chatTitleRegenerationAvailable={
               serverConfig?.environment.capabilities.threadTitleRegeneration === true
             }
