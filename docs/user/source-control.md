@@ -54,9 +54,13 @@ Run a quick **Rescan** after setting up a new machine or changing credentials.
 ### Browse Commit History
 
 Open **History** from the empty Right Panel or its **+** menu to browse the repository's commit
-graph, subjects, authors, author dates, and commit IDs. History is read-only and uses the branches,
-remote refs, and tags already known by the Git repository on the server. Opening it does not fetch
-from a remote or change the working tree.
+graph, subjects, authors, author dates, and commit IDs. It uses the branches, remote refs, and tags
+already known by the Git repository on the server. Opening it does not fetch from a remote or change
+the working tree.
+
+Use **Fetch all** in the History header to fetch every configured Git remote and then reload the
+graph. Fetching updates remote-tracking refs without changing the current branch, index, or working
+tree. The adjacent reload button only rereads the repository state already available on the server.
 
 Branch, remote-branch, and tag labels appear beside the subject on the commit each ref currently
 points to. Rows stay on one line; when a commit has several refs, the remaining labels are grouped

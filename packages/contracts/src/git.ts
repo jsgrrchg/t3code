@@ -165,6 +165,13 @@ export const GitListHistoryInput = Schema.Struct({
 });
 export type GitListHistoryInput = typeof GitListHistoryInput.Type;
 
+export const GitFetchAllInput = Schema.Struct({
+  projectId: ProjectId,
+  threadId: Schema.optional(ThreadId),
+  cwd: TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(GIT_HISTORY_CWD_MAX_LENGTH)),
+});
+export type GitFetchAllInput = typeof GitFetchAllInput.Type;
+
 const GitCommitResourceInputFields = {
   projectId: ProjectId,
   threadId: Schema.optional(ThreadId),

@@ -151,6 +151,7 @@ export const make = Effect.gen(function* () {
       threadTitleRegeneration: true,
       panelChats: true,
       gitHistory: true,
+      gitFetchAll: true,
       ...(serverSelfUpdate === null ? {} : { serverSelfUpdate }),
       ...(serverSelfUpdate === "boot-service" ? { serverSelfUpdateProgress: true } : {}),
     },

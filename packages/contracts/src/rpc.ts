@@ -24,6 +24,7 @@ import {
   VcsSwitchRefInput,
   VcsSwitchRefResult,
   GitCommandError,
+  GitFetchAllInput,
   GitListHistoryInput,
   GitListHistoryResult,
   GitGetCommitDetailInput,
@@ -208,6 +209,7 @@ export const WS_METHODS = {
 
   // Git workflow methods
   gitRunStackedAction: "git.runStackedAction",
+  gitFetchAll: "git.fetchAll",
   gitListHistory: "git.listHistory",
   gitGetCommitDetail: "git.getCommitDetail",
   gitGetCommitDiff: "git.getCommitDiff",
@@ -555,6 +557,11 @@ export const WsGitPreparePullRequestThreadRpc = Rpc.make(WS_METHODS.gitPreparePu
   error: Schema.Union([GitManagerServiceError, EnvironmentAuthorizationError]),
 });
 
+export const WsGitFetchAllRpc = Rpc.make(WS_METHODS.gitFetchAll, {
+  payload: GitFetchAllInput,
+  error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
+});
+
 export const WsGitListHistoryRpc = Rpc.make(WS_METHODS.gitListHistory, {
   payload: GitListHistoryInput,
   success: GitListHistoryResult,
@@ -898,6 +905,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsGitRunStackedActionRpc,
   WsGitResolvePullRequestRpc,
   WsGitPreparePullRequestThreadRpc,
+  WsGitFetchAllRpc,
   WsGitListHistoryRpc,
   WsGitGetCommitDetailRpc,
   WsGitGetCommitDiffRpc,

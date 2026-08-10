@@ -41,6 +41,10 @@ describe("RPC authorization scopes", () => {
     );
   });
 
+  it("requires orchestration operate access to fetch all Git remotes", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.gitFetchAll)).toBe(AuthOrchestrationOperateScope);
+  });
+
   it("allows relay status reads without granting relay installation access", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.cloudGetRelayClientStatus)).toBe(
       AuthRelayReadScope,

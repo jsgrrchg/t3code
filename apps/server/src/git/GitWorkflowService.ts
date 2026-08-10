@@ -7,6 +7,7 @@ import {
   GitCommandError,
   type GitListHistoryInput,
   type GitListHistoryResult,
+  type GitFetchAllInput,
   type GitGetCommitDetailInput,
   type GitGetCommitDetailResult,
   type GitGetCommitDiffInput,
@@ -42,6 +43,9 @@ import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import { makeAssertWorkspaceBoundCwd } from "../workspace/WorkspaceBoundCwd.ts";
 
 export type GitListHistoryWorkspaceInput = Omit<GitListHistoryInput, "projectId" | "threadId"> & {
+  readonly workspaceRoot: string;
+};
+export type GitFetchAllWorkspaceInput = Omit<GitFetchAllInput, "projectId" | "threadId"> & {
   readonly workspaceRoot: string;
 };
 export type GitGetCommitDetailWorkspaceInput = Omit<
@@ -90,6 +94,7 @@ export class GitWorkflowService extends Context.Service<
     readonly listHistory: (
       input: GitListHistoryWorkspaceInput,
     ) => Effect.Effect<GitListHistoryResult, GitCommandError>;
+    readonly fetchAll: (input: GitFetchAllWorkspaceInput) => Effect.Effect<void, GitCommandError>;
     readonly getCommitDetail: (
       input: GitGetCommitDetailWorkspaceInput,
     ) => Effect.Effect<GitGetCommitDetailResult, GitCommandError>;
@@ -394,6 +399,27 @@ export const make = Effect.gen(function* () {
             return git.listHistory(historyInput);
           }),
         ),
+      ),
+    fetchAll: (input) =>
+      assertWorkspaceBoundCwd(input.cwd, {
+        workspaceRoot: input.workspaceRoot,
+        includeManagedWorktrees: false,
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new GitCommandError({
+              operation: "GitWorkflowService.fetchAll",
+              command: "workspace-boundary",
+              cwd: input.cwd,
+              detail:
+                cause._tag === "WorkspaceCwdCanonicalizationError"
+                  ? "Failed to resolve a path while validating the Git fetch workspace."
+                  : "Git fetch cwd must stay within the selected project or its linked Git worktrees.",
+              cause,
+            }),
+        ),
+        Effect.andThen(ensureGitCommand("GitWorkflowService.fetchAll", input.cwd)),
+        Effect.andThen(git.fetchAll({ cwd: input.cwd })),
       ),
     getCommitDetail: readWorkspaceCommitResource<
       GitGetCommitDetailWorkspaceInput,

@@ -65,9 +65,13 @@ const baseProps: GitHistoryPanelViewProps = {
   refreshError: null,
   isLoadingMore: false,
   loadMoreError: null,
+  canFetchAll: true,
+  isFetching: false,
+  fetchError: null,
   scrollKey: "history-target",
   initialScrollOffset: null,
   onRefresh: () => {},
+  onFetchAll: () => {},
   onLoadOlder: () => {},
   onScrollOffsetChange: () => {},
   onOpenCommit: () => {},
@@ -142,7 +146,7 @@ describe("GitHistoryCommitRow", () => {
     expect(markup).toContain(HEAD_SHA);
     expect(markup).toContain('aria-hidden="true"');
     expect(markup).toContain('role="listitem"');
-    expect(markup.match(/<button/g)).toHaveLength(1);
+    expect(markup.match(/<button/g)).toHaveLength(2);
     expect(markup.match(/<circle/g)).toHaveLength(2);
   });
 
@@ -197,7 +201,7 @@ describe("GitHistoryCommitRow", () => {
     expect(markup).toContain("Remote branch: upstream/feature/very-long-remote-name");
     expect(markup).toContain("h-[34px]");
     expect(markup).toContain("h-4");
-    expect(markup.match(/<button/g)).toHaveLength(1);
+    expect(markup.match(/<button/g)).toHaveLength(2);
   });
 
   it("renders an em dash when the author date is invalid", () => {
@@ -245,7 +249,7 @@ describe("GitHistoryPanelView states", () => {
     const markup = renderView({ commits: [], headSha: null, isInitialLoading: true });
 
     expect(markup).toContain("Loading commit history");
-    expect(buttonTagBefore(markup, "Refresh history")).toContain('disabled=""');
+    expect(buttonTagBefore(markup, "Reload history")).toContain('disabled=""');
     expect(markup).not.toContain("animate");
   });
 
@@ -254,7 +258,7 @@ describe("GitHistoryPanelView states", () => {
 
     expect(markup).toContain("No commits found.");
     expect(markup).toContain("0 commits");
-    expect(buttonTagBefore(markup, "Refresh history")).not.toContain('disabled=""');
+    expect(buttonTagBefore(markup, "Reload history")).not.toContain('disabled=""');
   });
 
   it("shows an initial error with Retry", () => {
@@ -273,8 +277,35 @@ describe("GitHistoryPanelView states", () => {
     const markup = renderView({ isRefreshing: true });
 
     expect(markup).toContain("Render history rows");
-    expect(markup).toContain("Refreshing…");
-    expect(buttonTagBefore(markup, "Refreshing history")).toContain('disabled=""');
+    expect(markup).toContain("Reloading…");
+    expect(buttonTagBefore(markup, "Reloading history")).toContain('disabled=""');
+  });
+
+  it("offers fetch all separately from reloading local history", () => {
+    const markup = renderView();
+
+    expect(markup).toContain("Fetch all");
+    expect(markup).toContain('aria-label="Fetch all Git remotes"');
+    expect(markup).toContain('aria-label="Reload history"');
+  });
+
+  it("preserves rows and exposes retry feedback when fetch all fails", () => {
+    const fetching = renderView({ isFetching: true });
+    const failed = renderView({ fetchError: "Authentication failed" });
+
+    expect(fetching).toContain("Render history rows");
+    expect(fetching).toContain("Fetching…");
+    expect(buttonTagBefore(fetching, "Fetching all Git remotes")).toContain('disabled=""');
+    expect(failed).toContain("Render history rows");
+    expect(failed).toContain("Authentication failed");
+    expect(failed).toContain(">Retry</button>");
+  });
+
+  it("hides fetch all when the connected server does not advertise support", () => {
+    const markup = renderView({ canFetchAll: false });
+
+    expect(markup).not.toContain("Fetch all");
+    expect(markup).toContain('aria-label="Reload history"');
   });
 
   it("shows the repository total instead of only the loaded rows", () => {

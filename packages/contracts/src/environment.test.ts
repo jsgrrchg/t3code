@@ -20,5 +20,6 @@ describe("ExecutionEnvironmentDescriptor", () => {
 
     expect(decoded.capabilities.repositoryIdentity).toBe(false);
     expect(decoded.capabilities.gitHistory).toBeUndefined();
+    expect(decoded.capabilities.gitFetchAll).toBeUndefined();
   });
 });

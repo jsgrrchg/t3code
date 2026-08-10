@@ -3531,6 +3531,15 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     },
   );
 
+  const fetchAll: GitVcsDriver.GitVcsDriver["Service"]["fetchAll"] = Effect.fn("fetchAll")(
+    function* (input) {
+      yield* executeGit("GitVcsDriver.fetchAll", input.cwd, ["fetch", "--all", "--quiet"], {
+        env: STATUS_UPSTREAM_REFRESH_ENV,
+        fallbackErrorDetail: "git fetch --all failed",
+      });
+    },
+  );
+
   const resolveRemoteTrackingCommit: GitVcsDriver.GitVcsDriver["Service"]["resolveRemoteTrackingCommit"] =
     Effect.fn("resolveRemoteTrackingCommit")(function* (input) {
       const remoteNames = yield* listRemoteNames(input.cwd);
@@ -3800,6 +3809,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       withListRefsInvalidation(input.cwd, fetchPullRequestBranch(input)),
     ensureRemote: (input) => withListRefsInvalidation(input.cwd, ensureRemote(input)),
     resolvePrimaryRemoteName,
+    fetchAll: (input) => withListRefsInvalidation(input.cwd, fetchAll(input)),
     fetchRemote: (input) => withListRefsInvalidation(input.cwd, fetchRemote(input)),
     remoteExists,
     resolveRemoteTrackingCommit,

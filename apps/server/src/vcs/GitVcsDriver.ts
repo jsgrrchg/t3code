@@ -187,6 +187,10 @@ export interface GitFetchRemoteInput {
   remoteName: string;
 }
 
+export interface GitFetchAllInput {
+  cwd: string;
+}
+
 export interface GitRemoteExistsInput {
   cwd: string;
   remoteName: string;
@@ -278,6 +282,7 @@ export class GitVcsDriver extends Context.Service<
     ) => Effect.Effect<void, GitCommandError>;
     readonly ensureRemote: (input: GitEnsureRemoteInput) => Effect.Effect<string, GitCommandError>;
     readonly resolvePrimaryRemoteName: (cwd: string) => Effect.Effect<string, GitCommandError>;
+    readonly fetchAll: (input: GitFetchAllInput) => Effect.Effect<void, GitCommandError>;
     readonly fetchRemote: (input: GitFetchRemoteInput) => Effect.Effect<void, GitCommandError>;
     readonly remoteExists: (input: GitRemoteExistsInput) => Effect.Effect<boolean, GitCommandError>;
     readonly resolveRemoteTrackingCommit: (

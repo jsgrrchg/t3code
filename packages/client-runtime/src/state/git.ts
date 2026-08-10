@@ -115,6 +115,12 @@ export function createGitEnvironmentAtoms<R, E>(
 ) {
   const commitDiffFileScheduler = createAtomCommandScheduler();
   return {
+    fetchAll: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:git:fetch-all",
+      tag: WS_METHODS.gitFetchAll,
+      scheduler: vcsCommandScheduler,
+      concurrency: vcsCommandConcurrency,
+    }),
     history: createEnvironmentRpcQueryAtomFamily(runtime, gitHistoryQueryOptions),
     commitDetail: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:git:commit-detail",

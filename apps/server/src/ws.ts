@@ -52,6 +52,7 @@ import {
   RpcClientId,
   EnvironmentAuthorizationError,
   GitCommandError,
+  type GitFetchAllInput,
   type GitListHistoryInput,
   type GitGetCommitDetailInput,
   type GitGetCommitDiffInput,
@@ -1122,6 +1123,16 @@ const makeWsRpcLayer = (
         },
       );
 
+      const resolveGitFetchAllWorkspaceInput = Effect.fn("resolveGitFetchAllWorkspaceInput")(
+        function* (input: GitFetchAllInput) {
+          const context = yield* resolveGitHistoryWorkspaceContext(
+            input,
+            "GitWorkflowService.fetchAll",
+          );
+          return context satisfies GitWorkflowService.GitFetchAllWorkspaceInput;
+        },
+      );
+
       const resolveGitCommitDetailWorkspaceInput = Effect.fn(
         "resolveGitCommitDetailWorkspaceInput",
       )(function* (input: GitGetCommitDetailInput) {
@@ -2009,6 +2020,18 @@ const makeWsRpcLayer = (
                 onSuccess: (result) =>
                   refreshGitStatus(input.cwd).pipe(Effect.ignore({ log: true }), Effect.as(result)),
               }),
+            ),
+            { "rpc.aggregate": "git" },
+          ),
+        [WS_METHODS.gitFetchAll]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.gitFetchAll,
+            resolveGitFetchAllWorkspaceInput(input).pipe(
+              Effect.flatMap((workspaceInput) =>
+                gitWorkflow
+                  .fetchAll(workspaceInput)
+                  .pipe(Effect.tap(() => refreshGitStatus(workspaceInput.cwd))),
+              ),
             ),
             { "rpc.aggregate": "git" },
           ),

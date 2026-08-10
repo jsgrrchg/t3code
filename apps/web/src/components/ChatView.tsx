@@ -6581,6 +6581,7 @@ function ChatViewContent(props: ChatViewProps) {
       gitHistoryPanelTarget ? (
         <Suspense fallback={null}>
           <GitHistoryPanel
+            canFetchAll={serverConfig?.environment.capabilities.gitFetchAll === true}
             environmentId={gitHistoryPanelTarget.environmentId}
             projectId={gitHistoryPanelTarget.projectId}
             threadId={gitHistoryPanelTarget.threadId}

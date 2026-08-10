@@ -24,6 +24,7 @@ import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { cn } from "~/lib/utils";
 import { gitEnvironment } from "~/state/git";
 import { useEnvironmentQuery } from "~/state/query";
+import { useAtomCommand } from "~/state/use-atom-command";
 import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
 import { parseTimestampDate } from "~/timestampFormat";
 
@@ -63,6 +64,8 @@ interface HistoryPanelLocalState {
   readonly appliedFirstPage: GitListHistoryResult | null;
   readonly loadMoreError: string | null;
   readonly isLoadingMore: boolean;
+  readonly fetchError: string | null;
+  readonly isFetching: boolean;
 }
 
 function createLocalState(target: GitHistoryTarget): HistoryPanelLocalState {
@@ -74,13 +77,13 @@ function createLocalState(target: GitHistoryTarget): HistoryPanelLocalState {
     appliedFirstPage: remembered?.appliedFirstPage ?? null,
     loadMoreError: null,
     isLoadingMore: false,
+    fetchError: null,
+    isFetching: false,
   };
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error && error.message.trim().length > 0
-    ? error.message
-    : "The Git history request failed.";
+function errorMessage(error: unknown, fallback = "The Git history request failed."): string {
+  return error instanceof Error && error.message.trim().length > 0 ? error.message : fallback;
 }
 
 export interface GitHistoryPanelViewProps {
@@ -94,9 +97,13 @@ export interface GitHistoryPanelViewProps {
   readonly refreshError: string | null;
   readonly isLoadingMore: boolean;
   readonly loadMoreError: string | null;
+  readonly canFetchAll: boolean;
+  readonly isFetching: boolean;
+  readonly fetchError: string | null;
   readonly scrollKey: string;
   readonly initialScrollOffset: number | null;
   readonly onRefresh: () => void;
+  readonly onFetchAll: () => void;
   readonly onLoadOlder: () => void;
   readonly onScrollOffsetChange: (offset: number) => void;
   readonly onOpenCommit: (sha: GitHistoryCommitSummary["sha"]) => void;
@@ -356,9 +363,13 @@ export function GitHistoryPanelView({
   refreshError,
   isLoadingMore,
   loadMoreError,
+  canFetchAll,
+  isFetching,
+  fetchError,
   scrollKey,
   initialScrollOffset,
   onRefresh,
+  onFetchAll,
   onLoadOlder,
   onScrollOffsetChange,
   onOpenCommit,
@@ -383,7 +394,7 @@ export function GitHistoryPanelView({
       OPEN_COMMIT_COLUMN_WIDTH +
       ROW_END_PADDING,
   } satisfies CSSProperties;
-  const controlsPending = isInitialLoading || isRefreshing || isLoadingMore;
+  const controlsPending = isInitialLoading || isRefreshing || isLoadingMore || isFetching;
   const displayedCommitLabel =
     totalCount !== null
       ? `${totalCount.toLocaleString()} commit${totalCount === 1 ? "" : "s"}`
@@ -514,19 +525,43 @@ export function GitHistoryPanelView({
         <span className="min-w-0 flex-1 truncate text-xs font-medium">{displayedCommitLabel}</span>
         {isRefreshing ? (
           <span className="text-[11px] text-muted-foreground" role="status">
-            Refreshing…
+            Reloading…
           </span>
         ) : null}
+        {canFetchAll ? (
+          <Button
+            aria-label={isFetching ? "Fetching all Git remotes" : "Fetch all Git remotes"}
+            disabled={controlsPending}
+            size="xs"
+            title="Fetch all configured Git remotes and reload history"
+            variant="outline"
+            onClick={onFetchAll}
+          >
+            {isFetching ? "Fetching…" : "Fetch all"}
+          </Button>
+        ) : null}
         <Button
-          aria-label={isRefreshing ? "Refreshing history" : "Refresh history"}
+          aria-label={isRefreshing ? "Reloading history" : "Reload history"}
           disabled={controlsPending}
           size="icon-xs"
+          title="Reload history from the local repository"
           variant="ghost"
           onClick={onRefresh}
         >
           <RefreshCwIcon aria-hidden="true" className="size-3.5" />
         </Button>
       </div>
+      {fetchError !== null ? (
+        <div
+          className="flex shrink-0 items-center gap-2 border-b border-destructive/20 bg-destructive/5 px-2 py-1 text-xs text-destructive-foreground"
+          role="alert"
+        >
+          <span className="min-w-0 flex-1 truncate">{fetchError}</span>
+          <Button size="xs" variant="ghost" disabled={controlsPending} onClick={onFetchAll}>
+            Retry
+          </Button>
+        </div>
+      ) : null}
       {content}
     </section>
   );
@@ -537,12 +572,14 @@ export function GitHistoryPanel({
   projectId,
   threadId,
   cwd,
+  canFetchAll,
   onOpenCommit,
 }: {
   readonly environmentId: EnvironmentId;
   readonly projectId: ProjectId;
   readonly threadId: ThreadId | null;
   readonly cwd: string;
+  readonly canFetchAll: boolean;
   readonly onOpenCommit: (sha: GitHistoryCommitSummary["sha"]) => void;
 }) {
   const target = useMemo<GitHistoryTarget>(
@@ -564,6 +601,10 @@ export function GitHistoryPanel({
   );
   const runHistoryPage = useAtomQueryRunner(gitEnvironment.history, {
     label: "load older Git history",
+    reportFailure: false,
+  });
+  const runFetchAll = useAtomCommand(gitEnvironment.fetchAll, {
+    label: "fetch all Git remotes",
     reportFailure: false,
   });
   const [localState, setLocalState] = useState<HistoryPanelLocalState>(() =>
@@ -616,6 +657,47 @@ export function GitHistoryPanel({
     });
     firstPage.refresh();
   }, [currentTargetKey, firstPage, target]);
+
+  const fetchAll = useCallback(() => {
+    if (!canFetchAll || scopedState.isFetching) return;
+    setLocalState((current) => {
+      const scoped = current.targetKey === currentTargetKey ? current : createLocalState(target);
+      return { ...scoped, fetchError: null, isFetching: true };
+    });
+    void runFetchAll({
+      environmentId,
+      input: {
+        projectId,
+        ...(threadId !== null ? { threadId } : {}),
+        cwd,
+      },
+    }).then((result) => {
+      if (activeTarget.current !== target) return;
+      setLocalState((current) => {
+        if (current.targetKey !== currentTargetKey) return current;
+        return {
+          ...current,
+          fetchError:
+            result._tag === "Success"
+              ? null
+              : errorMessage(squashAtomCommandFailure(result), "Fetching Git remotes failed."),
+          isFetching: false,
+        };
+      });
+      if (result._tag === "Success") firstPage.refresh();
+    });
+  }, [
+    canFetchAll,
+    currentTargetKey,
+    cwd,
+    environmentId,
+    firstPage,
+    projectId,
+    runFetchAll,
+    scopedState.isFetching,
+    target,
+    threadId,
+  ]);
 
   const loadOlder = useCallback(() => {
     const cursor = visibleHistory.nextCursor;
@@ -688,6 +770,9 @@ export function GitHistoryPanel({
       isLoadingMore={scopedState.isLoadingMore}
       isRefreshing={hasVisibleCommits && firstPage.isPending}
       loadMoreError={scopedState.loadMoreError}
+      canFetchAll={canFetchAll}
+      isFetching={scopedState.isFetching}
+      fetchError={scopedState.fetchError}
       nextCursor={visibleHistory.nextCursor}
       scrollKey={currentTargetKey}
       initialScrollOffset={initialScrollOffset}
@@ -695,6 +780,7 @@ export function GitHistoryPanel({
       refreshError={hasVisibleCommits ? firstPage.error : null}
       onLoadOlder={loadOlder}
       onRefresh={refresh}
+      onFetchAll={fetchAll}
       onScrollOffsetChange={rememberScrollOffset}
       onOpenCommit={onOpenCommit}
     />

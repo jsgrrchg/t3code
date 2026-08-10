@@ -72,6 +72,7 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
       expect(second.capabilities.threadTitleRegeneration).toBe(true);
       expect(second.capabilities.panelChats).toBe(true);
       expect(second.capabilities.gitHistory).toBe(true);
+      expect(second.capabilities.gitFetchAll).toBe(true);
     }),
   );
 
