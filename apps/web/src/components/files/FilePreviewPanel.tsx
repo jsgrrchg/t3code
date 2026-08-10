@@ -12,7 +12,15 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { ChevronRight, Code2, Eye, FolderTree, Globe2, LoaderCircle } from "lucide-react";
+import {
+  ChevronRight,
+  Code2,
+  Eye,
+  FolderTree,
+  Globe2,
+  LoaderCircle,
+  RefreshCw,
+} from "lucide-react";
 import * as Schema from "effect/Schema";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -28,6 +36,7 @@ import { cn } from "~/lib/utils";
 import { isPreviewSupportedInRuntime } from "~/previewStateStore";
 import { resolvePathLinkTarget } from "~/terminal-links";
 import { ScrollArea } from "~/components/ui/scroll-area";
+import { Button } from "~/components/ui/button";
 import { Toggle } from "~/components/ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
@@ -84,6 +93,8 @@ interface FilePreviewPanelProps {
   availableEditors: ReadonlyArray<EditorId>;
   revealLine: number | null;
   revealRequestId: number;
+  refreshToken: string | null;
+  refreshBlocked: boolean;
   onOpenFile: (relativePath: string) => void;
   onEntryDeleted: (relativePath: string, kind: "file" | "directory") => void;
   onPendingChange: (relativePath: string, pending: boolean) => void;
@@ -906,6 +917,8 @@ export default function FilePreviewPanel({
   availableEditors,
   revealLine,
   revealRequestId,
+  refreshToken,
+  refreshBlocked,
   onOpenFile,
   onEntryDeleted,
   onPendingChange,
@@ -922,6 +935,7 @@ export default function FilePreviewPanel({
   });
   const isImage = relativePath !== null && isWorkspaceImagePreviewPath(relativePath);
   const file = useProjectFileQuery(environmentId, cwd, relativePath, !isImage);
+  const lastAutoRefreshTokenRef = useRef(refreshToken);
   const [explorerOpen, setExplorerOpen] = useState(initialExplorerOpen);
   // Reading markdown rendered is a preference, not a property of one file. Keeping
   // it on the panel meant a thread switch dropped it and forced source back.
@@ -964,6 +978,19 @@ export default function FilePreviewPanel({
   const handleSaveCoordinatorChange = useCallback((coordinator: FileSaveCoordinator | null) => {
     saveCoordinatorRef.current = coordinator;
   }, []);
+  useEffect(() => {
+    if (
+      relativePath === null ||
+      isImage ||
+      refreshBlocked ||
+      refreshToken === null ||
+      lastAutoRefreshTokenRef.current === refreshToken
+    ) {
+      return;
+    }
+    lastAutoRefreshTokenRef.current = refreshToken;
+    file.refresh();
+  }, [file.refresh, isImage, refreshBlocked, refreshToken, relativePath]);
   const activeFileFallsWithinEntry = useCallback(
     (entryPath: string) => relativePath !== null && pathFallsWithinEntry(relativePath, entryPath),
     [relativePath],
@@ -1103,6 +1130,31 @@ export default function FilePreviewPanel({
               />
               <TooltipPopup>
                 {renderMarkdown ? "Show markdown source" : "Show rendered markdown"}
+              </TooltipPopup>
+            </Tooltip>
+          ) : null}
+          {!isImage ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={file.isPending ? "Refreshing file" : "Refresh file"}
+                    disabled={file.isPending || refreshBlocked}
+                    onClick={file.refresh}
+                  />
+                }
+              >
+                <RefreshCw className={cn("size-3.5", file.isPending && "animate-spin")} />
+              </TooltipTrigger>
+              <TooltipPopup side="top">
+                {refreshBlocked
+                  ? "Waiting for local changes to save"
+                  : file.isPending
+                    ? "Refreshing file…"
+                    : "Refresh file"}
               </TooltipPopup>
             </Tooltip>
           ) : null}

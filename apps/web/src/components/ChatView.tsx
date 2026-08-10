@@ -1800,6 +1800,10 @@ function ChatViewContent(props: ChatViewProps) {
     });
   }, [activeThreadKey, existingOpenTerminalThreadKeys, terminalUiState.terminalOpen]);
   const latestTurnSettled = isLatestTurnSettled(activeLatestTurn, activeThread?.session ?? null);
+  const activeFileRefreshToken =
+    latestTurnSettled && activeThreadKey && activeLatestTurn?.completedAt
+      ? `${activeThreadKey}:${activeLatestTurn.turnId}:${activeLatestTurn.completedAt}`
+      : null;
   const activeProjectRef = activeThread
     ? scopeProjectRef(activeThread.environmentId, activeThread.projectId)
     : null;
@@ -6630,6 +6634,11 @@ function ChatViewContent(props: ChatViewProps) {
           }
           revealLine={activeFileSurface?.revealLine ?? null}
           revealRequestId={activeFileSurface?.revealRequestId ?? 0}
+          refreshToken={activeFileRefreshToken}
+          refreshBlocked={
+            activeRightPanelSurface.kind === "file" &&
+            pendingFileSurfaceIds.has(`file:${activeRightPanelSurface.relativePath}`)
+          }
           onOpenFile={openFileSurface}
           onEntryDeleted={handleFileEntryDeleted}
           onPendingChange={handleFilePendingChange}
