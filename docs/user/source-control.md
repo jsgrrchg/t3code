@@ -51,6 +51,17 @@ The **Source Control settings** page shows you exactly what's connected:
 
 Run a quick **Rescan** after setting up a new machine or changing credentials.
 
+### Browse Commit History
+
+Open **History** from the empty Right Panel or its **+** menu to browse the repository's commit
+graph, subjects, authors, and commit IDs. History is read-only and uses the branches, remote refs,
+and tags already known by the Git repository on the server. Opening it does not fetch from a remote
+or change the working tree.
+
+History behaves like the other Right Panel tabs: select its tab to return to it, use the tab's close
+control to remove it, and open **History** again from the empty state or **+** menu when needed. This
+first version does not add a Command Palette action, keyboard shortcut, or desktop menu item.
+
 ## Getting Started
 
 ### For GitHub (Recommended for most users)

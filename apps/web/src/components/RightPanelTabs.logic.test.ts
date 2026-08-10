@@ -2,6 +2,9 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   panelChatThreadIdsForClose,
+  GIT_HISTORY_DISABLED_REASONS,
+  resolveGitHistoryAvailability,
+  resolveGitHistoryPanelTarget,
   resolvePanelChatOpenAnnouncementThreadId,
   resolveFocusTargetAfterRemoteSurfaceRemoval,
   resolveFocusedRightPanelSurfaceId,
@@ -9,6 +12,66 @@ import {
   resolveRightPanelTabKeyAction,
   surfacesClosedAfterPanelChatDeletion,
 } from "./RightPanelTabs.logic";
+
+describe("Git History right-panel availability", () => {
+  it("requires project, confirmed Git, and an advertised server capability", () => {
+    expect(
+      resolveGitHistoryAvailability({
+        hasProject: true,
+        cwd: "/repo",
+        isGitRepo: true,
+        capability: true,
+      }),
+    ).toEqual({ available: true, disabledReason: "" });
+    expect(
+      resolveGitHistoryAvailability({
+        hasProject: true,
+        cwd: "/repo",
+        isGitRepo: false,
+        capability: true,
+      }),
+    ).toEqual({
+      available: false,
+      disabledReason: GIT_HISTORY_DISABLED_REASONS.repository,
+    });
+    expect(
+      resolveGitHistoryAvailability({
+        hasProject: true,
+        cwd: "/repo",
+        isGitRepo: true,
+        capability: undefined,
+      }),
+    ).toEqual({
+      available: false,
+      disabledReason: GIT_HISTORY_DISABLED_REASONS.capability,
+    });
+  });
+
+  it("only returns an RPC target while History is active and available", () => {
+    const available = { available: true, disabledReason: "" };
+    const input = {
+      activeSurfaceKind: "history",
+      availability: available,
+      environmentId: "environment-1",
+      cwd: "/repo/worktree",
+    } as const;
+
+    expect(resolveGitHistoryPanelTarget(input)).toEqual({
+      environmentId: "environment-1",
+      cwd: "/repo/worktree",
+    });
+    expect(resolveGitHistoryPanelTarget({ ...input, activeSurfaceKind: "diff" })).toBeNull();
+    expect(
+      resolveGitHistoryPanelTarget({
+        ...input,
+        availability: {
+          available: false,
+          disabledReason: GIT_HISTORY_DISABLED_REASONS.capability,
+        },
+      }),
+    ).toBeNull();
+  });
+});
 
 describe("right-panel chat close deletion", () => {
   const surfaces = [

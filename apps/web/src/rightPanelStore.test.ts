@@ -114,6 +114,28 @@ describe("rightPanelStore", () => {
     });
   });
 
+  it("restores a persisted History singleton without changing the storage version", () => {
+    expect(
+      migratePersistedRightPanelState({
+        byThreadKey: {
+          "env-1:thread-A": {
+            isOpen: true,
+            activeSurfaceId: "history",
+            surfaces: [{ id: "history", kind: "history" }],
+          },
+        },
+      }),
+    ).toEqual({
+      byThreadKey: {
+        "env-1:thread-A": {
+          isOpen: true,
+          activeSurfaceId: "history",
+          surfaces: [{ id: "history", kind: "history" }],
+        },
+      },
+    });
+  });
+
   it("upgrades saved single-session terminal surfaces to split-capable surfaces", () => {
     expect(
       migratePersistedRightPanelState({
@@ -236,6 +258,44 @@ describe("rightPanelStore", () => {
         { id: "diff", kind: "diff", threadId: null },
         { id: "agents", kind: "agents", threadId: null },
       ],
+    });
+  });
+
+  it("opens, focuses, closes, and reopens one History surface in relative order", () => {
+    useRightPanelStore.getState().open(refA, "diff");
+    useRightPanelStore.getState().open(refA, "history");
+    useRightPanelStore.getState().open(refA, "agents");
+    useRightPanelStore.getState().open(refA, "history");
+
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: "history",
+      surfaces: [
+        { id: "diff", kind: "diff", threadId: null },
+        { id: "history", kind: "history" },
+        { id: "agents", kind: "agents", threadId: null },
+      ],
+    });
+
+    useRightPanelStore.getState().closeSurface(refA, "history");
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces.map(
+        (surface) => surface.id,
+      ),
+    ).toEqual(["diff", "agents"]);
+
+    useRightPanelStore.getState().open(refA, "history");
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces.map(
+        (surface) => surface.id,
+      ),
+    ).toEqual(["diff", "agents", "history"]);
+
+    useRightPanelStore.getState().closeAllSurfaces(refA);
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: false,
+      activeSurfaceId: null,
+      surfaces: [],
     });
   });
 

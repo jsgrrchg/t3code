@@ -4,6 +4,7 @@ import {
   Bot,
   FileDiff,
   Files,
+  GitGraph,
   Globe2,
   MessageSquare,
   MoreHorizontal,
@@ -54,7 +55,10 @@ import {
   resolveFocusTargetAfterRemoteSurfaceRemoval,
   resolveFocusedRightPanelSurfaceId,
   resolveRightPanelTabKeyAction,
+  RIGHT_PANEL_ADD_MENU_SURFACE_ORDER,
+  RIGHT_PANEL_EMPTY_SURFACE_ORDER,
   shouldClearRightPanelFocusOwner,
+  type StandardRightPanelSurfaceKind,
 } from "./RightPanelTabs.logic";
 import { writeComposerMentionDragPayload } from "./chat/composerMentionDrag";
 import { composerMentionFromRightPanelSurface } from "./rightPanelTabDrag";
@@ -78,6 +82,7 @@ interface RightPanelTabsProps {
   onAddBrowser: () => void;
   onAddTerminal: () => void;
   onAddDiff: () => void;
+  onAddHistory: () => void;
   onAddFiles: () => void;
   onAddAgents: () => void;
   onAddChat: () => void;
@@ -87,6 +92,8 @@ interface RightPanelTabsProps {
   onDeleteChat: (threadId: string) => Promise<boolean>;
   browserAvailable: boolean;
   diffAvailable: boolean;
+  historyAvailable: boolean;
+  historyDisabledReason: string;
   filesAvailable: boolean;
   chatAvailable: boolean;
   chatTitlesById: ReadonlyMap<string, string>;
@@ -117,6 +124,91 @@ const SURFACE_DISABLED_REASONS = {
   files: "Files are only available when a project is open.",
   diff: "Diff is only available for server threads in Git repositories.",
 } as const;
+
+interface StandardSurfaceActionsInput {
+  readonly onAddBrowser: () => void;
+  readonly onAddTerminal: () => void;
+  readonly onAddFiles: () => void;
+  readonly onAddDiff: () => void;
+  readonly onAddHistory: () => void;
+  readonly onAddAgents: () => void;
+  readonly browserAvailable: boolean;
+  readonly filesAvailable: boolean;
+  readonly diffAvailable: boolean;
+  readonly historyAvailable: boolean;
+  readonly historyDisabledReason: string;
+  readonly liveAgentCount: number;
+}
+
+export function buildStandardSurfaceActions(input: StandardSurfaceActionsInput) {
+  return {
+    browser: {
+      label: "Browser",
+      description: "Open a local app or URL.",
+      icon: Globe2,
+      available: input.browserAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.browser,
+      onClick: input.onAddBrowser,
+      badgeCount: 0,
+    },
+    terminal: {
+      label: "Terminal",
+      description: "Start a shell in this workspace.",
+      icon: TerminalSquare,
+      available: true,
+      disabledReason: null,
+      onClick: input.onAddTerminal,
+      badgeCount: 0,
+    },
+    files: {
+      label: "Files",
+      description: "Browse and read workspace files.",
+      icon: Files,
+      available: input.filesAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.files,
+      onClick: input.onAddFiles,
+      badgeCount: 0,
+    },
+    diff: {
+      label: "Diff",
+      description: "Review changes in this thread.",
+      icon: FileDiff,
+      available: input.diffAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.diff,
+      onClick: input.onAddDiff,
+      badgeCount: 0,
+    },
+    history: {
+      label: "History",
+      description: "Browse the repository commit graph.",
+      icon: GitGraph,
+      available: input.historyAvailable,
+      disabledReason: input.historyDisabledReason,
+      onClick: input.onAddHistory,
+      badgeCount: 0,
+    },
+    agents: {
+      label: "Agents",
+      description: "Watch subagents and workflows run.",
+      icon: Bot,
+      available: true,
+      disabledReason: null,
+      onClick: input.onAddAgents,
+      badgeCount: input.liveAgentCount,
+    },
+  } satisfies Record<
+    StandardRightPanelSurfaceKind,
+    {
+      readonly label: string;
+      readonly description: string;
+      readonly icon: typeof Globe2;
+      readonly available: boolean;
+      readonly disabledReason: string | null;
+      readonly onClick: () => void;
+      readonly badgeCount: number;
+    }
+  >;
+}
 
 type TabContextMenuAction =
   | "copy-path"
@@ -160,11 +252,14 @@ function RightPanelEmptyState(props: {
   onAddBrowser: () => void;
   onAddTerminal: () => void;
   onAddDiff: () => void;
+  onAddHistory: () => void;
   onAddFiles: () => void;
   onAddAgents: () => void;
   onAddChat: () => void;
   browserAvailable: boolean;
   diffAvailable: boolean;
+  historyAvailable: boolean;
+  historyDisabledReason: string;
   filesAvailable: boolean;
   chatAvailable: boolean;
   panelChats: ReadonlyArray<PanelChatTabMetadata>;
@@ -176,7 +271,9 @@ function RightPanelEmptyState(props: {
     () => filterPanelChatPickerItems(props.panelChats, chatSearchQuery),
     [chatSearchQuery, props.panelChats],
   );
+  const standardActions = buildStandardSurfaceActions(props);
   const actions = [
+    ...RIGHT_PANEL_EMPTY_SURFACE_ORDER.map((kind) => standardActions[kind]),
     ...(props.chatAvailable
       ? [
           {
@@ -190,51 +287,6 @@ function RightPanelEmptyState(props: {
           },
         ]
       : []),
-    {
-      label: "Browser",
-      description: "Open a local app or URL.",
-      icon: Globe2,
-      available: props.browserAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.browser,
-      onClick: props.onAddBrowser,
-      badgeCount: 0,
-    },
-    {
-      label: "Terminal",
-      description: "Start a shell in this workspace.",
-      icon: TerminalSquare,
-      available: true,
-      disabledReason: null,
-      onClick: props.onAddTerminal,
-      badgeCount: 0,
-    },
-    {
-      label: "Files",
-      description: "Browse and read workspace files.",
-      icon: Files,
-      available: props.filesAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.files,
-      onClick: props.onAddFiles,
-      badgeCount: 0,
-    },
-    {
-      label: "Diff",
-      description: "Review changes in this thread.",
-      icon: FileDiff,
-      available: props.diffAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.diff,
-      onClick: props.onAddDiff,
-      badgeCount: 0,
-    },
-    {
-      label: "Agents",
-      description: "Watch subagents and workflows run.",
-      icon: Bot,
-      available: true,
-      disabledReason: null,
-      onClick: props.onAddAgents,
-      badgeCount: props.liveAgentCount,
-    },
   ] as const;
 
   return (
@@ -353,6 +405,8 @@ function surfaceTitle(
   switch (surface.kind) {
     case "diff":
       return "Diff";
+    case "history":
+      return "History";
     case "files":
       return "Files";
     case "file":
@@ -412,6 +466,8 @@ function SurfaceIcon({
     }
     case "diff":
       return <FileDiff className="size-3 shrink-0" />;
+    case "history":
+      return <GitGraph className="size-3 shrink-0" />;
     case "files":
       return <Files className="size-3 shrink-0" />;
     case "file":
@@ -464,6 +520,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     () => filterPanelChatPickerItems(closedPanelChats, chatSearchQuery),
     [chatSearchQuery, closedPanelChats],
   );
+  const standardActions = buildStandardSurfaceActions(props);
   const focusTab = useCallback((surfaceId: string) => {
     window.requestAnimationFrame(() => tabButtonRefs.current.get(surfaceId)?.focus());
   }, []);
@@ -923,38 +980,23 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                   <Plus className="size-3.5" />
                 </MenuTrigger>
                 <MenuPopup align="start" side="bottom" sideOffset={6} className="min-w-44">
-                  <SurfaceMenuItem
-                    available={props.browserAvailable}
-                    disabledReason={SURFACE_DISABLED_REASONS.browser}
-                    onClick={props.onAddBrowser}
-                  >
-                    <Globe2 />
-                    Browser
-                  </SurfaceMenuItem>
-                  <SurfaceMenuItem available onClick={props.onAddTerminal}>
-                    <TerminalSquare />
-                    Terminal
-                  </SurfaceMenuItem>
-                  <SurfaceMenuItem
-                    available={props.filesAvailable}
-                    disabledReason={SURFACE_DISABLED_REASONS.files}
-                    onClick={props.onAddFiles}
-                  >
-                    <Files />
-                    Files
-                  </SurfaceMenuItem>
-                  <SurfaceMenuItem
-                    available={props.diffAvailable}
-                    disabledReason={SURFACE_DISABLED_REASONS.diff}
-                    onClick={props.onAddDiff}
-                  >
-                    <FileDiff />
-                    Diff
-                  </SurfaceMenuItem>
-                  <SurfaceMenuItem available onClick={props.onAddAgents}>
-                    <Bot />
-                    Agents
-                  </SurfaceMenuItem>
+                  {RIGHT_PANEL_ADD_MENU_SURFACE_ORDER.map((kind) => {
+                    const action = standardActions[kind];
+                    const Icon = action.icon;
+                    return (
+                      <SurfaceMenuItem
+                        key={kind}
+                        available={action.available}
+                        {...(action.disabledReason === null
+                          ? {}
+                          : { disabledReason: action.disabledReason })}
+                        onClick={action.onClick}
+                      >
+                        <Icon />
+                        {action.label}
+                      </SurfaceMenuItem>
+                    );
+                  })}
                   {props.chatAvailable ? (
                     <>
                       <SurfaceMenuItem available onClick={props.onAddChat}>
@@ -1036,11 +1078,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddBrowser={props.onAddBrowser}
             onAddTerminal={props.onAddTerminal}
             onAddDiff={props.onAddDiff}
+            onAddHistory={props.onAddHistory}
             onAddFiles={props.onAddFiles}
             onAddAgents={props.onAddAgents}
             onAddChat={props.onAddChat}
             browserAvailable={props.browserAvailable}
             diffAvailable={props.diffAvailable}
+            historyAvailable={props.historyAvailable}
+            historyDisabledReason={props.historyDisabledReason}
             filesAvailable={props.filesAvailable}
             chatAvailable={props.chatAvailable}
             panelChats={closedPanelChats}

@@ -156,6 +156,8 @@ import {
 } from "./RightPanelTabs";
 import {
   panelChatThreadIdsForClose,
+  resolveGitHistoryAvailability,
+  resolveGitHistoryPanelTarget,
   surfacesClosedAfterPanelChatDeletion,
 } from "./RightPanelTabs.logic";
 import { hasUnseenCompletion } from "./Sidebar.logic";
@@ -455,6 +457,11 @@ const PreviewPanel = lazy(() =>
 );
 const DiffPanel = lazy(() => import("./DiffPanel"));
 const FilePreviewPanel = lazy(() => import("./files/FilePreviewPanel"));
+const GitHistoryPanel = lazy(() =>
+  import("./git-history/GitHistoryPanel").then((module) => ({
+    default: module.GitHistoryPanel,
+  })),
+);
 const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
 const TYPE_TO_FOCUS_EDITABLE_SELECTOR = [
   "input",
@@ -2749,6 +2756,12 @@ function ChatViewContent(props: ChatViewProps) {
     terminalUiLaunchContext?.threadId === activeThreadId ? terminalUiLaunchContext : null;
   // Default true while loading to avoid toolbar flicker.
   const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
+  const gitHistoryAvailability = resolveGitHistoryAvailability({
+    hasProject: activeProject !== null,
+    cwd: gitCwd,
+    isGitRepo: gitStatusQuery.data?.isRepo ?? null,
+    capability: serverConfig?.environment.capabilities.gitHistory,
+  });
   const composerContextStripAvailable = shouldShowComposerContextStrip({
     hasActiveProject: activeProject !== null,
     isGitRepo,
@@ -3354,6 +3367,10 @@ function ChatViewContent(props: ChatViewProps) {
     useRightPanelStore.getState().open(activeThreadRef, "diff");
     onDiffPanelOpen?.();
   }, [activeThreadRef, isGitRepo, isServerThread, onDiffPanelOpen]);
+  const addHistorySurface = useCallback(() => {
+    if (!activeThreadRef || !gitHistoryAvailability.available) return;
+    useRightPanelStore.getState().open(activeThreadRef, "history");
+  }, [activeThreadRef, gitHistoryAvailability.available]);
   const addFilesSurface = useCallback(() => {
     if (!activeThreadRef || !activeProject) return;
     useRightPanelStore.getState().open(activeThreadRef, "files");
@@ -6466,6 +6483,12 @@ function ChatViewContent(props: ChatViewProps) {
       ? scopeThreadRef(activeThread.environmentId, activeRightPanelSurface.threadId)
       : activeThreadRef;
   const activePanelChatThreadId = getActivePanelChatThreadId(activeRightPanelSurface);
+  const gitHistoryPanelTarget = resolveGitHistoryPanelTarget({
+    activeSurfaceKind: activeRightPanelSurface?.kind ?? null,
+    availability: gitHistoryAvailability,
+    environmentId: activeThreadRef?.environmentId ?? null,
+    cwd: gitCwd,
+  });
   const rightPanelContent = activeThreadRef ? (
     activeRightPanelSurface?.kind === "preview" ? (
       <Suspense fallback={null}>
@@ -6508,6 +6531,22 @@ function ChatViewContent(props: ChatViewProps) {
           initialGitScope={initialDiffPanelGitScope}
         />
       </Suspense>
+    ) : activeRightPanelSurface?.kind === "history" ? (
+      gitHistoryPanelTarget ? (
+        <Suspense fallback={null}>
+          <GitHistoryPanel
+            environmentId={gitHistoryPanelTarget.environmentId}
+            cwd={gitHistoryPanelTarget.cwd}
+          />
+        </Suspense>
+      ) : (
+        <div
+          className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground"
+          role="status"
+        >
+          {gitHistoryAvailability.disabledReason}
+        </div>
+      )
     ) : activeRightPanelSurface?.kind === "agents" && activeAgentsThreadRef ? (
       <ThreadAgentsPanel threadRef={activeAgentsThreadRef} />
     ) : activePanelChatThreadId ? (
@@ -6987,6 +7026,7 @@ function ChatViewContent(props: ChatViewProps) {
           onAddBrowser={createBrowserSurface}
           onAddTerminal={addTerminalSurface}
           onAddDiff={addDiffSurface}
+          onAddHistory={addHistorySurface}
           onAddFiles={addFilesSurface}
           onAddAgents={addAgentsSurface}
           onAddChat={() => void addPanelChatSurface()}
@@ -6996,6 +7036,8 @@ function ChatViewContent(props: ChatViewProps) {
           onDeleteChat={deletePanelChat}
           browserAvailable={isPreviewSupportedInRuntime()}
           diffAvailable={isServerThread && isGitRepo}
+          historyAvailable={gitHistoryAvailability.available}
+          historyDisabledReason={gitHistoryAvailability.disabledReason}
           filesAvailable={activeProject !== null}
           chatAvailable={
             isWorkspacePresentation &&
@@ -7035,6 +7077,7 @@ function ChatViewContent(props: ChatViewProps) {
             onAddBrowser={createBrowserSurface}
             onAddTerminal={addTerminalSurface}
             onAddDiff={addDiffSurface}
+            onAddHistory={addHistorySurface}
             onAddFiles={addFilesSurface}
             onAddAgents={addAgentsSurface}
             onAddChat={() => void addPanelChatSurface()}
@@ -7044,6 +7087,8 @@ function ChatViewContent(props: ChatViewProps) {
             onDeleteChat={deletePanelChat}
             browserAvailable={isPreviewSupportedInRuntime()}
             diffAvailable={isServerThread && isGitRepo}
+            historyAvailable={gitHistoryAvailability.available}
+            historyDisabledReason={gitHistoryAvailability.disabledReason}
             filesAvailable={activeProject !== null}
             chatAvailable={
               isWorkspacePresentation &&

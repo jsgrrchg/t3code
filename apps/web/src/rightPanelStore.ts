@@ -5,7 +5,7 @@
  * surface descriptors and the active surface, while each feature continues to
  * own its durable resource state. Browser surfaces point at preview tab ids,
  * terminal surfaces point at terminal session ids, file surfaces point at
- * workspace paths, and diff/files remain singleton surfaces.
+ * workspace paths, and diff/files/history remain singleton surfaces.
  */
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { ScopedThreadRef, ThreadId } from "@t3tools/contracts";
@@ -16,6 +16,7 @@ import { resolveStorage } from "./lib/storage";
 
 export const RIGHT_PANEL_KINDS = [
   "diff",
+  "history",
   "files",
   "file",
   "preview",
@@ -37,6 +38,7 @@ export type RightPanelSurface =
       splitDirection?: "horizontal" | "vertical";
     }
   | { id: "diff"; kind: "diff"; threadId?: ThreadId | null }
+  | { id: "history"; kind: "history" }
   | { id: "files"; kind: "files" }
   | {
       id: `file:${string}`;
@@ -107,6 +109,8 @@ const singletonSurface = (
       return { id: "diff", kind, threadId: null };
     case "files":
       return { id: "files", kind };
+    case "history":
+      return { id: "history", kind };
     case "agents":
       return { id: "agents", kind, threadId: null };
   }
@@ -270,6 +274,9 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                               : null,
                         },
                       ];
+                    }
+                    if (surface.kind === "history") {
+                      return surface.id === "history" ? [{ id: "history", kind: "history" }] : [];
                     }
                     if (surface.kind !== "terminal") return [surface];
                     if (

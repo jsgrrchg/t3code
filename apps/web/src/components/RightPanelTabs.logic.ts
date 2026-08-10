@@ -4,6 +4,73 @@ export type RightPanelTabKeyAction =
   | { readonly kind: "rename" }
   | null;
 
+export const RIGHT_PANEL_EMPTY_SURFACE_ORDER = [
+  "browser",
+  "terminal",
+  "files",
+  "diff",
+  "agents",
+  "history",
+] as const;
+
+export const RIGHT_PANEL_ADD_MENU_SURFACE_ORDER = [
+  "browser",
+  "terminal",
+  "files",
+  "diff",
+  "history",
+  "agents",
+] as const;
+
+export type StandardRightPanelSurfaceKind = (typeof RIGHT_PANEL_EMPTY_SURFACE_ORDER)[number];
+
+export const GIT_HISTORY_DISABLED_REASONS = {
+  project: "History is only available when a project is open.",
+  capability: "The connected server needs to support Git history.",
+  checking: "Checking whether this project is a Git repository.",
+  repository: "History is only available for Git repositories.",
+} as const;
+
+export interface GitHistoryAvailability {
+  readonly available: boolean;
+  readonly disabledReason: string;
+}
+
+export function resolveGitHistoryAvailability(input: {
+  readonly hasProject: boolean;
+  readonly cwd: string | null;
+  readonly isGitRepo: boolean | null;
+  readonly capability: boolean | undefined;
+}): GitHistoryAvailability {
+  if (!input.hasProject || input.cwd === null) {
+    return { available: false, disabledReason: GIT_HISTORY_DISABLED_REASONS.project };
+  }
+  if (input.capability !== true) {
+    return { available: false, disabledReason: GIT_HISTORY_DISABLED_REASONS.capability };
+  }
+  if (input.isGitRepo === false) {
+    return { available: false, disabledReason: GIT_HISTORY_DISABLED_REASONS.repository };
+  }
+  if (input.isGitRepo === null) {
+    return { available: false, disabledReason: GIT_HISTORY_DISABLED_REASONS.checking };
+  }
+  return { available: true, disabledReason: "" };
+}
+
+export function resolveGitHistoryPanelTarget<EnvironmentId extends string>(input: {
+  readonly activeSurfaceKind: string | null;
+  readonly availability: GitHistoryAvailability;
+  readonly environmentId: EnvironmentId | null;
+  readonly cwd: string | null;
+}): { readonly environmentId: EnvironmentId; readonly cwd: string } | null {
+  return input.activeSurfaceKind === "history" &&
+    input.availability.available &&
+    input.environmentId !== null &&
+    input.cwd !== null
+    ? { environmentId: input.environmentId, cwd: input.cwd }
+    : null;
+}
+
 interface ClosableRightPanelSurface<ThreadId extends string = string> {
   readonly kind: string;
   readonly threadId?: ThreadId | null;
