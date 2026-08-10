@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
   canDispatchDesktopQueuedFollowUp,
-  type DesktopQueuedFollowUp,
+  type DesktopQueuedMessageFollowUp,
   type DesktopQueuedProviderAction,
   queuedFollowUpsForThread,
   reloadDesktopFollowUpQueueForTest,
@@ -18,7 +18,7 @@ import {
   writeDesktopFollowUpQueueStorageForTest,
 } from "./desktopFollowUpQueueStore";
 
-function queuedFollowUp(index: number, threadId = "thread-1"): DesktopQueuedFollowUp {
+function queuedFollowUp(index: number, threadId = "thread-1"): DesktopQueuedMessageFollowUp {
   return {
     kind: "message",
     id: `queue-${index}`,
@@ -94,6 +94,59 @@ describe("desktop follow-up queue", () => {
     expect(useDesktopFollowUpQueueStore.getState().entries.map((entry) => entry.id)).toEqual([
       second.id,
     ]);
+  });
+
+  it("edits a queued message atomically and persists the updated text", () => {
+    const entry = queuedFollowUp(1);
+    const store = useDesktopFollowUpQueueStore.getState();
+    store.enqueue(entry);
+
+    expect(store.beginEdit(entry.id)).toBe(true);
+    expect(useDesktopFollowUpQueueStore.getState().editingEntryId).toBe(entry.id);
+    expect(useDesktopFollowUpQueueStore.getState().claim(entry.id)).toBe(false);
+    expect(
+      useDesktopFollowUpQueueStore.getState().updateMessageText(entry.id, "Edited follow-up"),
+    ).toBe(true);
+    expect(useDesktopFollowUpQueueStore.getState().editingEntryId).toBeNull();
+
+    useDesktopFollowUpQueueStore.setState({ entries: [] });
+    reloadDesktopFollowUpQueueForTest();
+    expect(useDesktopFollowUpQueueStore.getState().entries).toEqual([
+      expect.objectContaining({ id: entry.id, text: "Edited follow-up" }),
+    ]);
+  });
+
+  it("cancels edits without changing the queued message", () => {
+    const entry = queuedFollowUp(1);
+    const store = useDesktopFollowUpQueueStore.getState();
+    store.enqueue(entry);
+
+    expect(store.beginEdit(entry.id)).toBe(true);
+    useDesktopFollowUpQueueStore.getState().cancelEdit(entry.id);
+
+    expect(useDesktopFollowUpQueueStore.getState().editingEntryId).toBeNull();
+    expect(useDesktopFollowUpQueueStore.getState().entries[0]).toEqual(
+      expect.objectContaining({ text: entry.text }),
+    );
+    expect(useDesktopFollowUpQueueStore.getState().claim(entry.id)).toBe(true);
+  });
+
+  it("only edits message entries and keeps non-attachment messages non-empty", () => {
+    const message = queuedFollowUp(1);
+    const action = queuedProviderAction(1);
+    const store = useDesktopFollowUpQueueStore.getState();
+    store.enqueue(message);
+    store.enqueue(action);
+
+    expect(store.beginEdit(action.id)).toBe(false);
+    expect(store.beginEdit(message.id)).toBe(true);
+    expect(useDesktopFollowUpQueueStore.getState().updateMessageText(message.id, "   ")).toBe(
+      false,
+    );
+    expect(useDesktopFollowUpQueueStore.getState().editingEntryId).toBe(message.id);
+    expect(useDesktopFollowUpQueueStore.getState().entries[0]).toEqual(
+      expect.objectContaining({ text: message.text }),
+    );
   });
 
   it("reorders one thread without moving interleaved entries from another thread", () => {

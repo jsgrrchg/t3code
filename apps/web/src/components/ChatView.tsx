@@ -1557,6 +1557,7 @@ function ChatViewContent(props: ChatViewProps) {
   const desktopQueueDispatchingEntryId = useDesktopFollowUpQueueStore(
     (state) => state.dispatchingEntryId,
   );
+  const desktopQueueEditingEntryId = useDesktopFollowUpQueueStore((state) => state.editingEntryId);
   const activeQueuedFollowUps = useMemo(
     () =>
       isElectron && activeThread
@@ -5745,6 +5746,31 @@ function ChatViewContent(props: ChatViewProps) {
     useDesktopFollowUpQueueStore.getState().remove(entry.id);
   }, []);
 
+  const onBeginQueuedFollowUpEdit = useCallback((entry: DesktopQueuedMessageFollowUp) => {
+    return useDesktopFollowUpQueueStore.getState().beginEdit(entry.id);
+  }, []);
+
+  const onCancelQueuedFollowUpEdit = useCallback((entry: DesktopQueuedMessageFollowUp) => {
+    useDesktopFollowUpQueueStore.getState().cancelEdit(entry.id);
+  }, []);
+
+  const onSaveQueuedFollowUpEdit = useCallback(
+    (entry: DesktopQueuedMessageFollowUp, text: string) => {
+      const saved = useDesktopFollowUpQueueStore.getState().updateMessageText(entry.id, text);
+      if (!saved) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not update queued message",
+            description: "The original message is still in the queue. Try editing it again.",
+          }),
+        );
+      }
+      return saved;
+    },
+    [],
+  );
+
   const onReorderQueuedFollowUp = useCallback((entryId: string, overEntryId: string) => {
     useDesktopFollowUpQueueStore.getState().reorder(entryId, overEntryId);
   }, []);
@@ -6740,11 +6766,16 @@ function ChatViewContent(props: ChatViewProps) {
                     {activeQueuedFollowUps.length > 0 ? (
                       <div className="mx-auto mb-2 w-full max-w-(--chat-content-max-width)">
                         <DesktopFollowUpQueuePanel
+                          key={activeThreadKey}
                           entries={activeQueuedFollowUps}
                           paused={activeQueuePaused}
                           dispatchingEntryId={desktopQueueDispatchingEntryId}
+                          editingEntryId={desktopQueueEditingEntryId}
+                          onBeginEdit={onBeginQueuedFollowUpEdit}
+                          onCancelEdit={onCancelQueuedFollowUpEdit}
                           onRemove={onRemoveQueuedFollowUp}
                           onReorder={onReorderQueuedFollowUp}
+                          onSaveEdit={onSaveQueuedFollowUpEdit}
                           onSteer={(entry) => void onSteerQueuedFollowUp(entry)}
                         />
                       </div>

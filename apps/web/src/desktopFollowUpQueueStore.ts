@@ -109,9 +109,13 @@ function persistEntries(entries: ReadonlyArray<DesktopQueuedFollowUp>): boolean 
 interface DesktopFollowUpQueueState {
   readonly entries: ReadonlyArray<DesktopQueuedFollowUp>;
   readonly dispatchingEntryId: string | null;
+  readonly editingEntryId: string | null;
   enqueue: (entry: DesktopQueuedFollowUp) => boolean;
   remove: (entryId: string) => void;
   reorder: (entryId: string, overEntryId: string) => boolean;
+  beginEdit: (entryId: string) => boolean;
+  cancelEdit: (entryId: string) => void;
+  updateMessageText: (entryId: string, text: string) => boolean;
   claim: (entryId: string) => boolean;
   release: (entryId: string) => void;
 }
@@ -159,6 +163,7 @@ function reorderEntriesWithinThread(
 export const useDesktopFollowUpQueueStore = create<DesktopFollowUpQueueState>()((set, get) => ({
   entries: readEntries(),
   dispatchingEntryId: null,
+  editingEntryId: null,
   enqueue: (entry) => {
     if (get().entries.length >= MAX_QUEUED_FOLLOW_UPS) return false;
     const nextEntries = [...get().entries, entry];
@@ -172,10 +177,12 @@ export const useDesktopFollowUpQueueStore = create<DesktopFollowUpQueueState>()(
     set((state) => ({
       entries: nextEntries,
       dispatchingEntryId: state.dispatchingEntryId === entryId ? null : state.dispatchingEntryId,
+      editingEntryId: state.editingEntryId === entryId ? null : state.editingEntryId,
     }));
   },
   reorder: (entryId, overEntryId) => {
     const state = get();
+    if (state.editingEntryId !== null) return false;
     const dispatchingEntry =
       state.dispatchingEntryId === null
         ? undefined
@@ -190,8 +197,37 @@ export const useDesktopFollowUpQueueStore = create<DesktopFollowUpQueueState>()(
     set({ entries: nextEntries });
     return true;
   },
+  beginEdit: (entryId) => {
+    const state = get();
+    if (state.editingEntryId !== null || state.dispatchingEntryId === entryId) return false;
+    if (!state.entries.some((entry) => entry.id === entryId && entry.kind === "message")) {
+      return false;
+    }
+    set({ editingEntryId: entryId });
+    return true;
+  },
+  cancelEdit: (entryId) => {
+    set((state) => ({
+      editingEntryId: state.editingEntryId === entryId ? null : state.editingEntryId,
+    }));
+  },
+  updateMessageText: (entryId, text) => {
+    const state = get();
+    if (state.editingEntryId !== entryId || state.dispatchingEntryId === entryId) return false;
+
+    const entry = state.entries.find((candidate) => candidate.id === entryId);
+    if (!entry || entry.kind !== "message") return false;
+    if (!text.trim() && entry.attachments.length === 0) return false;
+
+    const nextEntries = state.entries.map((candidate) =>
+      candidate.id === entryId ? { ...entry, text } : candidate,
+    );
+    if (!persistEntries(nextEntries)) return false;
+    set({ entries: nextEntries, editingEntryId: null });
+    return true;
+  },
   claim: (entryId) => {
-    if (get().dispatchingEntryId !== null) return false;
+    if (get().dispatchingEntryId !== null || get().editingEntryId !== null) return false;
     if (!get().entries.some((entry) => entry.id === entryId)) return false;
     set({ dispatchingEntryId: entryId });
     return true;
@@ -240,9 +276,17 @@ export function canDispatchDesktopQueuedFollowUp(input: {
 export function writeDesktopFollowUpQueueStorageForTest(raw: string): void {
   if (raw) queueStorage.setItem(DESKTOP_FOLLOW_UP_QUEUE_STORAGE_KEY, raw);
   else queueStorage.removeItem(DESKTOP_FOLLOW_UP_QUEUE_STORAGE_KEY);
-  useDesktopFollowUpQueueStore.setState({ entries: readEntries(), dispatchingEntryId: null });
+  useDesktopFollowUpQueueStore.setState({
+    entries: readEntries(),
+    dispatchingEntryId: null,
+    editingEntryId: null,
+  });
 }
 
 export function reloadDesktopFollowUpQueueForTest(): void {
-  useDesktopFollowUpQueueStore.setState({ entries: readEntries(), dispatchingEntryId: null });
+  useDesktopFollowUpQueueStore.setState({
+    entries: readEntries(),
+    dispatchingEntryId: null,
+    editingEntryId: null,
+  });
 }

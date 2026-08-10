@@ -159,6 +159,7 @@ export function useDispatchDesktopQueuedFollowUp() {
 export function DesktopFollowUpQueueDrain() {
   const entries = useDesktopFollowUpQueueStore((state) => state.entries);
   const dispatchingEntryId = useDesktopFollowUpQueueStore((state) => state.dispatchingEntryId);
+  const editingEntryId = useDesktopFollowUpQueueStore((state) => state.editingEntryId);
   const threads = useThreadShells();
   const { environments } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -166,7 +167,7 @@ export function DesktopFollowUpQueueDrain() {
   const lastAttemptKeyRef = useRef<string | null>(null);
 
   const candidate = useMemo(() => {
-    if (!isElectron || dispatchingEntryId !== null) return null;
+    if (!isElectron || dispatchingEntryId !== null || editingEntryId !== null) return null;
     for (const entry of entries) {
       const environment = environments.find(
         (candidate) => candidate.environmentId === entry.environmentId,
@@ -190,7 +191,7 @@ export function DesktopFollowUpQueueDrain() {
       return { entry, thread };
     }
     return null;
-  }, [dispatchingEntryId, entries, environments, primaryEnvironmentId, threads]);
+  }, [dispatchingEntryId, editingEntryId, entries, environments, primaryEnvironmentId, threads]);
 
   useEffect(() => {
     if (!candidate) return;
