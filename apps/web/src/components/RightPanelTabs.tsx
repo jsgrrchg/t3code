@@ -1,6 +1,6 @@
 import type { ContextMenuItem, PreviewSessionSnapshot } from "@t3tools/contracts";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
-import { Bot, FileDiff, Files, Globe2, Plus, TerminalSquare, X } from "lucide-react";
+import { Bot, FileDiff, Files, Globe2, MessageSquare, Plus, TerminalSquare, X } from "lucide-react";
 import {
   type MouseEvent as ReactMouseEvent,
   type ReactElement,
@@ -45,9 +45,12 @@ interface RightPanelTabsProps {
   onAddDiff: () => void;
   onAddFiles: () => void;
   onAddAgents: () => void;
+  onAddChat: () => void;
   browserAvailable: boolean;
   diffAvailable: boolean;
   filesAvailable: boolean;
+  chatAvailable: boolean;
+  chatTitlesById: ReadonlyMap<string, string>;
   /** Running + waiting subagents; badges the Agents card in the empty state. */
   liveAgentCount: number;
   children: ReactNode;
@@ -95,12 +98,27 @@ function RightPanelEmptyState(props: {
   onAddDiff: () => void;
   onAddFiles: () => void;
   onAddAgents: () => void;
+  onAddChat: () => void;
   browserAvailable: boolean;
   diffAvailable: boolean;
   filesAvailable: boolean;
+  chatAvailable: boolean;
   liveAgentCount: number;
 }) {
   const actions = [
+    ...(props.chatAvailable
+      ? [
+          {
+            label: "Chat",
+            description: "Start a focused conversation in this workspace.",
+            icon: MessageSquare,
+            available: true,
+            disabledReason: null,
+            onClick: props.onAddChat,
+            badgeCount: 0,
+          },
+        ]
+      : []),
     {
       label: "Browser",
       description: "Open a local app or URL.",
@@ -203,7 +221,7 @@ function RightPanelEmptyState(props: {
             return (
               <DisabledReasonTooltip
                 key={action.label}
-                reason={action.disabledReason}
+                reason={action.disabledReason ?? "This surface is unavailable."}
                 trigger={disabledCard}
               />
             );
@@ -218,6 +236,7 @@ function surfaceTitle(
   surface: RightPanelSurface,
   sessions: Readonly<Record<string, PreviewSessionSnapshot>>,
   terminalLabelsById: ReadonlyMap<string, string>,
+  chatTitlesById: ReadonlyMap<string, string>,
 ): string {
   switch (surface.kind) {
     case "diff":
@@ -233,6 +252,8 @@ function surfaceTitle(
       );
     case "agents":
       return "Agents";
+    case "chat":
+      return chatTitlesById.get(surface.threadId) ?? "Chat";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
@@ -294,6 +315,8 @@ function SurfaceIcon({
       return <TerminalSquare className="size-3 shrink-0" />;
     case "agents":
       return <Bot className="size-3 shrink-0" />;
+    case "chat":
+      return <MessageSquare className="size-3 shrink-0" />;
   }
 }
 
@@ -404,7 +427,12 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             {props.surfaces.map((surface) => {
               const active = surface.id === props.activeSurfaceId;
               const pending = props.pendingSurfaceIds.has(surface.id);
-              const title = surfaceTitle(surface, props.previewSessions, props.terminalLabelsById);
+              const title = surfaceTitle(
+                surface,
+                props.previewSessions,
+                props.terminalLabelsById,
+                props.chatTitlesById,
+              );
               return (
                 <div
                   key={surface.id}
@@ -498,6 +526,12 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     <Bot />
                     Agents
                   </SurfaceMenuItem>
+                  {props.chatAvailable ? (
+                    <SurfaceMenuItem available onClick={props.onAddChat}>
+                      <MessageSquare />
+                      Chat
+                    </SurfaceMenuItem>
+                  ) : null}
                 </MenuPopup>
               </Menu>
             ) : null}
@@ -513,9 +547,11 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddDiff={props.onAddDiff}
             onAddFiles={props.onAddFiles}
             onAddAgents={props.onAddAgents}
+            onAddChat={props.onAddChat}
             browserAvailable={props.browserAvailable}
             diffAvailable={props.diffAvailable}
             filesAvailable={props.filesAvailable}
+            chatAvailable={props.chatAvailable}
             liveAgentCount={props.liveAgentCount}
           />
         ) : (

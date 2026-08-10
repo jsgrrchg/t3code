@@ -18,6 +18,32 @@ beforeEach(() => {
 });
 
 describe("rightPanelStore", () => {
+  it("opens a durable chat surface once and focuses it", () => {
+    const childId = ThreadId.make("thread-child");
+    useRightPanelStore.getState().openChat(refA, childId);
+    useRightPanelStore.getState().openChat(refA, childId);
+
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: "chat:thread-child",
+      surfaces: [{ id: "chat:thread-child", kind: "chat", threadId: childId }],
+    });
+  });
+
+  it("prunes deleted chats without reopening closed chat tabs", () => {
+    const firstId = ThreadId.make("thread-child-1");
+    const secondId = ThreadId.make("thread-child-2");
+    useRightPanelStore.getState().openChat(refA, firstId);
+    useRightPanelStore.getState().openChat(refA, secondId);
+    useRightPanelStore.getState().reconcileChatSurfaces(refA, [firstId]);
+
+    const state = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
+    expect(state.surfaces).toEqual([
+      { id: "chat:thread-child-1", kind: "chat", threadId: firstId },
+    ]);
+    expect(state.activeSurfaceId).toBe("chat:thread-child-1");
+  });
+
   it("drops the legacy singleton terminal surface during migration", () => {
     expect(
       migratePersistedRightPanelState({

@@ -353,6 +353,7 @@ const IMAGE_ONLY_BOOTSTRAP_PROMPT =
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
+const EMPTY_PANEL_CHAT_TITLES: ReadonlyMap<string, string> = new Map();
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
 function useDraftHeroLayoutTransition(isDraftHeroState: boolean) {
   const transitionGroupRef = useRef<HTMLDivElement | null>(null);
@@ -6642,9 +6643,12 @@ function ChatViewContent(props: ChatViewProps) {
           onAddDiff={addDiffSurface}
           onAddFiles={addFilesSurface}
           onAddAgents={addAgentsSurface}
+          onAddChat={() => undefined}
           browserAvailable={isPreviewSupportedInRuntime()}
           diffAvailable={isServerThread && isGitRepo}
           filesAvailable={activeProject !== null}
+          chatAvailable={false}
+          chatTitlesById={EMPTY_PANEL_CHAT_TITLES}
           liveAgentCount={agentPanelModel.liveCount}
         >
           {rightPanelContent}
@@ -6671,9 +6675,12 @@ function ChatViewContent(props: ChatViewProps) {
             onAddDiff={addDiffSurface}
             onAddFiles={addFilesSurface}
             onAddAgents={addAgentsSurface}
+            onAddChat={() => undefined}
             browserAvailable={isPreviewSupportedInRuntime()}
             diffAvailable={isServerThread && isGitRepo}
             filesAvailable={activeProject !== null}
+            chatAvailable={false}
+            chatTitlesById={EMPTY_PANEL_CHAT_TITLES}
             liveAgentCount={agentPanelModel.liveCount}
           >
             {rightPanelContent}

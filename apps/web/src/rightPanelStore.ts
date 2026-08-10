@@ -8,7 +8,7 @@
  * workspace paths, and diff/files remain singleton surfaces.
  */
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import type { ScopedThreadRef } from "@t3tools/contracts";
+import type { ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
@@ -21,6 +21,7 @@ export const RIGHT_PANEL_KINDS = [
   "preview",
   "terminal",
   "agents",
+  "chat",
 ] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
@@ -44,11 +45,12 @@ export type RightPanelSurface =
       revealLine: number | null;
       revealRequestId: number;
     }
-  | { id: "agents"; kind: "agents" };
+  | { id: "agents"; kind: "agents" }
+  | { id: `chat:${string}`; kind: "chat"; threadId: ThreadId };
 
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
-// v9 removed the "plan" surface kind (plans render inline in the transcript).
-const RIGHT_PANEL_STORAGE_VERSION = 9;
+// v10 adds durable thread-backed chat surfaces.
+const RIGHT_PANEL_STORAGE_VERSION = 10;
 
 export interface ThreadRightPanelState {
   isOpen: boolean;
@@ -58,10 +60,11 @@ export interface ThreadRightPanelState {
 
 interface RightPanelStoreState {
   byThreadKey: Record<string, ThreadRightPanelState>;
-  open: (ref: ScopedThreadRef, kind: Exclude<RightPanelKind, "file" | "terminal">) => void;
+  open: (ref: ScopedThreadRef, kind: Exclude<RightPanelKind, "file" | "terminal" | "chat">) => void;
   openBrowser: (ref: ScopedThreadRef, tabId: string | null) => void;
   openFile: (ref: ScopedThreadRef, relativePath: string, line?: number) => void;
   openTerminal: (ref: ScopedThreadRef, terminalId: string) => void;
+  openChat: (ref: ScopedThreadRef, threadId: ThreadId) => void;
   splitTerminal: (
     ref: ScopedThreadRef,
     surfaceId: string,
@@ -77,10 +80,14 @@ interface RightPanelStoreState {
   closeAllSurfaces: (ref: ScopedThreadRef) => void;
   reconcileBrowserSurfaces: (ref: ScopedThreadRef, tabIds: readonly string[]) => void;
   reconcileFileSurfaces: (ref: ScopedThreadRef, workspaceAvailable: boolean) => void;
+  reconcileChatSurfaces: (ref: ScopedThreadRef, threadIds: readonly ThreadId[]) => void;
   show: (ref: ScopedThreadRef) => void;
   close: (ref: ScopedThreadRef) => void;
   toggleVisibility: (ref: ScopedThreadRef) => void;
-  toggle: (ref: ScopedThreadRef, kind: Exclude<RightPanelKind, "file" | "terminal">) => void;
+  toggle: (
+    ref: ScopedThreadRef,
+    kind: Exclude<RightPanelKind, "file" | "terminal" | "chat">,
+  ) => void;
   removeThread: (ref: ScopedThreadRef) => void;
 }
 
@@ -101,6 +108,7 @@ const singletonSurface = (
     case "agents":
       return { id: "agents", kind };
   }
+  throw new Error(`Unsupported singleton right panel surface: ${kind}`);
 };
 
 const browserSurface = (tabId: string | null): RightPanelSurface =>
@@ -126,6 +134,12 @@ const terminalSurface = (terminalId: string): RightPanelSurface => ({
   resourceId: terminalId,
   terminalIds: [terminalId],
   activeTerminalId: terminalId,
+});
+
+const chatSurface = (threadId: ThreadId): RightPanelSurface => ({
+  id: `chat:${threadId}`,
+  kind: "chat",
+  threadId,
 });
 
 const upsertSurface = (
@@ -194,6 +208,16 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                           ? surface.revealRequestId
                           : 0;
                       return [{ ...surface, revealLine, revealRequestId }];
+                    }
+                    if (surface.kind === "chat") {
+                      if (
+                        !("threadId" in surface) ||
+                        typeof surface.threadId !== "string" ||
+                        surface.id !== `chat:${surface.threadId}`
+                      ) {
+                        return [];
+                      }
+                      return [surface];
                     }
                     if (surface.kind !== "terminal") return [surface];
                     if (
@@ -309,6 +333,12 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
         set((state) => ({
           byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) =>
             upsertSurface(current, terminalSurface(terminalId)),
+          ),
+        })),
+      openChat: (ref, threadId) =>
+        set((state) => ({
+          byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) =>
+            upsertSurface(current, chatSurface(threadId)),
           ),
         })),
       splitTerminal: (ref, surfaceId, terminalId, direction = "horizontal") =>
@@ -482,6 +512,27 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             if (workspaceAvailable) return current;
             const surfaces = current.surfaces.filter(
               (surface) => surface.kind !== "files" && surface.kind !== "file",
+            );
+            if (surfaces.length === current.surfaces.length) return current;
+            const activeStillExists = surfaces.some(
+              (surface) => surface.id === current.activeSurfaceId,
+            );
+            return {
+              ...current,
+              isOpen: surfaces.length > 0 ? current.isOpen : false,
+              surfaces,
+              activeSurfaceId: activeStillExists
+                ? current.activeSurfaceId
+                : (surfaces.at(-1)?.id ?? null),
+            };
+          }),
+        })),
+      reconcileChatSurfaces: (ref, threadIds) =>
+        set((state) => ({
+          byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) => {
+            const validIds = new Set(threadIds);
+            const surfaces = current.surfaces.filter(
+              (surface) => surface.kind !== "chat" || validIds.has(surface.threadId),
             );
             if (surfaces.length === current.surfaces.length) return current;
             const activeStillExists = surfaces.some(
