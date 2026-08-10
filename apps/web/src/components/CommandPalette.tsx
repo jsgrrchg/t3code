@@ -109,6 +109,7 @@ import {
   type CommandPaletteSubmenuItem,
   type CommandPaletteView,
   filterCommandPaletteGroups,
+  filterNavigableThreadsForProjectKeys,
   getCommandPaletteInputPlaceholder,
   getCommandPaletteMode,
   ITEM_ICON_CLASS,
@@ -913,11 +914,7 @@ function OpenCommandPaletteDialog(props: {
         : null;
       const latestThread = groupedProjectKeys
         ? (sortThreads(
-            threads.filter(
-              (thread) =>
-                thread.archivedAt === null &&
-                groupedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`),
-            ),
+            filterNavigableThreadsForProjectKeys(threads, groupedProjectKeys),
             clientSettings.sidebarThreadSortOrder,
           )[0] ?? null)
         : getLatestThreadForProject(

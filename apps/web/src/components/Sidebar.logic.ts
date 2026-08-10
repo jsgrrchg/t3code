@@ -1,5 +1,5 @@
 import * as React from "react";
-import type { ContextMenuItem } from "@t3tools/contracts";
+import { isTopLevelThread, type ContextMenuItem } from "@t3tools/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import {
   getThreadSortTimestamp,
@@ -794,7 +794,8 @@ export function getVisibleThreadsForProject<T extends Pick<Thread, "id">>(input:
 }
 
 export function getFallbackThreadIdAfterDelete<
-  T extends Pick<Thread, "id" | "projectId" | "createdAt" | "updatedAt"> & ThreadSortInput,
+  T extends Pick<Thread, "id" | "projectId" | "createdAt" | "updatedAt"> &
+    ThreadSortInput & { readonly parentThreadId?: unknown },
 >(input: {
   threads: readonly T[];
   deletedThreadId: T["id"];
@@ -812,6 +813,7 @@ export function getFallbackThreadIdAfterDelete<
       threads.filter(
         (thread) =>
           thread.projectId === deletedThread.projectId &&
+          isTopLevelThread(thread) &&
           thread.id !== deletedThreadId &&
           !deletedThreadIds?.has(thread.id),
       ),

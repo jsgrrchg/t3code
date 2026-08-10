@@ -6,6 +6,7 @@ import {
   buildThreadActionItems,
   enumerateCommandPaletteItems,
   filterCommandPaletteGroups,
+  filterNavigableThreadsForProjectKeys,
   reduceCommandPaletteUiState,
   type CommandPaletteGroup,
 } from "./CommandPalette.logic";
@@ -139,6 +140,22 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
 }
 
 describe("buildThreadActionItems", () => {
+  it("keeps child threads out of grouped project navigation", () => {
+    const parent = makeThread({ id: ThreadId.make("thread-parent") });
+    const child = makeThread({
+      id: ThreadId.make("thread-child"),
+      parentThreadId: parent.id,
+      updatedAt: "2026-03-02T00:00:00.000Z",
+    });
+
+    expect(
+      filterNavigableThreadsForProjectKeys(
+        [child, parent],
+        new Set([`${LOCAL_ENVIRONMENT_ID}:${PROJECT_ID}`]),
+      ),
+    ).toEqual([parent]);
+  });
+
   it("orders threads by most recent activity and formats timestamps from updatedAt", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-25T12:00:00.000Z"));

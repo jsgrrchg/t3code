@@ -903,6 +903,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         WHERE project_id = ${projectId}
           AND deleted_at IS NULL
           AND archived_at IS NULL
+          AND parent_thread_id IS NULL
         ORDER BY created_at ASC, thread_id ASC
         LIMIT 1
       `,

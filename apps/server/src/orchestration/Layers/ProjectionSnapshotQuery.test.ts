@@ -749,6 +749,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         INSERT INTO projection_threads (
           thread_id,
           project_id,
+          parent_thread_id,
           title,
           model_selection_json,
           runtime_mode,
@@ -765,6 +766,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           (
             'thread-first',
             'project-active',
+            'thread-second',
             'First Thread',
             '{"provider":"codex","model":"gpt-5-codex"}',
             'full-access',
@@ -780,6 +782,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           (
             'thread-second',
             'project-active',
+            NULL,
             'Second Thread',
             '{"provider":"codex","model":"gpt-5-codex"}',
             'full-access',
@@ -795,6 +798,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           (
             'thread-deleted',
             'project-active',
+            NULL,
             'Deleted Thread',
             '{"provider":"codex","model":"gpt-5-codex"}',
             'full-access',
@@ -829,7 +833,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         );
         assert.equal(firstThreadId._tag, "Some");
         if (firstThreadId._tag === "Some") {
-          assert.equal(firstThreadId.value, ThreadId.make("thread-first"));
+          assert.equal(firstThreadId.value, ThreadId.make("thread-second"));
         }
       }),
   );

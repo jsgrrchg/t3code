@@ -230,6 +230,22 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
   });
 }
 
+export function filterNavigableThreadsForProjectKeys<
+  TThread extends {
+    readonly archivedAt: string | null;
+    readonly environmentId: string;
+    readonly parentThreadId?: unknown;
+    readonly projectId: string;
+  },
+>(threads: ReadonlyArray<TThread>, projectKeys: ReadonlySet<string>): TThread[] {
+  return threads.filter(
+    (thread) =>
+      thread.archivedAt === null &&
+      isTopLevelThread(thread) &&
+      projectKeys.has(`${thread.environmentId}:${thread.projectId}`),
+  );
+}
+
 function rankSearchFieldMatch(field: string, normalizedQuery: string): number {
   const normalizedField = normalizeSearchText(field);
   if (normalizedField.length === 0 || !normalizedField.includes(normalizedQuery)) {

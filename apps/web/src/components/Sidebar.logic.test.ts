@@ -1365,6 +1365,36 @@ describe("getFallbackThreadIdAfterDelete", () => {
     expect(fallbackThreadId).toBe(ThreadId.make("thread-newest"));
   });
 
+  it("never falls back to a right-panel child thread", () => {
+    const fallbackThreadId = getFallbackThreadIdAfterDelete({
+      threads: [
+        makeThread({
+          id: ThreadId.make("thread-parent"),
+          projectId: ProjectId.make("project-1"),
+          createdAt: "2026-03-09T10:05:00.000Z",
+          messages: [],
+        }),
+        makeThread({
+          id: ThreadId.make("thread-child"),
+          projectId: ProjectId.make("project-1"),
+          parentThreadId: ThreadId.make("thread-parent"),
+          createdAt: "2026-03-09T10:10:00.000Z",
+          messages: [],
+        }),
+        makeThread({
+          id: ThreadId.make("thread-fallback"),
+          projectId: ProjectId.make("project-1"),
+          createdAt: "2026-03-09T10:07:00.000Z",
+          messages: [],
+        }),
+      ],
+      deletedThreadId: ThreadId.make("thread-parent"),
+      sortOrder: "created_at",
+    });
+
+    expect(fallbackThreadId).toBe(ThreadId.make("thread-fallback"));
+  });
+
   it("skips other threads being deleted in the same action", () => {
     const fallbackThreadId = getFallbackThreadIdAfterDelete({
       threads: [
