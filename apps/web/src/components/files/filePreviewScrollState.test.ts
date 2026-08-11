@@ -74,6 +74,23 @@ describe("file preview scroll state", () => {
     expect(memory.size).toBe(2);
   });
 
+  it("moves an entry to a new key and removes stale destination state", () => {
+    const memory = createFilePreviewScrollMemory();
+    const source = key("source", { relativePath: "src/index.ts" });
+    const destination = key("source", { relativePath: "components/index.ts" });
+    memory.set(source, { position: { top: 120, left: 8 }, revealRequestId: 3 });
+    memory.set(destination, { position: { top: 999, left: 0 }, revealRequestId: null });
+
+    memory.move(source, destination);
+
+    expect(memory.get(source)).toBeNull();
+    expect(memory.get(destination)).toEqual({
+      position: { top: 120, left: 8 },
+      revealRequestId: 3,
+    });
+    expect(memory.size).toBe(1);
+  });
+
   it("lets a new line reveal win and restores an already consumed reveal", () => {
     const remembered = {
       position: { top: 420, left: 32 },

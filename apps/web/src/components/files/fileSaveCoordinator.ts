@@ -13,6 +13,7 @@ export class FileSaveCoordinator<A = unknown, E = unknown> {
   private latestRevision = 0;
   private lastChangeAt = 0;
   private saving = false;
+  private flushing = false;
   private disposed = false;
   private readonly idleWaiters: Array<() => void> = [];
 
@@ -34,10 +35,18 @@ export class FileSaveCoordinator<A = unknown, E = unknown> {
 
   /** Persist the latest edit and wait until any in-flight save has settled. */
   flush(): Promise<void> {
+    this.flushing = true;
     this.clearTimer();
     if (this.latestRevision > 0 && !this.saving) void this.persistLatest();
-    if (!this.saving) return Promise.resolve();
+    if (!this.saving) {
+      this.flushing = false;
+      return Promise.resolve();
+    }
     return new Promise((resolve) => this.idleWaiters.push(resolve));
+  }
+
+  hasPendingChanges(): boolean {
+    return this.latestRevision > 0 || this.saving;
   }
 
   /** Prevent cleanup from writing a file again after it has been deleted. */
@@ -76,11 +85,16 @@ export class FileSaveCoordinator<A = unknown, E = unknown> {
 
     this.saving = false;
     if (this.latestRevision === 0) {
+      this.flushing = false;
       this.resolveIdleWaiters();
       return;
     }
     if (revision === this.latestRevision) {
-      if (succeeded) this.options.onPendingChange(false);
+      if (succeeded) {
+        this.latestRevision = 0;
+        this.options.onPendingChange(false);
+      }
+      this.flushing = false;
       this.resolveIdleWaiters();
       return;
     }
@@ -89,7 +103,7 @@ export class FileSaveCoordinator<A = unknown, E = unknown> {
       0,
       this.options.debounceMs - (Date.now() - this.lastChangeAt),
     );
-    if (this.disposed) {
+    if (this.disposed || this.flushing) {
       void this.persistLatest();
     } else {
       this.schedule(remainingDebounce);

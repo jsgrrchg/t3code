@@ -195,6 +195,18 @@ export function clearProjectFileQueryData(
   appAtomRegistry.set(optimisticFileAtom(environmentId, cwd, relativePath), null);
 }
 
+export function reconcileMovedProjectFileQueryData(
+  environmentId: EnvironmentId,
+  cwd: string,
+  sourceRelativePath: string,
+  destinationRelativePath: string,
+): void {
+  clearProjectFileQueryData(environmentId, cwd, sourceRelativePath);
+  clearProjectFileQueryData(environmentId, cwd, destinationRelativePath);
+  appAtomRegistry.refresh(getProjectFileQueryAtom(environmentId, cwd, sourceRelativePath));
+  appAtomRegistry.refresh(getProjectFileQueryAtom(environmentId, cwd, destinationRelativePath));
+}
+
 function errorMessage<A>(result: AsyncResult.AsyncResult<A, unknown>): string | null {
   if (result._tag !== "Failure") return null;
   const cause = Cause.squash(result.cause);

@@ -20,6 +20,42 @@ beforeEach(() => {
 });
 
 describe("rightPanelStore", () => {
+  it("remaps a file surface in place while preserving focus and reveal state", () => {
+    useRightPanelStore.getState().open(refA, "history");
+    useRightPanelStore.getState().openFile(refA, "src/index.ts", 42);
+    const before = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
+    const source = before.surfaces.find((surface) => surface.id === "file:src/index.ts");
+
+    useRightPanelStore.getState().remapFileSurface(refA, "src/index.ts", "components/index.ts");
+
+    const after = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
+    expect(after.activeSurfaceId).toBe("file:components/index.ts");
+    expect(after.surfaces.map((surface) => surface.id)).toEqual([
+      "history",
+      "file:components/index.ts",
+    ]);
+    expect(after.surfaces[1]).toEqual({
+      ...source,
+      id: "file:components/index.ts",
+      relativePath: "components/index.ts",
+    });
+  });
+
+  it("deduplicates a stale destination file surface without touching another thread", () => {
+    useRightPanelStore.getState().openFile(refA, "src/index.ts");
+    useRightPanelStore.getState().openFile(refA, "components/index.ts");
+    useRightPanelStore.getState().openFile(refB, "src/index.ts");
+
+    useRightPanelStore.getState().remapFileSurface(refA, "src/index.ts", "components/index.ts");
+
+    const stateA = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
+    expect(stateA.surfaces.filter((surface) => surface.kind === "file")).toHaveLength(1);
+    expect(stateA.activeSurfaceId).toBe("file:components/index.ts");
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refB).surfaces,
+    ).toEqual([expect.objectContaining({ id: "file:src/index.ts", relativePath: "src/index.ts" })]);
+  });
+
   it("keeps one commit diff tab per SHA and focuses the latest opened commit", () => {
     const first = GitObjectId.make("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     const second = GitObjectId.make("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");

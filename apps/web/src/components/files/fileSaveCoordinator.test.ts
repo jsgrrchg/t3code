@@ -31,7 +31,9 @@ describe("FileSaveCoordinator", () => {
     });
 
     coordinator.change("latest contents");
+    expect(coordinator.hasPendingChanges()).toBe(true);
     await coordinator.flush();
+    expect(coordinator.hasPendingChanges()).toBe(false);
     coordinator.discard();
     coordinator.dispose();
     await Promise.resolve();
@@ -111,5 +113,31 @@ describe("FileSaveCoordinator", () => {
     await Promise.resolve();
     expect(onPendingChange).toHaveBeenCalledWith(true);
     expect(onPendingChange).not.toHaveBeenCalledWith(false);
+    expect(coordinator.hasPendingChanges()).toBe(true);
+  });
+
+  it("flush waits for an edit made during the active save", async () => {
+    const firstWrite = deferred();
+    const persist = vi
+      .fn<(contents: string) => Promise<AtomCommandResult<void, never>>>()
+      .mockReturnValueOnce(firstWrite.promise)
+      .mockResolvedValueOnce(AsyncResult.success(undefined));
+    const coordinator = new FileSaveCoordinator({
+      debounceMs: 10_000,
+      persist,
+      onPendingChange: vi.fn(),
+      onConfirmed: vi.fn(),
+    });
+
+    coordinator.change("first");
+    const firstFlush = coordinator.flush();
+    coordinator.change("latest");
+    firstWrite.resolve(AsyncResult.success(undefined));
+    await firstFlush;
+    expect(coordinator.hasPendingChanges()).toBe(true);
+
+    await coordinator.flush();
+    expect(persist).toHaveBeenLastCalledWith("latest");
+    expect(coordinator.hasPendingChanges()).toBe(false);
   });
 });

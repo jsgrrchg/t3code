@@ -70,6 +70,16 @@ export function createFilePreviewScrollMemory(
       const oldestKey = entries.keys().next().value;
       if (oldestKey !== undefined) entries.delete(oldestKey);
     },
+    delete(key: string): void {
+      entries.delete(key);
+    },
+    move(sourceKey: string, destinationKey: string): void {
+      if (sourceKey === destinationKey) return;
+      const entry = entries.get(sourceKey);
+      entries.delete(sourceKey);
+      entries.delete(destinationKey);
+      if (entry) this.set(destinationKey, entry);
+    },
     get size(): number {
       return entries.size;
     },
@@ -84,6 +94,20 @@ export function getRememberedFilePreviewScroll(key: string): FilePreviewScrollEn
 
 export function rememberFilePreviewScroll(key: string, entry: FilePreviewScrollEntry): void {
   filePreviewScrollMemory.set(key, entry);
+}
+
+export function remapRememberedFilePreviewScroll(
+  threadRef: ScopedThreadRef,
+  cwd: string,
+  sourceRelativePath: string,
+  destinationRelativePath: string,
+): void {
+  for (const mode of ["source", "markdown", "image"] as const) {
+    filePreviewScrollMemory.move(
+      filePreviewScrollKey({ threadRef, cwd, relativePath: sourceRelativePath, mode }),
+      filePreviewScrollKey({ threadRef, cwd, relativePath: destinationRelativePath, mode }),
+    );
+  }
 }
 
 export function shouldRestoreFilePreviewScroll(

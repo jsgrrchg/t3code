@@ -118,6 +118,11 @@ interface RightPanelStoreState {
   closeAllSurfaces: (ref: ScopedThreadRef) => void;
   reconcileBrowserSurfaces: (ref: ScopedThreadRef, tabIds: readonly string[]) => void;
   reconcileFileSurfaces: (ref: ScopedThreadRef, workspaceAvailable: boolean) => void;
+  remapFileSurface: (
+    ref: ScopedThreadRef,
+    sourceRelativePath: string,
+    destinationRelativePath: string,
+  ) => void;
   reconcileChatSurfaces: (ref: ScopedThreadRef, threadIds: readonly ThreadId[]) => void;
   show: (ref: ScopedThreadRef) => void;
   close: (ref: ScopedThreadRef) => void;
@@ -714,6 +719,36 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               activeSurfaceId: activeStillExists
                 ? current.activeSurfaceId
                 : (surfaces.at(-1)?.id ?? null),
+            };
+          }),
+        })),
+      remapFileSurface: (ref, sourceRelativePath, destinationRelativePath) =>
+        set((state) => ({
+          byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) => {
+            if (sourceRelativePath === destinationRelativePath) return current;
+            const sourceId = `file:${sourceRelativePath}`;
+            const destinationId = `file:${destinationRelativePath}`;
+            const source = current.surfaces.find(
+              (surface) => surface.id === sourceId && surface.kind === "file",
+            );
+            if (!source || source.kind !== "file") return current;
+            const remapped = {
+              ...source,
+              id: destinationId as `file:${string}`,
+              relativePath: destinationRelativePath,
+            };
+            const surfaces = current.surfaces.flatMap<RightPanelSurface>((surface) => {
+              if (surface.id === sourceId) return [remapped];
+              if (surface.id === destinationId) return [];
+              return [surface];
+            });
+            return {
+              ...current,
+              surfaces,
+              activeSurfaceId:
+                current.activeSurfaceId === sourceId || current.activeSurfaceId === destinationId
+                  ? destinationId
+                  : current.activeSurfaceId,
             };
           }),
         })),

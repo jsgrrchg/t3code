@@ -9,6 +9,7 @@ import {
   getProjectEntriesQueryAtom,
   getOptimisticProjectFileQueryData,
   isDirectProjectChildPath,
+  reconcileMovedProjectFileQueryData,
   resolveProjectFileQueryData,
   setProjectFileQueryData,
 } from "./projectFilesQueryState";
@@ -18,7 +19,19 @@ const environmentId = EnvironmentId.make("environment-project-files-query-test")
 describe("project files queries", () => {
   afterEach(() => {
     clearProjectFileQueryData(environmentId, "/repo", "convex.json");
+    clearProjectFileQueryData(environmentId, "/repo", "src/convex.json");
     vi.unstubAllGlobals();
+  });
+
+  it("clears optimistic data for both sides of a confirmed move", () => {
+    vi.stubGlobal("window", {});
+    setProjectFileQueryData(environmentId, "/repo", "convex.json", "source");
+    setProjectFileQueryData(environmentId, "/repo", "src/convex.json", "stale destination");
+
+    reconcileMovedProjectFileQueryData(environmentId, "/repo", "convex.json", "src/convex.json");
+
+    expect(getOptimisticProjectFileQueryData(environmentId, "/repo", "convex.json")).toBeNull();
+    expect(getOptimisticProjectFileQueryData(environmentId, "/repo", "src/convex.json")).toBeNull();
   });
 
   it("keeps the latest optimistic draft when an older write finishes", () => {
