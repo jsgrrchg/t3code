@@ -171,7 +171,7 @@ describe("GitHistoryCommitRow", () => {
     expect(markup.match(/truncate/g)?.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("shows compact branch and tag refs without growing or wrapping the row", () => {
+  it("shows compact refs with app tooltips without growing or wrapping the row", () => {
     const item = commit(HEAD_SHA, "Keep history dense", "Ada Lovelace", [
       { kind: "remote", label: "upstream/feature/very-long-remote-name" },
       { kind: "tag", label: "v1.2.3" },
@@ -199,6 +199,8 @@ describe("GitHistoryCommitRow", () => {
     expect(markup).toContain(">+2</span>");
     expect(markup).toContain("Remote branch: origin/feature/history");
     expect(markup).toContain("Remote branch: upstream/feature/very-long-remote-name");
+    expect(markup.match(/data-slot="tooltip-trigger"/g)).toHaveLength(3);
+    expect(markup.match(/title=""/g)).toHaveLength(3);
     expect(markup).toContain("h-[34px]");
     expect(markup).toContain("h-4");
     expect(markup.match(/<button/g)).toHaveLength(2);

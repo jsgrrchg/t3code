@@ -20,6 +20,7 @@ import { CloudIcon, FileDiffIcon, GitBranchIcon, RefreshCwIcon, TagIcon } from "
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import { Button } from "~/components/ui/button";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { cn } from "~/lib/utils";
 import { gitEnvironment } from "~/state/git";
@@ -191,14 +192,53 @@ function GitHistoryRefIcon({ kind }: { readonly kind: GitHistoryRef["kind"] }) {
 /** Renders one labeled ref while preserving its full description in the tooltip. */
 function GitHistoryRefPill({ reference }: { readonly reference: GitHistoryRef }) {
   return (
-    <span
-      className="inline-flex h-4 min-w-0 max-w-28 shrink items-center gap-0.5 rounded-sm border border-border/55 bg-muted/40 px-1 text-[10px] leading-none text-muted-foreground"
-      data-history-ref-kind={reference.kind}
-      title={historyRefDescription(reference)}
-    >
-      <GitHistoryRefIcon kind={reference.kind} />
-      <span className="min-w-0 truncate">{reference.label}</span>
-    </span>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            className="inline-flex h-4 min-w-0 max-w-28 shrink items-center gap-0.5 rounded-sm border border-border/55 bg-muted/40 px-1 text-[10px] leading-none text-muted-foreground"
+            data-history-ref-kind={reference.kind}
+            title=""
+          />
+        }
+      >
+        <GitHistoryRefIcon kind={reference.kind} />
+        <span className="min-w-0 truncate">{reference.label}</span>
+      </TooltipTrigger>
+      <TooltipPopup side="top" className="max-w-80 whitespace-normal leading-tight wrap-anywhere">
+        {historyRefDescription(reference)}
+      </TooltipPopup>
+    </Tooltip>
+  );
+}
+
+function GitHistoryRefOverflowPill({ refs }: { readonly refs: ReadonlyArray<GitHistoryRef> }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            className="inline-flex h-4 shrink-0 items-center rounded-sm border border-border/45 px-1 text-[10px] leading-none text-muted-foreground/70"
+            data-history-ref-overflow="true"
+            title=""
+          />
+        }
+      >
+        +{refs.length}
+      </TooltipTrigger>
+      <TooltipPopup
+        side="top"
+        className="max-w-80 whitespace-normal text-left leading-tight wrap-anywhere"
+      >
+        <span className="flex flex-col gap-0.5">
+          {refs.map((reference) => (
+            <span key={`${reference.kind}:${reference.label}`}>
+              {historyRefDescription(reference)}
+            </span>
+          ))}
+        </span>
+      </TooltipPopup>
+    </Tooltip>
   );
 }
 
@@ -222,15 +262,7 @@ function GitHistoryCommitRefs({ refs }: { readonly refs: ReadonlyArray<GitHistor
       {visibleRefs.map((reference) => (
         <GitHistoryRefPill key={`${reference.kind}:${reference.label}`} reference={reference} />
       ))}
-      {hiddenRefs.length > 0 ? (
-        <span
-          className="inline-flex h-4 shrink-0 items-center rounded-sm border border-border/45 px-1 text-[10px] leading-none text-muted-foreground/70"
-          data-history-ref-overflow="true"
-          title={hiddenRefs.map(historyRefDescription).join("\n")}
-        >
-          +{hiddenRefs.length}
-        </span>
-      ) : null}
+      {hiddenRefs.length > 0 ? <GitHistoryRefOverflowPill refs={hiddenRefs} /> : null}
     </span>
   );
 }
