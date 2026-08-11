@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import type { ReviewCommentContext } from "~/reviewCommentContext";
-import { remapComposerFileTokens, remapFileReviewComments } from "./fileMoveReconciliation";
+import { remapComposerFileTokens, remapFileReviewComments } from "../../fileMoveReconciliation";
 
 describe("file move composer reconciliation", () => {
   it("remaps exact file tokens from right to left", () => {

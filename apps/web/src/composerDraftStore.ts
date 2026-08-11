@@ -32,6 +32,7 @@ import { DeepMutable } from "effect/Types";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import { useMemo } from "react";
 import { getLocalStorageItem } from "./hooks/useLocalStorage";
+import { remapComposerFileTokens, remapFileReviewComments } from "./fileMoveReconciliation";
 import { resolveAppModelSelection, resolveAppModelSelectionForInstance } from "./modelSelection";
 import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type ChatImageAttachment } from "./types";
 import {
@@ -427,6 +428,11 @@ interface ComposerDraftStoreState {
   clearDraftThread: (threadRef: ComposerThreadTarget) => void;
   setStickyModelSelection: (modelSelection: ModelSelection | null | undefined) => void;
   setPrompt: (threadRef: ComposerThreadTarget, prompt: string) => void;
+  remapFileReferences: (
+    targets: ReadonlyArray<ComposerThreadTarget>,
+    sourceRelativePath: string,
+    destinationRelativePath: string,
+  ) => void;
   setTerminalContexts: (threadRef: ComposerThreadTarget, contexts: TerminalContextDraft[]) => void;
   setModelSelection: (
     threadRef: ComposerThreadTarget,
@@ -2673,6 +2679,47 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               nextDraftsByThreadKey[threadKey] = nextDraft;
             }
             return { draftsByThreadKey: nextDraftsByThreadKey };
+          });
+        },
+        remapFileReferences: (targets, sourceRelativePath, destinationRelativePath) => {
+          if (sourceRelativePath === destinationRelativePath || targets.length === 0) return;
+          set((state) => {
+            const threadKeys = new Set(
+              targets.flatMap((target) => {
+                const threadKey = resolveComposerDraftKey(state, target);
+                return threadKey ? [threadKey] : [];
+              }),
+            );
+            let nextDraftsByThreadKey = state.draftsByThreadKey;
+            for (const threadKey of threadKeys) {
+              const existing = state.draftsByThreadKey[threadKey];
+              if (!existing) continue;
+              const prompt = remapComposerFileTokens(
+                existing.prompt,
+                sourceRelativePath,
+                destinationRelativePath,
+              );
+              const reviewComments = remapFileReviewComments(
+                existing.reviewComments,
+                sourceRelativePath,
+                destinationRelativePath,
+              );
+              const commentsChanged = reviewComments.some(
+                (comment, index) => comment !== existing.reviewComments[index],
+              );
+              if (prompt === existing.prompt && !commentsChanged) continue;
+              if (nextDraftsByThreadKey === state.draftsByThreadKey) {
+                nextDraftsByThreadKey = { ...state.draftsByThreadKey };
+              }
+              nextDraftsByThreadKey[threadKey] = {
+                ...existing,
+                prompt,
+                reviewComments: commentsChanged ? [...reviewComments] : existing.reviewComments,
+              };
+            }
+            return nextDraftsByThreadKey === state.draftsByThreadKey
+              ? state
+              : { draftsByThreadKey: nextDraftsByThreadKey };
           });
         },
         setTerminalContexts: (threadRef, contexts) => {

@@ -14,6 +14,7 @@ import {
 
 const refA = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-A"));
 const refB = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-B"));
+const refC = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-C"));
 
 beforeEach(() => {
   useRightPanelStore.setState({ byThreadKey: {} });
@@ -26,7 +27,7 @@ describe("rightPanelStore", () => {
     const before = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
     const source = before.surfaces.find((surface) => surface.id === "file:src/index.ts");
 
-    useRightPanelStore.getState().remapFileSurface(refA, "src/index.ts", "components/index.ts");
+    useRightPanelStore.getState().remapFileSurfaces([refA], "src/index.ts", "components/index.ts");
 
     const after = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
     expect(after.activeSurfaceId).toBe("file:components/index.ts");
@@ -41,18 +42,29 @@ describe("rightPanelStore", () => {
     });
   });
 
-  it("deduplicates a stale destination file surface without touching another thread", () => {
+  it("remaps every supplied thread and leaves unrelated threads untouched", () => {
     useRightPanelStore.getState().openFile(refA, "src/index.ts");
     useRightPanelStore.getState().openFile(refA, "components/index.ts");
     useRightPanelStore.getState().openFile(refB, "src/index.ts");
+    useRightPanelStore.getState().openFile(refC, "src/index.ts");
 
-    useRightPanelStore.getState().remapFileSurface(refA, "src/index.ts", "components/index.ts");
+    useRightPanelStore
+      .getState()
+      .remapFileSurfaces([refA, refB], "src/index.ts", "components/index.ts");
 
     const stateA = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
     expect(stateA.surfaces.filter((surface) => surface.kind === "file")).toHaveLength(1);
     expect(stateA.activeSurfaceId).toBe("file:components/index.ts");
     expect(
       selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refB).surfaces,
+    ).toEqual([
+      expect.objectContaining({
+        id: "file:components/index.ts",
+        relativePath: "components/index.ts",
+      }),
+    ]);
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refC).surfaces,
     ).toEqual([expect.objectContaining({ id: "file:src/index.ts", relativePath: "src/index.ts" })]);
   });
 

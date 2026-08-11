@@ -1,7 +1,7 @@
 import { collectComposerInlineTokens } from "@t3tools/shared/composerInlineTokens";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 
-import type { ReviewCommentContext } from "~/reviewCommentContext";
+import type { ReviewCommentContext } from "./reviewCommentContext";
 
 export function remapComposerFileTokens(
   prompt: string,

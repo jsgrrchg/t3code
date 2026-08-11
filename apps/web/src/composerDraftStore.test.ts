@@ -697,6 +697,51 @@ describe("composerDraftStore project draft thread mapping", () => {
     resetComposerDraftStore();
   });
 
+  it("remaps file mentions and review comments for every supplied project draft", () => {
+    const store = useComposerDraftStore.getState();
+    const serverThreadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("thread-server"));
+    const comment = {
+      id: "comment-move",
+      sectionId: "file:src/index.ts",
+      sectionTitle: "File comment",
+      filePath: "src/index.ts",
+      startIndex: 0,
+      endIndex: 0,
+      rangeLabel: "L1",
+      text: "Keep this.",
+      diff: "@@ -1 +1 @@",
+    } as const;
+
+    store.setProjectDraftThreadId(projectRef, draftId, { threadId });
+    store.setProjectDraftThreadId(otherProjectRef, otherDraftId, { threadId: otherThreadId });
+    store.setPrompt(draftId, "Review @src/index.ts");
+    store.setReviewComments(draftId, [comment]);
+    store.setPrompt(serverThreadRef, "Also review @src/index.ts");
+    store.setReviewComments(serverThreadRef, [comment]);
+    store.setPrompt(otherDraftId, "Leave @src/index.ts alone");
+    store.setReviewComments(otherDraftId, [comment]);
+
+    store.remapFileReferences([draftId, serverThreadRef], "src/index.ts", "components/index.ts");
+
+    expect(useComposerDraftStore.getState().getComposerDraft(draftId)).toMatchObject({
+      prompt: "Review @components/index.ts",
+      reviewComments: [
+        expect.objectContaining({
+          sectionId: "file:components/index.ts",
+          filePath: "components/index.ts",
+        }),
+      ],
+    });
+    expect(useComposerDraftStore.getState().getComposerDraft(serverThreadRef)).toMatchObject({
+      prompt: "Also review @components/index.ts",
+      reviewComments: [expect.objectContaining({ filePath: "components/index.ts" })],
+    });
+    expect(useComposerDraftStore.getState().getComposerDraft(otherDraftId)).toMatchObject({
+      prompt: "Leave @src/index.ts alone",
+      reviewComments: [expect.objectContaining({ filePath: "src/index.ts" })],
+    });
+  });
+
   it("clears composer data for one environment without touching another", () => {
     const store = useComposerDraftStore.getState();
     const localThreadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, threadId);

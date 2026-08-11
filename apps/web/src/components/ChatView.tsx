@@ -144,7 +144,6 @@ import {
 import { addBrowserSurface } from "./preview/addBrowserSurface";
 import { closePreviewSession } from "./preview/closePreviewSession";
 import { pathFallsWithinEntry } from "./files/filePath";
-import { remapComposerFileTokens, remapFileReviewComments } from "./files/fileMoveReconciliation";
 import { ThreadPreviewMiniPlayer } from "./preview/ThreadPreviewMiniPlayer";
 import { subscribePreviewAction } from "./preview/previewActionBus";
 import { getConfiguredPreviewUrls } from "./preview/previewEmptyStateLogic";
@@ -3543,10 +3542,42 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const handleFileEntryMoved = useCallback(
     (sourceRelativePath: string, destinationRelativePath: string) => {
-      if (!activeThreadRef) return;
+      if (!activeThreadRef || !activeThread) return;
+      const projectThreadRefsByKey = new Map<string, ScopedThreadRef>();
+      for (const thread of allThreadShells) {
+        if (
+          thread.environmentId !== activeThread.environmentId ||
+          thread.projectId !== activeThread.projectId
+        ) {
+          continue;
+        }
+        const threadRef = scopeThreadRef(thread.environmentId, thread.id);
+        projectThreadRefsByKey.set(scopedThreadKey(threadRef), threadRef);
+      }
+      const projectDraftIds: DraftId[] = [];
+      for (const [draftKey, draftSession] of Object.entries(draftThreadsByThreadKey)) {
+        if (
+          draftSession.environmentId !== activeThread.environmentId ||
+          draftSession.projectId !== activeThread.projectId
+        ) {
+          continue;
+        }
+        const threadRef = scopeThreadRef(draftSession.environmentId, draftSession.threadId);
+        projectThreadRefsByKey.set(scopedThreadKey(threadRef), threadRef);
+        projectDraftIds.push(draftKey as DraftId);
+      }
+      projectThreadRefsByKey.set(scopedThreadKey(activeThreadRef), activeThreadRef);
+      const projectThreadRefs = [...projectThreadRefsByKey.values()];
       useRightPanelStore
         .getState()
-        .remapFileSurface(activeThreadRef, sourceRelativePath, destinationRelativePath);
+        .remapFileSurfaces(projectThreadRefs, sourceRelativePath, destinationRelativePath);
+      useComposerDraftStore
+        .getState()
+        .remapFileReferences(
+          [...projectThreadRefs, ...projectDraftIds],
+          sourceRelativePath,
+          destinationRelativePath,
+        );
 
       if (activeProjectKey) {
         setPendingFileSurfaceIdsByProject((currentByProject) => {
@@ -3562,33 +3593,8 @@ function ChatViewContent(props: ChatViewProps) {
           return nextByProject;
         });
       }
-
-      const draft = useComposerDraftStore.getState().getComposerDraft(composerDraftTarget);
-      if (!draft) return;
-      const prompt = remapComposerFileTokens(
-        draft.prompt,
-        sourceRelativePath,
-        destinationRelativePath,
-      );
-      if (prompt !== draft.prompt) {
-        setComposerDraftPrompt(composerDraftTarget, prompt);
-      }
-      const reviewComments = remapFileReviewComments(
-        draft.reviewComments,
-        sourceRelativePath,
-        destinationRelativePath,
-      );
-      if (reviewComments.some((comment, index) => comment !== draft.reviewComments[index])) {
-        setComposerDraftReviewComments(composerDraftTarget, reviewComments);
-      }
     },
-    [
-      activeProjectKey,
-      activeThreadRef,
-      composerDraftTarget,
-      setComposerDraftPrompt,
-      setComposerDraftReviewComments,
-    ],
+    [activeThread, activeProjectKey, activeThreadRef, allThreadShells, draftThreadsByThreadKey],
   );
 
   // The thread's own change request, placed against the project it belongs to. Without a

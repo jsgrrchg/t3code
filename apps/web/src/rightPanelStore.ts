@@ -118,8 +118,8 @@ interface RightPanelStoreState {
   closeAllSurfaces: (ref: ScopedThreadRef) => void;
   reconcileBrowserSurfaces: (ref: ScopedThreadRef, tabIds: readonly string[]) => void;
   reconcileFileSurfaces: (ref: ScopedThreadRef, workspaceAvailable: boolean) => void;
-  remapFileSurface: (
-    ref: ScopedThreadRef,
+  remapFileSurfaces: (
+    refs: ReadonlyArray<ScopedThreadRef>,
     sourceRelativePath: string,
     destinationRelativePath: string,
   ) => void;
@@ -272,6 +272,38 @@ const updateThread = (
   }
   if (next === current) return byThreadKey;
   return { ...byThreadKey, [threadKey]: next };
+};
+
+const remapThreadFileSurface = (
+  current: ThreadRightPanelState,
+  sourceRelativePath: string,
+  destinationRelativePath: string,
+): ThreadRightPanelState => {
+  if (sourceRelativePath === destinationRelativePath) return current;
+  const sourceId = `file:${sourceRelativePath}`;
+  const destinationId = `file:${destinationRelativePath}`;
+  const source = current.surfaces.find(
+    (surface) => surface.id === sourceId && surface.kind === "file",
+  );
+  if (!source || source.kind !== "file") return current;
+  const remapped = {
+    ...source,
+    id: destinationId as `file:${string}`,
+    relativePath: destinationRelativePath,
+  };
+  const surfaces = current.surfaces.flatMap<RightPanelSurface>((surface) => {
+    if (surface.id === sourceId) return [remapped];
+    if (surface.id === destinationId) return [];
+    return [surface];
+  });
+  return {
+    ...current,
+    surfaces,
+    activeSurfaceId:
+      current.activeSurfaceId === sourceId || current.activeSurfaceId === destinationId
+        ? destinationId
+        : current.activeSurfaceId,
+  };
 };
 
 function normalizeRevealLine(line: number | undefined): number | null {
@@ -722,36 +754,16 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             };
           }),
         })),
-      remapFileSurface: (ref, sourceRelativePath, destinationRelativePath) =>
-        set((state) => ({
-          byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) => {
-            if (sourceRelativePath === destinationRelativePath) return current;
-            const sourceId = `file:${sourceRelativePath}`;
-            const destinationId = `file:${destinationRelativePath}`;
-            const source = current.surfaces.find(
-              (surface) => surface.id === sourceId && surface.kind === "file",
+      remapFileSurfaces: (refs, sourceRelativePath, destinationRelativePath) =>
+        set((state) => {
+          let byThreadKey = state.byThreadKey;
+          for (const threadKey of new Set(refs.map(scopedThreadKey))) {
+            byThreadKey = updateThread(byThreadKey, threadKey, (current) =>
+              remapThreadFileSurface(current, sourceRelativePath, destinationRelativePath),
             );
-            if (!source || source.kind !== "file") return current;
-            const remapped = {
-              ...source,
-              id: destinationId as `file:${string}`,
-              relativePath: destinationRelativePath,
-            };
-            const surfaces = current.surfaces.flatMap<RightPanelSurface>((surface) => {
-              if (surface.id === sourceId) return [remapped];
-              if (surface.id === destinationId) return [];
-              return [surface];
-            });
-            return {
-              ...current,
-              surfaces,
-              activeSurfaceId:
-                current.activeSurfaceId === sourceId || current.activeSurfaceId === destinationId
-                  ? destinationId
-                  : current.activeSurfaceId,
-            };
-          }),
-        })),
+          }
+          return byThreadKey === state.byThreadKey ? state : { byThreadKey };
+        }),
       reconcileChatSurfaces: (ref, threadIds) =>
         set((state) => ({
           byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) => {
