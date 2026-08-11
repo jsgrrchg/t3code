@@ -1,4 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -14,9 +15,10 @@ const isServerEnvironmentIdPersistenceError = Schema.is(
 );
 
 it("advertises workspace moves only on supported server platforms", () => {
-  expect(ServerEnvironment.supportsWorkspaceEntryMove("darwin")).toBe(true);
-  expect(ServerEnvironment.supportsWorkspaceEntryMove("linux")).toBe(true);
-  expect(ServerEnvironment.supportsWorkspaceEntryMove("win32")).toBe(false);
+  expect(ServerEnvironment.supportsWorkspaceEntryMove("darwin", "arm64")).toBe(true);
+  expect(ServerEnvironment.supportsWorkspaceEntryMove("linux", "x64")).toBe(true);
+  expect(ServerEnvironment.supportsWorkspaceEntryMove("linux", "riscv64")).toBe(false);
+  expect(ServerEnvironment.supportsWorkspaceEntryMove("win32", "x64")).toBe(false);
 });
 
 const makeServerEnvironmentLayer = (baseDir: string) =>
@@ -59,6 +61,8 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
   it.effect("persists the environment id across service restarts", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
+      const hostPlatform = yield* HostProcessPlatform;
+      const hostArchitecture = yield* HostProcessArchitecture;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "t3-server-environment-test-",
       });
@@ -81,7 +85,7 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
       expect(second.capabilities.gitHistory).toBe(true);
       expect(second.capabilities.gitFetchAll).toBe(true);
       expect(second.capabilities.workspaceEntryMove).toBe(
-        ServerEnvironment.supportsWorkspaceEntryMove(process.platform),
+        ServerEnvironment.supportsWorkspaceEntryMove(hostPlatform, hostArchitecture),
       );
     }),
   );

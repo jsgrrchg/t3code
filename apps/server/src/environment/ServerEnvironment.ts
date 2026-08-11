@@ -62,8 +62,14 @@ function platformArch(
   }
 }
 
-export function supportsWorkspaceEntryMove(platform: NodeJS.Platform): boolean {
-  return platform === "darwin" || platform === "linux";
+export function supportsWorkspaceEntryMove(
+  platform: NodeJS.Platform,
+  architecture: NodeJS.Architecture,
+): boolean {
+  return (
+    (platform === "darwin" || platform === "linux") &&
+    (architecture === "arm64" || architecture === "x64")
+  );
 }
 
 export const make = Effect.gen(function* () {
@@ -157,7 +163,7 @@ export const make = Effect.gen(function* () {
       panelChats: true,
       gitHistory: true,
       gitFetchAll: true,
-      workspaceEntryMove: supportsWorkspaceEntryMove(hostPlatform),
+      workspaceEntryMove: supportsWorkspaceEntryMove(hostPlatform, hostArchitecture),
       ...(serverSelfUpdate === null ? {} : { serverSelfUpdate }),
       ...(serverSelfUpdate === "boot-service" ? { serverSelfUpdateProgress: true } : {}),
     },

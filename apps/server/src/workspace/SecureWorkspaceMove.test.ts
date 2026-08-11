@@ -94,6 +94,48 @@ describe("moveWorkspaceEntrySecurely", () => {
   );
 
   posixTest(
+    "resolves absolute parent symlinks against a symlinked workspace root",
+    async (runtime) => {
+      const container = await NodeFSP.mkdtemp(
+        NodePath.join(NodeOS.tmpdir(), "t3-secure-move-root-link-"),
+      );
+      const realWorkspaceRoot = NodePath.join(container, "real-workspace");
+      const workspaceRoot = NodePath.join(container, "workspace-link");
+      const sourceParent = NodePath.join(realWorkspaceRoot, "source");
+      const destinationParent = NodePath.join(realWorkspaceRoot, "destination");
+
+      await NodeFSP.mkdir(realWorkspaceRoot);
+      await NodeFSP.mkdir(sourceParent);
+      await NodeFSP.mkdir(destinationParent);
+      await NodeFSP.writeFile(NodePath.join(sourceParent, "file.txt"), "workspace\n");
+      await NodeFSP.symlink(realWorkspaceRoot, workspaceRoot);
+      await NodeFSP.symlink(sourceParent, NodePath.join(realWorkspaceRoot, "source-link"));
+      await NodeFSP.symlink(
+        destinationParent,
+        NodePath.join(realWorkspaceRoot, "destination-link"),
+      );
+
+      try {
+        await moveWorkspaceEntrySecurely({
+          ...runtime,
+          workspaceRoot,
+          sourceRelativePath: "source-link/file.txt",
+          destinationRelativePath: "destination-link/file.txt",
+        });
+
+        await expect(
+          NodeFSP.readFile(NodePath.join(destinationParent, "file.txt"), "utf8"),
+        ).resolves.toBe("workspace\n");
+        await expect(NodeFSP.lstat(NodePath.join(sourceParent, "file.txt"))).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+      } finally {
+        await NodeFSP.rm(container, { recursive: true, force: true });
+      }
+    },
+  );
+
+  posixTest(
     "rejects a parent symlink that resolves outside the opened workspace",
     async (runtime) => {
       const workspaceRoot = await NodeFSP.mkdtemp(

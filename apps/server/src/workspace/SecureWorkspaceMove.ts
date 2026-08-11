@@ -9,6 +9,8 @@ import { DataType, load, open } from "ffi-rs";
 const LIBRARY_NAME = "t3-secure-workspace-move";
 const MAX_SYMLINKS = 40;
 const READLINK_BUFFER_BYTES = 16 * 1024;
+const RENAME_NOREPLACE = 1;
+const RENAME_EXCL = 4;
 
 type SecureWorkspaceMoveFailure =
   | "destination-exists"
@@ -297,7 +299,27 @@ function openParentDirectory(input: {
       }
       const targetComponents = NodePath.isAbsolute(target)
         ? (() => {
-            const relativeTarget = NodePath.relative(NodePath.resolve(input.workspaceRoot), target);
+            let resolvedTarget: string;
+            try {
+              resolvedTarget = NodeFS.realpathSync(target);
+            } catch (cause) {
+              const code = (cause as NodeJS.ErrnoException).code;
+              if (code === "ENOENT") {
+                throw new SecureWorkspaceMoveError(
+                  parentFailure(input.parentKind, code),
+                  operationPath,
+                  `Workspace move parent is unavailable at '${operationPath}'.`,
+                  { code, cause },
+                );
+              }
+              throw new SecureWorkspaceMoveError(
+                "operation-failed",
+                operationPath,
+                `Could not resolve workspace symlink '${operationPath}'.`,
+                { ...(code === undefined ? {} : { code }), cause },
+              );
+            }
+            const relativeTarget = NodePath.relative(input.workspaceRoot, resolvedTarget);
             if (
               relativeTarget === ".." ||
               relativeTarget.startsWith(`..${NodePath.sep}`) ||
@@ -330,7 +352,7 @@ function openParentDirectory(input: {
   }
 }
 
-function linkAt(input: {
+function renameAtExclusive(input: {
   readonly runtime: NativeRuntime;
   readonly sourceDescriptor: number;
   readonly sourceName: string;
@@ -339,26 +361,16 @@ function linkAt(input: {
 }): NativeResult {
   return callNative({
     ...input.runtime,
-    funcName: "linkat",
+    funcName: input.runtime.platform === "darwin" ? "renameatx_np" : "renameat2",
     retType: DataType.I32,
-    paramsType: [DataType.I32, DataType.String, DataType.I32, DataType.String, DataType.I32],
+    paramsType: [DataType.I32, DataType.String, DataType.I32, DataType.String, DataType.U32],
     paramsValue: [
       input.sourceDescriptor,
       input.sourceName,
       input.destinationDescriptor,
       input.destinationName,
-      0,
+      input.runtime.platform === "darwin" ? RENAME_EXCL : RENAME_NOREPLACE,
     ],
-  });
-}
-
-function unlinkAt(runtime: NativeRuntime, directoryDescriptor: number, name: string): NativeResult {
-  return callNative({
-    ...runtime,
-    funcName: "unlinkat",
-    retType: DataType.I32,
-    paramsType: [DataType.I32, DataType.String, DataType.I32],
-    paramsValue: [directoryDescriptor, name, 0],
   });
 }
 
@@ -388,21 +400,22 @@ export async function moveWorkspaceEntrySecurely(input: {
   let sourceDescriptor: number | undefined;
   let destinationDescriptor: number | undefined;
   try {
+    const resolvedWorkspaceRoot = await NodeFSP.realpath(input.workspaceRoot);
     rootHandle = await NodeFSP.open(
-      input.workspaceRoot,
+      resolvedWorkspaceRoot,
       NodeFS.constants.O_RDONLY | NodeFS.constants.O_DIRECTORY,
     );
     sourceDescriptor = openParentDirectory({
       runtime,
       rootDescriptor: rootHandle.fd,
-      workspaceRoot: input.workspaceRoot,
+      workspaceRoot: resolvedWorkspaceRoot,
       relativePath: input.sourceRelativePath,
       parentKind: "source",
     });
     destinationDescriptor = openParentDirectory({
       runtime,
       rootDescriptor: rootHandle.fd,
-      workspaceRoot: input.workspaceRoot,
+      workspaceRoot: resolvedWorkspaceRoot,
       relativePath: input.destinationRelativePath,
       parentKind: "destination",
     });
@@ -410,7 +423,34 @@ export async function moveWorkspaceEntrySecurely(input: {
 
     const sourceName = NodePath.basename(input.sourceRelativePath);
     const destinationName = NodePath.basename(input.destinationRelativePath);
-    const result = linkAt({
+    const sourceDirectory = openDirectoryAt(runtime, sourceDescriptor, sourceName);
+    if (sourceDirectory.value >= 0) {
+      closeDescriptor(runtime, sourceDirectory.value);
+      throw new SecureWorkspaceMoveError(
+        "source-kind-mismatch",
+        NodePath.join(resolvedWorkspaceRoot, input.sourceRelativePath),
+        `Workspace move source is not a file at '${input.sourceRelativePath}'.`,
+        { code: "EISDIR" },
+      );
+    }
+    const sourceKindCode = errnoCode(sourceDirectory.errnoCode);
+    if (sourceKindCode === "ENOENT") {
+      throw new SecureWorkspaceMoveError(
+        "source-not-found",
+        NodePath.join(resolvedWorkspaceRoot, input.sourceRelativePath),
+        `Workspace move source is unavailable at '${input.sourceRelativePath}'.`,
+        { code: sourceKindCode },
+      );
+    }
+    if (sourceKindCode !== "ELOOP" && sourceKindCode !== "ENOTDIR") {
+      throw nativeError(
+        sourceDirectory,
+        NodePath.join(resolvedWorkspaceRoot, input.sourceRelativePath),
+        "openat",
+      );
+    }
+
+    const result = renameAtExclusive({
       runtime,
       sourceDescriptor,
       sourceName,
@@ -419,7 +459,7 @@ export async function moveWorkspaceEntrySecurely(input: {
     });
     if (result.value < 0) {
       const code = errnoCode(result.errnoCode);
-      const operationPath = NodePath.join(input.workspaceRoot, input.destinationRelativePath);
+      const operationPath = NodePath.join(resolvedWorkspaceRoot, input.destinationRelativePath);
       if (code === "EEXIST") {
         throw new SecureWorkspaceMoveError(
           "destination-exists",
@@ -431,41 +471,20 @@ export async function moveWorkspaceEntrySecurely(input: {
       if (code === "ENOENT") {
         throw new SecureWorkspaceMoveError(
           "source-not-found",
-          NodePath.join(input.workspaceRoot, input.sourceRelativePath),
+          NodePath.join(resolvedWorkspaceRoot, input.sourceRelativePath),
           `Workspace move source is unavailable at '${input.sourceRelativePath}'.`,
           { code },
         );
       }
-      if (code === "EISDIR" || code === "EPERM") {
+      if (code === "EISDIR") {
         throw new SecureWorkspaceMoveError(
           "source-kind-mismatch",
-          NodePath.join(input.workspaceRoot, input.sourceRelativePath),
+          NodePath.join(resolvedWorkspaceRoot, input.sourceRelativePath),
           `Workspace move source is not a file at '${input.sourceRelativePath}'.`,
           { code },
         );
       }
-      throw nativeError(result, operationPath, "linkat");
-    }
-
-    const removal = unlinkAt(runtime, sourceDescriptor, sourceName);
-    if (removal.value < 0) {
-      const rollback = unlinkAt(runtime, destinationDescriptor, destinationName);
-      const operationPath = NodePath.join(input.workspaceRoot, input.sourceRelativePath);
-      if (rollback.value < 0) {
-        throw new SecureWorkspaceMoveError(
-          "operation-failed",
-          NodePath.join(input.workspaceRoot, input.destinationRelativePath),
-          `unlinkat failed for the source and its destination rollback also failed.`,
-          {
-            code: errnoCode(rollback.errnoCode),
-            cause: new AggregateError([
-              nativeError(removal, operationPath, "unlinkat"),
-              nativeError(rollback, input.destinationRelativePath, "rollback unlinkat"),
-            ]),
-          },
-        );
-      }
-      throw nativeError(removal, operationPath, "unlinkat");
+      throw nativeError(result, operationPath, "rename");
     }
   } catch (cause) {
     if (cause instanceof SecureWorkspaceMoveError) throw cause;
