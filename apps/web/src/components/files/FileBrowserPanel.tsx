@@ -713,7 +713,13 @@ export default function FileBrowserPanel({
     if (panel === null) {
       return;
     }
-    const handleDragStart = (event: DragEvent) => {
+    const treeHost = panel.querySelector("file-tree-container");
+    const dragEventTarget = treeHost?.shadowRoot;
+    if (dragEventTarget === null || dragEventTarget === undefined) {
+      return;
+    }
+    const handleDragStart = (event: Event) => {
+      if (!(event instanceof DragEvent)) return;
       dragMention.handleDragStart(event);
       setTreeDragActive(dragMention.isDragInProgress());
     };
@@ -721,7 +727,8 @@ export default function FileBrowserPanel({
       dragMention.handleDragEnd();
       setTreeDragActive(false);
     };
-    const handleDragOver = (event: DragEvent) => {
+    const handleDragOver = (event: Event) => {
+      if (!(event instanceof DragEvent)) return;
       const target = fileTreeDirectoryDropTarget(event);
       if (
         target === null ||
@@ -732,7 +739,8 @@ export default function FileBrowserPanel({
       event.preventDefault();
       if (event.dataTransfer !== null) event.dataTransfer.dropEffect = "move";
     };
-    const handleDrop = (event: DragEvent) => {
+    const handleDrop = (event: Event) => {
+      if (!(event instanceof DragEvent)) return;
       const target = fileTreeDirectoryDropTarget(event);
       if (target === null) return;
       const draggedPaths = dragMention.getDraggedPaths();
@@ -747,15 +755,18 @@ export default function FileBrowserPanel({
         operation: draggedPaths.length > 1 ? "batch" : "move",
       });
     };
-    panel.addEventListener("dragstart", handleDragStart, true);
-    panel.addEventListener("dragover", handleDragOver, true);
-    panel.addEventListener("drop", handleDrop, true);
-    panel.addEventListener("dragend", handleDragEnd);
+    // Native drag events can remain inside Pierre's shadow root, especially once a nested
+    // source row is virtualized. Listen at the shadow boundary instead of assuming the events
+    // will always compose through to the surrounding panel.
+    dragEventTarget.addEventListener("dragstart", handleDragStart, true);
+    dragEventTarget.addEventListener("dragover", handleDragOver, true);
+    dragEventTarget.addEventListener("drop", handleDrop, true);
+    dragEventTarget.addEventListener("dragend", handleDragEnd);
     return () => {
-      panel.removeEventListener("dragstart", handleDragStart, true);
-      panel.removeEventListener("dragover", handleDragOver, true);
-      panel.removeEventListener("drop", handleDrop, true);
-      panel.removeEventListener("dragend", handleDragEnd);
+      dragEventTarget.removeEventListener("dragstart", handleDragStart, true);
+      dragEventTarget.removeEventListener("dragover", handleDragOver, true);
+      dragEventTarget.removeEventListener("drop", handleDrop, true);
+      dragEventTarget.removeEventListener("dragend", handleDragEnd);
     };
   }, [dragMention, resolveMove]);
 
