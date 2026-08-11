@@ -1,4 +1,6 @@
 import * as Schema from "effect/Schema";
+
+import { DiffSliceResult } from "./diff.ts";
 import * as HttpServerRespondable from "effect/unstable/http/HttpServerRespondable";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 
@@ -562,16 +564,8 @@ export const PullRequestDiffInput = Schema.Struct({
 });
 export type PullRequestDiffInput = typeof PullRequestDiffInput.Type;
 
-export const PullRequestDiffResult = Schema.Struct({
-  patch: Schema.String,
-  /**
-   * Something inside this slice could not be shown — a binary file, or a hunk the host declined
-   * to inline. Not the same as there being more slices, which `nextCursor` answers.
-   */
-  truncated: Schema.Boolean,
-  /** Where the next slice starts, or null once the diff is whole. */
-  nextCursor: Schema.NullOr(TrimmedNonEmptyString),
-});
+/** Pull-request providers use the shared diff-slice wire shape without adding host-specific data. */
+export const PullRequestDiffResult = DiffSliceResult;
 export type PullRequestDiffResult = typeof PullRequestDiffResult.Type;
 
 /** The complete old and new files Pierre needs to open omitted context in a host-backed patch. */

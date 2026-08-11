@@ -8,6 +8,13 @@ import type {
   PullRequestReviewThread,
 } from "@t3tools/contracts";
 import {
+  createPagedDiffState,
+  receiveDiffSlice,
+  requestDiffSlice,
+  selectNextDiffCursor,
+  selectPagedDiffSlices,
+} from "@t3tools/client-runtime/state/paged-diff";
+import {
   ChevronDownIcon,
   ChevronRightIcon,
   ChevronsDownUpIcon,
@@ -225,11 +232,9 @@ export function PullRequestCodeTab({
   const [reviewOpen, setReviewOpen] = useState(false);
   // Which pull request the slices belong to travels with them, so a render taken before the
   // reset below cannot read the previous one's slices — or send its cursor to the host.
-  const [sliceState, setSliceState] = useState<{
-    readonly key: string;
-    readonly cursor: string | null;
-    readonly slices: ReadonlyArray<PullRequestDiffSlice>;
-  }>(() => ({ key: scopeKey, cursor: null, slices: rememberedCodeView?.slices ?? NO_SLICES }));
+  const [sliceState, setSliceState] = useState(() =>
+    createPagedDiffState(scopeKey, rememberedCodeView?.slices ?? NO_SLICES),
+  );
   const parseCache = useRef(new Map<string, RenderablePatch>());
   const scrollRootRef = useRef<HTMLDivElement>(null);
   // The panel keeps this mounted across pull requests, so an open composer would otherwise
@@ -244,17 +249,16 @@ export function PullRequestCodeTab({
     setFoldOverrideState({ key: scopeKey, value: rememberedCodeView?.foldOverride ?? null });
     setVisibleCommitCount(COMMIT_PAGE_SIZE);
     setOrphansOpen(false);
-    setSliceState({
-      key: scopeKey,
-      cursor: null,
-      slices: rememberedCodeView?.slices ?? NO_SLICES,
-    });
+    setSliceState(createPagedDiffState(scopeKey, rememberedCodeView?.slices ?? NO_SLICES));
     parseCache.current.clear();
   }, [rememberedCodeView, scopeKey]);
 
-  const loadedSlices =
-    sliceState.key === scopeKey ? sliceState.slices : (rememberedCodeView?.slices ?? NO_SLICES);
-  const cursor = sliceState.key === scopeKey ? sliceState.cursor : null;
+  const loadedSlices = selectPagedDiffSlices(
+    sliceState,
+    scopeKey,
+    rememberedCodeView?.slices ?? NO_SLICES,
+  );
+  const cursor = sliceState.scopeKey === scopeKey ? sliceState.requestCursor : null;
   const diffQuery = useEnvironmentQuery(
     pullRequestEnvironment.diff({
       environmentId,
@@ -270,31 +274,7 @@ export function PullRequestCodeTab({
   useEffect(() => {
     const data = diffQuery.data;
     if (data === null) return;
-    setSliceState((previous) => {
-      const slices = previous.key === scopeKey ? previous.slices : NO_SLICES;
-      const next = {
-        cursor,
-        patch: data.patch,
-        truncated: data.truncated,
-        nextCursor: data.nextCursor,
-      };
-      const index = slices.findIndex((slice) => slice.cursor === cursor);
-      if (index === -1) {
-        return { key: scopeKey, cursor, slices: [...slices, next] };
-      }
-      const existing = slices[index];
-      if (
-        existing !== undefined &&
-        existing.patch === next.patch &&
-        existing.truncated === next.truncated &&
-        existing.nextCursor === next.nextCursor
-      ) {
-        return previous;
-      }
-      // A page that came back different means the diff moved under the review. The slices
-      // after it go with the replacement: their cursors were positions in the old diff.
-      return { key: scopeKey, cursor, slices: [...slices.slice(0, index), next] };
-    });
+    setSliceState((previous) => receiveDiffSlice(previous, { scopeKey, cursor, result: data }));
   }, [cursor, diffQuery.data, scopeKey]);
   useEffect(() => {
     rememberPullRequestCodeViewState(viewStateKey, codeScopeKey, {
@@ -315,7 +295,7 @@ export function PullRequestCodeTab({
   useEffect(() => {
     if (appliedRefreshToken.current === refreshToken) return;
     appliedRefreshToken.current = refreshToken;
-    setSliceState({ key: scopeKey, cursor: null, slices: NO_SLICES });
+    setSliceState(createPagedDiffState(scopeKey));
     refreshFirstDiffPage();
   }, [refreshToken, scopeKey, refreshFirstDiffPage]);
   const reviewKey = referenceKey;
@@ -388,7 +368,7 @@ export function PullRequestCodeTab({
       ),
     [parsedSlices],
   );
-  const nextCursor = loadedSlices.at(-1)?.nextCursor ?? null;
+  const nextCursor = selectNextDiffCursor(loadedSlices);
   // What a slice withheld: the host declining to inline part of it, or a patch the viewer could
   // not structure and so dropped. Neither says anything about there being more to fetch.
   const withheldContent =
@@ -542,7 +522,7 @@ export function PullRequestCodeTab({
     const observer = new IntersectionObserver(
       (observed) => {
         if (observed.some((entry) => entry.isIntersecting)) {
-          setSliceState((previous) => ({ ...previous, cursor: nextCursor }));
+          setSliceState((previous) => requestDiffSlice(previous, scopeKey, nextCursor));
         }
       },
       // Start the next slice slightly before the sentinel is on screen.
@@ -550,7 +530,7 @@ export function PullRequestCodeTab({
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [cursor, diffQuery.error, diffQuery.isPending, nextCursor, sentinel]);
+  }, [cursor, diffQuery.error, diffQuery.isPending, nextCursor, scopeKey, sentinel]);
 
   // A stable identity: the viewer's SlotPortals memoizes each file's header/annotation portal on
   // these render props, so a fresh function here would recreate every visible file's portal on

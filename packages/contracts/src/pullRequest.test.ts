@@ -1,7 +1,9 @@
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
+import { DiffSliceResult } from "./diff.ts";
 import {
+  PullRequestDiffResult,
   PullRequestListInput,
   PullRequestListResult,
   PullRequestReviewerRequestInput,
@@ -10,6 +12,19 @@ import {
 const decodeListResult = Schema.decodeUnknownSync(PullRequestListResult);
 const decodeListInput = Schema.decodeUnknownSync(PullRequestListInput);
 const decodeReviewerRequest = Schema.decodeUnknownSync(PullRequestReviewerRequestInput);
+
+describe("PullRequestDiffResult", () => {
+  it("keeps the shared slice wire shape", () => {
+    const value = { patch: "diff --git a/a b/a", truncated: false, nextCursor: "page-2" };
+    const pullRequestCodec = Schema.toCodecJson(PullRequestDiffResult);
+    const sharedCodec = Schema.toCodecJson(DiffSliceResult);
+
+    expect(
+      Schema.decodeUnknownSync(pullRequestCodec)(Schema.encodeUnknownSync(pullRequestCodec)(value)),
+    ).toStrictEqual(value);
+    expect(Schema.decodeUnknownSync(sharedCodec)(value)).toStrictEqual(value);
+  });
+});
 
 const LIST_RESULT: PullRequestListResult = {
   viewers: { "github.com": "bilal", "gitlab.com": "bilal.hassan" },
