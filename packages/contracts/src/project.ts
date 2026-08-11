@@ -11,6 +11,7 @@ const PROJECT_SEARCH_CONTENTS_MAX_LIMIT = 500;
 const PROJECT_WRITE_FILE_PATH_MAX_LENGTH = 512;
 const PROJECT_READ_FILE_PATH_MAX_LENGTH = 512;
 const PROJECT_DELETE_ENTRY_PATH_MAX_LENGTH = 512;
+const PROJECT_MOVE_ENTRY_PATH_MAX_LENGTH = 512;
 const PROJECT_LIST_DIRECTORY_PATH_MAX_LENGTH = 512;
 const PROJECT_LIST_DIRECTORY_CURSOR_MAX_LENGTH = 512;
 
@@ -241,6 +242,87 @@ export const ProjectDeleteEntryResult = Schema.Struct({
   kind: ProjectEntryKind,
 });
 export type ProjectDeleteEntryResult = typeof ProjectDeleteEntryResult.Type;
+
+export const ProjectMoveEntryInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  sourceRelativePath: TrimmedNonEmptyString.check(
+    Schema.isMaxLength(PROJECT_MOVE_ENTRY_PATH_MAX_LENGTH),
+  ),
+  destinationRelativePath: TrimmedNonEmptyString.check(
+    Schema.isMaxLength(PROJECT_MOVE_ENTRY_PATH_MAX_LENGTH),
+  ),
+  kind: Schema.Literal("file"),
+});
+export type ProjectMoveEntryInput = typeof ProjectMoveEntryInput.Type;
+
+export const ProjectMoveEntryResult = Schema.Struct({
+  sourceRelativePath: TrimmedNonEmptyString,
+  destinationRelativePath: TrimmedNonEmptyString,
+  kind: Schema.Literal("file"),
+});
+export type ProjectMoveEntryResult = typeof ProjectMoveEntryResult.Type;
+
+export const ProjectMoveEntryFailure = Schema.Literals([
+  "workspace_path_outside_root",
+  "resolved_path_outside_root",
+  "source_not_found",
+  "source_kind_mismatch",
+  "source_destination_same",
+  "destination_exists",
+  "destination_parent_not_found",
+  "destination_parent_not_directory",
+  "operation_failed",
+]);
+export type ProjectMoveEntryFailure = typeof ProjectMoveEntryFailure.Type;
+
+export const ProjectMoveEntryOperation = Schema.Literals([
+  "lstat-source",
+  "lstat-destination",
+  "lstat-destination-parent",
+  "realpath-workspace-root",
+  "realpath-source-parent",
+  "realpath-destination-parent",
+  "rename",
+]);
+export type ProjectMoveEntryOperation = typeof ProjectMoveEntryOperation.Type;
+
+type ProjectMoveEntryFailureContext = {
+  readonly cwd: string;
+  readonly sourceRelativePath: string;
+  readonly destinationRelativePath: string;
+  readonly failure: ProjectMoveEntryFailure;
+  readonly resolvedPath?: string;
+  readonly resolvedWorkspaceRoot?: string;
+  readonly operation?: ProjectMoveEntryOperation;
+  readonly operationPath?: string;
+  readonly cause?: unknown;
+};
+
+export class ProjectMoveEntryError extends Schema.TaggedErrorClass<ProjectMoveEntryError>()(
+  "ProjectMoveEntryError",
+  {
+    cwd: Schema.optional(TrimmedNonEmptyString),
+    sourceRelativePath: Schema.optional(TrimmedNonEmptyString),
+    destinationRelativePath: Schema.optional(TrimmedNonEmptyString),
+    failure: Schema.optional(ProjectMoveEntryFailure),
+    resolvedPath: Schema.optional(TrimmedNonEmptyString),
+    resolvedWorkspaceRoot: Schema.optional(TrimmedNonEmptyString),
+    operation: Schema.optional(ProjectMoveEntryOperation),
+    operationPath: Schema.optional(TrimmedNonEmptyString),
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  // @effect-diagnostics-next-line overriddenSchemaConstructor:off
+  constructor(props: ProjectMoveEntryFailureContext) {
+    super({
+      ...props,
+      message:
+        decodedProjectErrorMessage(props) ??
+        `Failed to move workspace file '${props.sourceRelativePath}' to '${props.destinationRelativePath}' in '${props.cwd}'.`,
+    } as any);
+  }
+}
 
 export const ProjectFileFailure = Schema.Literals([
   "workspace_path_outside_root",

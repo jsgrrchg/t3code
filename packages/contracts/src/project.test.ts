@@ -4,6 +4,8 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   ProjectDeleteEntryInput,
   ProjectListEntriesInput,
+  ProjectMoveEntryError,
+  ProjectMoveEntryInput,
   ProjectReadFileError,
   ProjectSearchContentsError,
   ProjectSearchContentsInput,
@@ -14,10 +16,56 @@ import {
 
 const decodeListEntriesInput = Schema.decodeUnknownSync(ProjectListEntriesInput);
 const decodeDeleteEntryInput = Schema.decodeUnknownSync(ProjectDeleteEntryInput);
+const decodeMoveEntryInput = Schema.decodeUnknownSync(ProjectMoveEntryInput);
 const decodeSearchEntriesInput = Schema.decodeUnknownSync(ProjectSearchEntriesInput);
 const decodeSearchContentsInput = Schema.decodeUnknownSync(ProjectSearchContentsInput);
 
 describe("project search inputs", () => {
+  it("accepts a file move with nested, spaced paths", () => {
+    expect(
+      decodeMoveEntryInput({
+        cwd: "/workspace",
+        sourceRelativePath: "src/my file (draft).ts",
+        destinationRelativePath: "components/my file (draft).ts",
+        kind: "file",
+      }),
+    ).toEqual({
+      cwd: "/workspace",
+      sourceRelativePath: "src/my file (draft).ts",
+      destinationRelativePath: "components/my file (draft).ts",
+      kind: "file",
+    });
+  });
+
+  it("rejects invalid file move paths and unsupported kinds", () => {
+    for (const path of ["", "   ", "a".repeat(513)]) {
+      expect(() =>
+        decodeMoveEntryInput({
+          cwd: "/workspace",
+          sourceRelativePath: path,
+          destinationRelativePath: "destination.ts",
+          kind: "file",
+        }),
+      ).toThrow();
+      expect(() =>
+        decodeMoveEntryInput({
+          cwd: "/workspace",
+          sourceRelativePath: "source.ts",
+          destinationRelativePath: path,
+          kind: "file",
+        }),
+      ).toThrow();
+    }
+    expect(() =>
+      decodeMoveEntryInput({
+        cwd: "/workspace",
+        sourceRelativePath: "src",
+        destinationRelativePath: "components/src",
+        kind: "directory",
+      }),
+    ).toThrow();
+  });
+
   it("requires the expected entry kind for workspace deletion", () => {
     expect(
       decodeDeleteEntryInput({ cwd: "/workspace", relativePath: "src", kind: "directory" }),
@@ -137,6 +185,7 @@ describe("project RPC errors", () => {
   it("decodes legacy message-only errors during rolling upgrades", () => {
     const decodeSearchError = Schema.decodeUnknownSync(ProjectSearchEntriesError);
     const decodeWriteError = Schema.decodeUnknownSync(ProjectWriteFileError);
+    const decodeMoveError = Schema.decodeUnknownSync(ProjectMoveEntryError);
 
     const searchError = decodeSearchError({
       _tag: "ProjectSearchEntriesError",
@@ -147,6 +196,10 @@ describe("project RPC errors", () => {
       _tag: "ProjectWriteFileError",
       message: "Legacy project write failure.",
     });
+    const moveError = decodeMoveError({
+      _tag: "ProjectMoveEntryError",
+      message: "Legacy project move failure.",
+    });
 
     expect(searchError.message).toBe("Legacy project search failure.");
     expect(searchError.cwd).toBeUndefined();
@@ -156,5 +209,30 @@ describe("project RPC errors", () => {
     expect(writeError.message).toBe("Legacy project write failure.");
     expect(writeError.relativePath).toBeUndefined();
     expect(writeError.failure).toBeUndefined();
+    expect(moveError.message).toBe("Legacy project move failure.");
+    expect(moveError.sourceRelativePath).toBeUndefined();
+    expect(moveError.destinationRelativePath).toBeUndefined();
+    expect(moveError.failure).toBeUndefined();
+  });
+
+  it("derives a stable structured move error message", () => {
+    const cause = new Error("sensitive platform detail");
+    const moveError = new ProjectMoveEntryError({
+      cwd: "/workspace",
+      sourceRelativePath: "src/index.ts",
+      destinationRelativePath: "components/index.ts",
+      failure: "destination_exists",
+      operation: "lstat-destination",
+      operationPath: "/workspace/components/index.ts",
+      cause,
+    });
+
+    expect(moveError.message).toBe(
+      "Failed to move workspace file 'src/index.ts' to 'components/index.ts' in '/workspace'.",
+    );
+    expect(moveError.failure).toBe("destination_exists");
+    expect(moveError.operation).toBe("lstat-destination");
+    expect(moveError.cause).toBe(cause);
+    expect(moveError.message).not.toContain(cause.message);
   });
 });

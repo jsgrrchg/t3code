@@ -77,6 +77,9 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   gitHistory: Schema.optionalKey(Schema.Boolean),
   /** Server can explicitly fetch every configured Git remote. */
   gitFetchAll: Schema.optionalKey(Schema.Boolean),
+  /** Server can move workspace files through projects.moveEntry. Absent on older servers, so
+      clients must not offer internal file-tree drops or probe the method. */
+  workspaceEntryMove: Schema.optionalKey(Schema.Boolean),
   /** The update path clients should offer for this server. Absent on
       servers that must be relaunched manually (dev checkouts, Windows
       foreground runs, pre-update servers). */

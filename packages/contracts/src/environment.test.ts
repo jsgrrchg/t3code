@@ -22,6 +22,7 @@ describe("ExecutionEnvironmentDescriptor", () => {
     expect(decoded.capabilities.gitHistory).toBeUndefined();
     expect(decoded.capabilities.gitFetchAll).toBeUndefined();
     expect(decoded.capabilities.pullRequests).toBeUndefined();
+    expect(decoded.capabilities.workspaceEntryMove).toBeUndefined();
   });
 
   it("preserves an advertised pull-request capability", () => {
@@ -40,5 +41,20 @@ describe("ExecutionEnvironmentDescriptor", () => {
     });
 
     expect(decoded.capabilities.pullRequests).toBe(true);
+  });
+
+  it("preserves an advertised workspace entry move capability", () => {
+    const decoded = decodeEnvironmentDescriptor({
+      environmentId: "environment-1",
+      label: "Local",
+      platform: { os: "darwin", arch: "arm64" },
+      serverVersion: "0.0.32",
+      capabilities: {
+        repositoryIdentity: true,
+        workspaceEntryMove: true,
+      },
+    });
+
+    expect(decoded.capabilities.workspaceEntryMove).toBe(true);
   });
 });
