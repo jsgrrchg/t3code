@@ -5,8 +5,16 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
+import {
+  createPagedDiffState,
+  receiveDiffSlice,
+  requestDiffSlice,
+  selectNextDiffCursor,
+  selectPagedDiffSlices,
+  type LoadedDiffSlice,
+} from "@t3tools/client-runtime/state/paged-diff";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
-import type { ScopedThreadRef, TurnId } from "@t3tools/contracts";
+import type { ReviewDiffPreviewSource, ScopedThreadRef, TurnId } from "@t3tools/contracts";
 import {
   ArrowRightIcon,
   CheckIcon,
@@ -31,11 +39,13 @@ import { selectThreadDiffPanelSelection, useDiffPanelStore } from "../diffPanelS
 import { useTheme } from "../hooks/useTheme";
 import {
   buildFileDiffRenderKey,
+  buildPatchCacheKey,
   getDiffCollapseIconClassName,
   getDiffLineStat,
   getRenderablePatch,
   resolveDiffThemeName,
   resolveFileDiffPath,
+  type RenderablePatch,
 } from "../lib/diffRendering";
 import { areAllDiffFilesCollapsed, toggleAllDiffFiles } from "../lib/diffCollapse";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
@@ -75,6 +85,7 @@ import { reviewEnvironment } from "../state/review";
 import { vcsEnvironment } from "../state/vcs";
 import { buildBaseRefChoices, filterBaseRefChoices } from "../lib/baseRefChoices";
 import { createGitDiffFileContentsLoader } from "../lib/diffFileContents";
+import { branchDiffPageFromSource, branchReviewDiffScopeKey } from "../lib/reviewDiffPagination";
 import {
   diffPanelViewStateKey,
   getDiffPanelViewState,
@@ -93,6 +104,7 @@ interface CollapsedDiffFilesState {
 }
 
 const EMPTY_COLLAPSED_DIFF_FILE_KEYS: ReadonlySet<string> = new Set();
+const EMPTY_DIFF_SLICES: ReadonlyArray<LoadedDiffSlice> = [];
 
 interface DiffPanelProps {
   mode?: DiffPanelMode;
@@ -124,6 +136,7 @@ export default function DiffPanel({
   const [codeViewRevision, setCodeViewRevision] = useState(0);
   const codeViewRef = useRef<AnnotatableCodeViewHandle>(null);
   const codeViewRootRef = useRef<HTMLDivElement>(null);
+  const branchParseCacheRef = useRef(new Map<string, RenderablePatch>());
   const lastCompletedTurnRefreshRef = useRef<{
     readonly threadKey: string | null;
     readonly turnId: TurnId | null;
@@ -261,6 +274,34 @@ export default function DiffPanel({
     },
     { enabled: isGitRepo && selectedTurn !== undefined },
   );
+  const primaryBranchScopeKey =
+    activeThread && activeCwd
+      ? branchReviewDiffScopeKey({
+          environmentId: activeThread.environmentId,
+          cwd: activeCwd,
+          baseRef: selectedBaseRef,
+          ignoreWhitespace: diffIgnoreWhitespace,
+        })
+      : "inactive";
+  const fallbackBranchScopeKey =
+    activeThread && serverConfig?.cwd
+      ? branchReviewDiffScopeKey({
+          environmentId: activeThread.environmentId,
+          cwd: serverConfig.cwd,
+          baseRef: selectedBaseRef,
+          ignoreWhitespace: diffIgnoreWhitespace,
+        })
+      : "inactive-fallback";
+  const [branchSliceState, setBranchSliceState] = useState(() =>
+    createPagedDiffState(primaryBranchScopeKey),
+  );
+  const [branchSourceState, setBranchSourceState] = useState<{
+    readonly scopeKey: string;
+    readonly source: ReviewDiffPreviewSource | null;
+    readonly legacy: boolean;
+  }>(() => ({ scopeKey: primaryBranchScopeKey, source: null, legacy: false }));
+  const primaryBranchCursor =
+    branchSliceState.scopeKey === primaryBranchScopeKey ? branchSliceState.requestCursor : null;
   const primaryBranchDiffPreview = useEnvironmentQuery(
     selectedTurnId === null && activeThread && activeCwd
       ? reviewEnvironment.diffPreview({
@@ -269,6 +310,14 @@ export default function DiffPanel({
             cwd: activeCwd,
             ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
             ignoreWhitespace: diffIgnoreWhitespace,
+            ...(selectedGitScope === "branch"
+              ? {
+                  pagination: {
+                    sourceKind: "branch-range" as const,
+                    ...(primaryBranchCursor ? { cursor: primaryBranchCursor } : {}),
+                  },
+                }
+              : {}),
           },
         })
       : null,
@@ -286,6 +335,17 @@ export default function DiffPanel({
             cwd: serverConfig.cwd,
             ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
             ignoreWhitespace: diffIgnoreWhitespace,
+            ...(selectedGitScope === "branch"
+              ? {
+                  pagination: {
+                    sourceKind: "branch-range" as const,
+                    ...(branchSliceState.scopeKey === fallbackBranchScopeKey &&
+                    branchSliceState.requestCursor
+                      ? { cursor: branchSliceState.requestCursor }
+                      : {}),
+                  },
+                }
+              : {}),
           },
         })
       : null,
@@ -293,12 +353,93 @@ export default function DiffPanel({
   const branchDiffPreview = shouldRetryBranchDiffAtEnvironmentCwd
     ? fallbackBranchDiffPreview
     : primaryBranchDiffPreview;
-  const refreshBranchDiffPreview = branchDiffPreview.refresh;
+  const activeBranchScopeKey = shouldRetryBranchDiffAtEnvironmentCwd
+    ? fallbackBranchScopeKey
+    : primaryBranchScopeKey;
+  const activeReviewCwd = shouldRetryBranchDiffAtEnvironmentCwd
+    ? (serverConfig?.cwd ?? activeCwd)
+    : activeCwd;
+  const activeBranchCursor =
+    branchSliceState.scopeKey === activeBranchScopeKey ? branchSliceState.requestCursor : null;
+  const firstPrimaryBranchDiffPreview = useEnvironmentQuery(
+    selectedTurnId === null && selectedGitScope === "branch" && activeThread && activeCwd
+      ? reviewEnvironment.diffPreview({
+          environmentId: activeThread.environmentId,
+          input: {
+            cwd: activeCwd,
+            ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
+            ignoreWhitespace: diffIgnoreWhitespace,
+            pagination: { sourceKind: "branch-range" },
+          },
+        })
+      : null,
+  );
+  const firstFallbackBranchDiffPreview = useEnvironmentQuery(
+    selectedTurnId === null &&
+      selectedGitScope === "branch" &&
+      shouldRetryBranchDiffAtEnvironmentCwd &&
+      activeThread &&
+      serverConfig
+      ? reviewEnvironment.diffPreview({
+          environmentId: activeThread.environmentId,
+          input: {
+            cwd: serverConfig.cwd,
+            ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
+            ignoreWhitespace: diffIgnoreWhitespace,
+            pagination: { sourceKind: "branch-range" },
+          },
+        })
+      : null,
+  );
+  const refreshBranchDiffPreview = useCallback(() => {
+    if (selectedGitScope !== "branch") {
+      branchDiffPreview.refresh();
+      return;
+    }
+    setBranchSliceState(createPagedDiffState(activeBranchScopeKey));
+    setBranchSourceState({ scopeKey: activeBranchScopeKey, source: null, legacy: false });
+    branchParseCacheRef.current.clear();
+    if (shouldRetryBranchDiffAtEnvironmentCwd) firstFallbackBranchDiffPreview.refresh();
+    else firstPrimaryBranchDiffPreview.refresh();
+  }, [
+    activeBranchScopeKey,
+    branchDiffPreview,
+    firstFallbackBranchDiffPreview,
+    firstPrimaryBranchDiffPreview,
+    selectedGitScope,
+    shouldRetryBranchDiffAtEnvironmentCwd,
+  ]);
   const canRefreshGitDiff =
     isGitRepo && selectedTurnId === null && activeThread != null && activeCwd != null;
   const activeThreadRefreshKey = routeThreadRef
     ? `${routeThreadRef.environmentId}:${routeThreadRef.threadId}`
     : null;
+
+  useEffect(() => {
+    if (selectedGitScope !== "branch" || branchSliceState.scopeKey === activeBranchScopeKey) return;
+    setBranchSliceState(createPagedDiffState(activeBranchScopeKey));
+    setBranchSourceState({ scopeKey: activeBranchScopeKey, source: null, legacy: false });
+    branchParseCacheRef.current.clear();
+  }, [activeBranchScopeKey, branchSliceState.scopeKey, selectedGitScope]);
+
+  useEffect(() => {
+    if (selectedGitScope !== "branch") return;
+    const source = branchDiffPreview.data?.sources.find((entry) => entry.kind === "branch-range");
+    if (!source) return;
+    const page = branchDiffPageFromSource(source);
+    setBranchSourceState({ scopeKey: activeBranchScopeKey, source, legacy: page.legacy });
+    setBranchSliceState((previous) => {
+      const scoped =
+        previous.scopeKey === activeBranchScopeKey
+          ? previous
+          : createPagedDiffState(activeBranchScopeKey);
+      return receiveDiffSlice(scoped, {
+        scopeKey: activeBranchScopeKey,
+        cursor: activeBranchCursor,
+        result: page.result,
+      });
+    });
+  }, [activeBranchCursor, activeBranchScopeKey, branchDiffPreview.data, selectedGitScope]);
 
   useEffect(() => {
     if (!canRefreshGitDiff) return;
@@ -325,39 +466,30 @@ export default function DiffPanel({
     lastCompletedTurnRefreshRef.current = current;
   }, [activeThreadRefreshKey, canRefreshGitDiff, latestTurn?.turnId, refreshBranchDiffPreview]);
 
-  const selectedGitSource = branchDiffPreview.data?.sources.find(
-    (source) => source.kind === (selectedGitScope === "unstaged" ? "working-tree" : "branch-range"),
-  );
+  const selectedGitSource =
+    selectedGitScope === "branch" && branchSourceState.scopeKey === activeBranchScopeKey
+      ? branchSourceState.source
+      : branchDiffPreview.data?.sources.find((source) => source.kind === "working-tree");
   const loadDiffFiles = useMemo<FileDiffContentsLoader | undefined>(() => {
-    const preview = branchDiffPreview.data;
-    if (selectedTurnId !== null || !activeThread || !preview || !selectedGitSource) {
+    if (selectedTurnId !== null || !activeThread || !activeReviewCwd || !selectedGitSource) {
       return undefined;
     }
 
     return createGitDiffFileContentsLoader(getDiffFileContents, {
       environmentId: activeThread.environmentId,
-      cwd: preview.cwd,
+      cwd: activeReviewCwd,
       sourceKind: selectedGitSource.kind,
       baseRef: selectedGitSource.baseRef,
       headRef: selectedGitSource.headRef,
-      cacheKey: selectedGitSource.diffHash,
+      cacheKey: selectedGitSource.snapshotId ?? selectedGitSource.diffHash,
     });
-  }, [
-    activeThread,
-    branchDiffPreview.data,
-    getDiffFileContents,
-    selectedGitSource,
-    selectedTurnId,
-  ]);
+  }, [activeThread, activeReviewCwd, getDiffFileContents, selectedGitSource, selectedTurnId]);
   const localBranchRefs = useEnvironmentQuery(
-    selectedTurnId === null &&
-      selectedGitScope === "branch" &&
-      activeThread &&
-      branchDiffPreview.data?.cwd
+    selectedTurnId === null && selectedGitScope === "branch" && activeThread && activeReviewCwd
       ? vcsEnvironment.listRefs({
           environmentId: activeThread.environmentId,
           input: {
-            cwd: branchDiffPreview.data.cwd,
+            cwd: activeReviewCwd,
             includeMatchingRemoteRefs: true,
             refKind: "local",
             ...(baseRefQuery.trim().length > 0 ? { query: baseRefQuery.trim() } : {}),
@@ -367,14 +499,11 @@ export default function DiffPanel({
       : null,
   );
   const remoteBranchRefs = useEnvironmentQuery(
-    selectedTurnId === null &&
-      selectedGitScope === "branch" &&
-      activeThread &&
-      branchDiffPreview.data?.cwd
+    selectedTurnId === null && selectedGitScope === "branch" && activeThread && activeReviewCwd
       ? vcsEnvironment.listRefs({
           environmentId: activeThread.environmentId,
           input: {
-            cwd: branchDiffPreview.data.cwd,
+            cwd: activeReviewCwd,
             includeMatchingRemoteRefs: true,
             refKind: "remote",
             ...(baseRefQuery.trim().length > 0 ? { query: baseRefQuery.trim() } : {}),
@@ -398,33 +527,86 @@ export default function DiffPanel({
     ...matchingBaseRefChoices.map(valueForBaseRefChoice),
   ];
   const gitDiff = selectedGitSource?.diff;
-
-  const selectedPatch = selectedTurn ? activeCheckpointDiff.data?.diff : gitDiff;
-  const isSelectedPatchTruncated = !selectedTurn && selectedGitSource?.truncated === true;
+  const branchLoadedSlices = selectPagedDiffSlices(
+    branchSliceState,
+    activeBranchScopeKey,
+    EMPTY_DIFF_SLICES,
+  );
+  const branchNextCursor = selectNextDiffCursor(branchLoadedSlices);
+  const branchResponseIsLegacy =
+    branchSourceState.scopeKey === activeBranchScopeKey && branchSourceState.legacy;
+  const selectedPatch = selectedTurn
+    ? activeCheckpointDiff.data?.diff
+    : selectedGitScope === "unstaged"
+      ? gitDiff
+      : undefined;
+  const isSelectedPatchTruncated = selectedTurn
+    ? false
+    : selectedGitScope === "branch"
+      ? branchLoadedSlices.some((slice) => slice.truncated)
+      : selectedGitSource?.truncated === true;
   const isLoadingSelectedPatch = selectedTurn
     ? activeCheckpointDiff.isPending
-    : branchDiffPreview.isPending;
+    : selectedGitScope === "branch"
+      ? branchLoadedSlices.length === 0 && branchDiffPreview.isPending
+      : branchDiffPreview.isPending;
   const selectedPatchError = selectedTurn ? activeCheckpointDiff.error : branchDiffPreview.error;
-  const hasResolvedPatch = typeof selectedPatch === "string";
-  const hasNoNetChanges = hasResolvedPatch && selectedPatch.trim().length === 0;
-  const renderablePatch = useMemo(
+  const hasResolvedPatch =
+    selectedGitScope === "branch" && !selectedTurn
+      ? branchLoadedSlices.length > 0
+      : typeof selectedPatch === "string";
+  const hasNoNetChanges =
+    hasResolvedPatch &&
+    (selectedGitScope === "branch" && !selectedTurn
+      ? branchNextCursor === null && branchLoadedSlices.every((slice) => slice.patch.trim() === "")
+      : selectedPatch?.trim().length === 0);
+  const directRenderablePatch = useMemo(
     () =>
       getRenderablePatch(selectedPatch, `diff-panel:${resolvedTheme}`, {
         compactPartialHunkOffsets: selectedTurnId === null,
       }),
     [resolvedTheme, selectedPatch, selectedTurnId],
   );
-  const renderableFiles = useMemo(() => {
-    if (!renderablePatch || renderablePatch.kind !== "files") {
-      return [];
-    }
-    return renderablePatch.files.toSorted((left, right) =>
-      resolveFileDiffPath(left).localeCompare(resolveFileDiffPath(right), undefined, {
-        numeric: true,
-        sensitivity: "base",
+  const branchRenderablePatches = useMemo(
+    () =>
+      branchLoadedSlices.map((slice) => {
+        const cacheKey = buildPatchCacheKey(
+          slice.patch,
+          `diff-panel:${activeBranchScopeKey}:${selectedGitSource?.snapshotId ?? "legacy"}:${slice.cursor ?? "first"}:${resolvedTheme}`,
+        );
+        const cached = branchParseCacheRef.current.get(cacheKey);
+        if (cached) return cached;
+        const parsed = getRenderablePatch(slice.patch, cacheKey, {
+          compactPartialHunkOffsets: true,
+        });
+        if (parsed) branchParseCacheRef.current.set(cacheKey, parsed);
+        return parsed;
       }),
+    [activeBranchScopeKey, branchLoadedSlices, resolvedTheme, selectedGitSource?.snapshotId],
+  );
+  const selectedRenderablePatches =
+    selectedGitScope === "branch" && !selectedTurn
+      ? branchRenderablePatches
+      : [directRenderablePatch];
+  const renderableFiles = useMemo(() => {
+    return selectedRenderablePatches.flatMap((patch) =>
+      patch?.kind === "files"
+        ? patch.files.toSorted((left, right) =>
+            resolveFileDiffPath(left).localeCompare(resolveFileDiffPath(right), undefined, {
+              numeric: true,
+              sensitivity: "base",
+            }),
+          )
+        : [],
     );
-  }, [renderablePatch]);
+  }, [selectedRenderablePatches]);
+  const rawRenderablePatches = selectedRenderablePatches.filter(
+    (patch): patch is Extract<RenderablePatch, { kind: "raw" }> => patch?.kind === "raw",
+  );
+  const renderablePatch: RenderablePatch | null =
+    renderableFiles.length > 0
+      ? { kind: "files", files: renderableFiles }
+      : (rawRenderablePatches[0] ?? null);
   const renderableFileEntries = useMemo(
     () =>
       renderableFiles.map((fileDiff) => ({
@@ -447,7 +629,14 @@ export default function DiffPanel({
   );
   const diffFileKeys = useMemo(() => codeViewFiles.map((file) => file.fileKey), [codeViewFiles]);
   const allDiffFilesCollapsed = areAllDiffFilesCollapsed(diffFileKeys, collapsedDiffFileKeys);
-  const diffLineStat = useMemo(() => getDiffLineStat(renderableFiles), [renderableFiles]);
+  const renderedDiffLineStat = useMemo(() => getDiffLineStat(renderableFiles), [renderableFiles]);
+  const diffLineStat =
+    selectedGitScope === "branch" && !selectedTurn && selectedGitSource?.stats
+      ? {
+          additions: selectedGitSource.stats.additions,
+          deletions: selectedGitSource.stats.deletions,
+        }
+      : renderedDiffLineStat;
   const selectedDiffFileKey = selectedFilePath
     ? (codeViewFiles.find((candidate) => candidate.filePath === selectedFilePath)?.fileKey ?? null)
     : null;
@@ -474,6 +663,78 @@ export default function DiffPanel({
     codeViewRef.current?.scrollTo({ type: "item", id: selectedDiffFileKey, align: "start" });
     rememberDiffPanelRevealRequest(collapseScopeKey, selectedFileRevealRequestId);
   }, [codeViewMountKey, collapseScopeKey, selectedDiffFileKey, selectedFileRevealRequestId]);
+
+  const [branchPageSentinel, setBranchPageSentinel] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (
+      selectedGitScope !== "branch" ||
+      branchPageSentinel === null ||
+      branchNextCursor === null ||
+      branchNextCursor === activeBranchCursor ||
+      branchDiffPreview.isPending ||
+      branchDiffPreview.error !== null
+    ) {
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        setBranchSliceState((previous) =>
+          requestDiffSlice(previous, activeBranchScopeKey, branchNextCursor),
+        );
+      },
+      { rootMargin: "240px" },
+    );
+    observer.observe(branchPageSentinel);
+    return () => observer.disconnect();
+  }, [
+    activeBranchCursor,
+    activeBranchScopeKey,
+    branchDiffPreview.error,
+    branchDiffPreview.isPending,
+    branchNextCursor,
+    branchPageSentinel,
+    selectedGitScope,
+  ]);
+
+  const branchCodeViewFooter =
+    selectedGitScope === "branch" &&
+    (rawRenderablePatches.length > 0 || branchNextCursor !== null) ? (
+      <div className="border-t border-border/60">
+        {rawRenderablePatches.map((patch) => (
+          <div
+            key={buildPatchCacheKey(patch.text, `raw:${patch.reason}`)}
+            className="space-y-2 px-3 py-3"
+          >
+            <p className="text-[11px] text-muted-foreground/75">{patch.reason}</p>
+            <pre className="overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] text-muted-foreground/90">
+              {patch.text}
+            </pre>
+          </div>
+        ))}
+        {branchNextCursor !== null && (
+          <div
+            ref={setBranchPageSentinel}
+            className="flex items-center justify-center gap-2 px-3 py-2 text-[11px] text-muted-foreground"
+          >
+            {branchDiffPreview.error !== null ? (
+              <>
+                <span>The rest of this diff could not be loaded.</span>
+                <Button size="xs" variant="outline" onClick={() => branchDiffPreview.refresh()}>
+                  Retry
+                </Button>
+              </>
+            ) : branchDiffPreview.isPending ? (
+              "Loading more files..."
+            ) : selectedGitSource?.stats ? (
+              `${codeViewFiles.length} of ${selectedGitSource.stats.fileCount} files loaded`
+            ) : (
+              "Load more files"
+            )}
+          </div>
+        )}
+      </div>
+    ) : null;
 
   const openDiffFile = useCallback(
     (filePath: string) => {
@@ -631,7 +892,7 @@ export default function DiffPanel({
                 className="inline-flex min-w-0 max-w-48 items-center gap-1 overflow-hidden rounded-md px-1.5 py-1 outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                 aria-label={`Change comparison target. Currently ${selectedGitSource.baseRef}`}
               >
-                <span className="min-w-0 truncate">{selectedGitSource.baseRef}</span>
+                <span className="min-w-0 truncate">{selectedBaseRef ?? "Automatic"}</span>
                 <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
               </ComboboxTrigger>
               <ComboboxPopup
@@ -859,8 +1120,9 @@ export default function DiffPanel({
           <div className="diff-panel-viewport flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             {isSelectedPatchTruncated && (
               <p className="shrink-0 border-b border-border/70 bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground">
-                This diff was truncated because it exceeded the preview limit. The changes shown are
-                incomplete.
+                {selectedGitScope === "branch" && !branchResponseIsLegacy
+                  ? "Some individual files could not be shown inline. Every other branch file remains available."
+                  : "This diff was truncated because it exceeded the preview limit. The changes shown are incomplete."}
               </p>
             )}
             {selectedPatchError && !renderablePatch && (
@@ -933,6 +1195,9 @@ export default function DiffPanel({
                   sectionId={reviewSectionId}
                   sectionTitle={reviewSectionTitle}
                   composerDraftTarget={composerDraftTarget}
+                  {...(branchCodeViewFooter
+                    ? { renderCodeViewFooter: () => branchCodeViewFooter }
+                    : {})}
                   renderHeaderPrefix={(fileDiff, fileKey, collapsed) => {
                     const filePath = resolveFileDiffPath(fileDiff);
                     return (

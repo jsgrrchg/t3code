@@ -85,6 +85,7 @@ interface AnnotatableCodeViewProps {
   options: StyledDiffCodeViewOptions<DiffCommentAnnotationGroup>;
   viewerRef?: Ref<AnnotatableCodeViewHandle>;
   className?: string;
+  renderCodeViewFooter?: () => ReactNode;
   renderHeaderPrefix: (
     fileDiff: FileDiffMetadata,
     fileKey: string,
@@ -105,6 +106,7 @@ export function AnnotatableCodeView({
   options,
   viewerRef,
   className,
+  renderCodeViewFooter,
   renderHeaderPrefix,
 }: AnnotatableCodeViewProps) {
   const addReviewComment = useComposerDraftStore((store) => store.addReviewComment);
@@ -245,6 +247,7 @@ export function AnnotatableCodeView({
       items={items}
       selectedLines={selectedLines}
       onSelectedLinesChange={setSelectedLines}
+      {...(renderCodeViewFooter ? { renderCodeViewFooter } : {})}
       options={{
         ...options,
         enableGutterUtility: !hasOpenComment,
