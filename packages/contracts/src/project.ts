@@ -279,10 +279,15 @@ export const ProjectMoveEntryOperation = Schema.Literals([
   "lstat-source",
   "lstat-destination",
   "lstat-destination-parent",
+  "link-destination",
+  "readlink-source",
   "realpath-workspace-root",
   "realpath-source-parent",
   "realpath-destination-parent",
   "rename",
+  "rollback-destination",
+  "symlink-destination",
+  "unlink-source",
 ]);
 export type ProjectMoveEntryOperation = typeof ProjectMoveEntryOperation.Type;
 

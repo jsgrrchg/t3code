@@ -749,6 +749,7 @@ export default function FileBrowserPanel({
       // shadow tree can lose its source row to virtualization during a cross-folder drop.
       event.preventDefault();
       event.stopPropagation();
+      handleDragEnd();
       completeMoveRef.current({
         draggedPaths,
         target,
@@ -816,12 +817,13 @@ export default function FileBrowserPanel({
           onDrop={(event) => {
             event.preventDefault();
             const draggedPaths = dragMention.getDraggedPaths();
+            dragMention.handleDragEnd();
+            setTreeDragActive(false);
             completeMoveRef.current({
               draggedPaths,
               target: PROJECT_ROOT_DROP_TARGET,
               operation: draggedPaths.length > 1 ? "batch" : "move",
             });
-            setTreeDragActive(false);
           }}
         >
           Move to project root

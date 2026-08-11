@@ -146,10 +146,15 @@ export class WorkspaceMoveEntryOperationError extends Schema.TaggedErrorClass<Wo
       "lstat-source",
       "lstat-destination",
       "lstat-destination-parent",
+      "link-destination",
+      "readlink-source",
       "realpath-workspace-root",
       "realpath-source-parent",
       "realpath-destination-parent",
       "rename",
+      "rollback-destination",
+      "symlink-destination",
+      "unlink-source",
     ]),
     cause: Schema.Defect(),
   },
@@ -594,43 +599,87 @@ export const make = Effect.gen(function* () {
       });
     }
 
-    const destinationExists = yield* Effect.tryPromise({
-      try: async () => {
-        try {
-          await NodeFSP.lstat(effectiveDestinationPath);
-          return true;
-        } catch (cause) {
-          if ((cause as NodeJS.ErrnoException).code === "ENOENT") return false;
-          throw cause;
-        }
-      },
-      catch: (cause) =>
-        new WorkspaceMoveEntryOperationError({
-          ...errorContext,
-          resolvedPath: effectiveDestinationPath,
-          operationPath: effectiveDestinationPath,
-          operation: "lstat-destination",
-          cause,
-        }),
-    });
-    if (destinationExists) {
-      return yield* new WorkspaceMoveEntryDestinationExistsError({
-        ...errorContext,
-        resolvedPath: effectiveDestinationPath,
+    const claimDestination = <A>(
+      operation: "link-destination" | "symlink-destination",
+      tryClaim: () => Promise<A>,
+    ) =>
+      Effect.tryPromise({
+        try: tryClaim,
+        catch: (cause) =>
+          (cause as NodeJS.ErrnoException).code === "EEXIST"
+            ? new WorkspaceMoveEntryDestinationExistsError({
+                ...errorContext,
+                resolvedPath: effectiveDestinationPath,
+              })
+            : new WorkspaceMoveEntryOperationError({
+                ...errorContext,
+                resolvedPath: effectiveDestinationPath,
+                operationPath: effectiveDestinationPath,
+                operation,
+                cause,
+              }),
       });
+
+    if (sourceStat.isSymbolicLink()) {
+      const linkTarget = yield* Effect.tryPromise({
+        try: () => NodeFSP.readlink(effectiveSourcePath),
+        catch: (cause) =>
+          (cause as NodeJS.ErrnoException).code === "ENOENT"
+            ? new WorkspaceMoveEntrySourceNotFoundError({
+                ...errorContext,
+                resolvedPath: effectiveSourcePath,
+              })
+            : new WorkspaceMoveEntryOperationError({
+                ...errorContext,
+                resolvedPath: effectiveSourcePath,
+                operationPath: effectiveSourcePath,
+                operation: "readlink-source",
+                cause,
+              }),
+      });
+      yield* claimDestination("symlink-destination", () =>
+        NodeFSP.symlink(linkTarget, effectiveDestinationPath),
+      );
+    } else {
+      // link(2) claims a previously absent destination atomically. Unlike rename(2), it fails
+      // with EEXIST when another process creates the destination concurrently and preserves the
+      // source inode and metadata until the old name is removed below.
+      yield* claimDestination("link-destination", () =>
+        NodeFSP.link(effectiveSourcePath, effectiveDestinationPath),
+      );
     }
 
-    yield* Effect.tryPromise({
-      try: () => NodeFSP.rename(effectiveSourcePath, effectiveDestinationPath),
-      catch: (cause) =>
-        new WorkspaceMoveEntryOperationError({
+    const removalError = yield* Effect.promise(async () => {
+      try {
+        await NodeFSP.unlink(effectiveSourcePath);
+        return null;
+      } catch (cause) {
+        try {
+          await NodeFSP.unlink(effectiveDestinationPath);
+        } catch (rollbackCause) {
+          return new WorkspaceMoveEntryOperationError({
+            ...errorContext,
+            resolvedPath: effectiveDestinationPath,
+            operationPath: effectiveDestinationPath,
+            operation: "rollback-destination",
+            cause: new AggregateError(
+              [cause, rollbackCause],
+              "Failed to remove the move source and roll back its claimed destination.",
+            ),
+          });
+        }
+        return new WorkspaceMoveEntryOperationError({
           ...errorContext,
-          resolvedPath: effectiveDestinationPath,
-          operationPath: effectiveDestinationPath,
-          operation: "rename",
+          resolvedPath: effectiveSourcePath,
+          operationPath: effectiveSourcePath,
+          operation: "unlink-source",
           cause,
-        }),
+        });
+      }
     });
+    if (removalError !== null) {
+      return yield* removalError;
+    }
     yield* workspaceEntries.refresh(input.cwd);
     return {
       sourceRelativePath: source.relativePath,
