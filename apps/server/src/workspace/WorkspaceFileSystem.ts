@@ -19,6 +19,7 @@ import type {
   ProjectWriteFileInput,
   ProjectWriteFileResult,
 } from "@t3tools/contracts";
+import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -27,7 +28,9 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
 import * as WorkspaceEntries from "./WorkspaceEntries.ts";
+import { moveWorkspaceEntrySecurely, SecureWorkspaceMoveError } from "./SecureWorkspaceMove.ts";
 import * as WorkspacePaths from "./WorkspacePaths.ts";
+import { ResourceMonitorHostLinuxLibc } from "../resourceTelemetry/ResourceMonitorBinary.ts";
 
 const PROJECT_READ_FILE_MAX_BYTES = 1024 * 1024;
 
@@ -288,6 +291,9 @@ export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
   const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
+  const hostPlatform = yield* HostProcessPlatform;
+  const hostArchitecture = yield* HostProcessArchitecture;
+  const linuxLibc = hostPlatform === "linux" ? yield* ResourceMonitorHostLinuxLibc : undefined;
 
   const readFile: WorkspaceFileSystem["Service"]["readFile"] = Effect.fn(
     "WorkspaceFileSystem.readFile",
@@ -490,196 +496,70 @@ export const make = Effect.gen(function* () {
       });
     }
 
-    const realWorkspaceRoot = yield* Effect.tryPromise({
-      try: () => NodeFSP.realpath(input.cwd),
-      catch: (cause) =>
-        new WorkspaceMoveEntryOperationError({
-          ...errorContext,
-          resolvedPath: input.cwd,
-          operationPath: input.cwd,
-          operation: "realpath-workspace-root",
-          cause,
+    yield* Effect.tryPromise({
+      try: () =>
+        moveWorkspaceEntrySecurely({
+          platform: hostPlatform,
+          architecture: hostArchitecture,
+          ...(linuxLibc === undefined ? {} : { linuxLibc }),
+          workspaceRoot: input.cwd,
+          sourceRelativePath: source.relativePath,
+          destinationRelativePath: destination.relativePath,
         }),
-    });
-
-    const ensureRealParentWithinRoot = Effect.fn("WorkspaceFileSystem.ensureMoveParentWithinRoot")(
-      function* (
-        parentPath: string,
-        operation: "realpath-source-parent" | "realpath-destination-parent",
-      ) {
-        const realParent = yield* Effect.tryPromise({
-          try: () => NodeFSP.realpath(parentPath),
-          catch: (cause) =>
-            (cause as NodeJS.ErrnoException).code === "ENOENT"
-              ? operation === "realpath-destination-parent"
-                ? new WorkspaceMoveEntryDestinationParentNotFoundError({
-                    ...errorContext,
-                    resolvedPath: parentPath,
-                  })
-                : new WorkspaceMoveEntrySourceNotFoundError({
-                    ...errorContext,
-                    resolvedPath: source.absolutePath,
-                  })
-              : new WorkspaceMoveEntryOperationError({
-                  ...errorContext,
-                  resolvedPath: parentPath,
-                  operationPath: parentPath,
-                  operation,
-                  cause,
-                }),
-        });
-        const relativeRealPath = path.relative(realWorkspaceRoot, realParent);
-        if (
-          relativeRealPath.startsWith(`..${path.sep}`) ||
-          relativeRealPath === ".." ||
-          path.isAbsolute(relativeRealPath)
-        ) {
-          return yield* new WorkspaceMoveEntryPathEscapeError({
-            ...errorContext,
-            resolvedWorkspaceRoot: realWorkspaceRoot,
-            resolvedPath: realParent,
-          });
-        }
-        return realParent;
-      },
-    );
-
-    const realSourceParent = yield* ensureRealParentWithinRoot(
-      path.dirname(source.absolutePath),
-      "realpath-source-parent",
-    );
-    const realDestinationParent = yield* ensureRealParentWithinRoot(
-      path.dirname(destination.absolutePath),
-      "realpath-destination-parent",
-    );
-    // Operate through the already-validated real parents. A symlink ancestor changing after the
-    // containment check can no longer redirect the final lstat/rename outside the workspace.
-    const effectiveSourcePath = path.join(realSourceParent, path.basename(source.absolutePath));
-    const effectiveDestinationPath = path.join(
-      realDestinationParent,
-      path.basename(destination.absolutePath),
-    );
-    const sourceStat = yield* Effect.tryPromise({
-      try: () => NodeFSP.lstat(effectiveSourcePath),
-      catch: (cause) =>
-        (cause as NodeJS.ErrnoException).code === "ENOENT"
-          ? new WorkspaceMoveEntrySourceNotFoundError({
-              ...errorContext,
-              resolvedPath: effectiveSourcePath,
-            })
-          : new WorkspaceMoveEntryOperationError({
-              ...errorContext,
-              resolvedPath: effectiveSourcePath,
-              operationPath: effectiveSourcePath,
-              operation: "lstat-source",
-              cause,
-            }),
-    });
-    if (!sourceStat.isFile() && !sourceStat.isSymbolicLink()) {
-      return yield* new WorkspaceMoveEntrySourceKindMismatchError({
-        ...errorContext,
-        resolvedPath: effectiveSourcePath,
-      });
-    }
-    const destinationParentStat = yield* Effect.tryPromise({
-      try: () => NodeFSP.lstat(realDestinationParent),
-      catch: (cause) =>
-        new WorkspaceMoveEntryOperationError({
-          ...errorContext,
-          resolvedPath: realDestinationParent,
-          operationPath: realDestinationParent,
-          operation: "lstat-destination-parent",
-          cause,
-        }),
-    });
-    if (!destinationParentStat.isDirectory()) {
-      return yield* new WorkspaceMoveEntryDestinationParentNotDirectoryError({
-        ...errorContext,
-        resolvedPath: realDestinationParent,
-      });
-    }
-
-    const claimDestination = <A>(
-      operation: "link-destination" | "symlink-destination",
-      tryClaim: () => Promise<A>,
-    ) =>
-      Effect.tryPromise({
-        try: tryClaim,
-        catch: (cause) =>
-          (cause as NodeJS.ErrnoException).code === "EEXIST"
-            ? new WorkspaceMoveEntryDestinationExistsError({
-                ...errorContext,
-                resolvedPath: effectiveDestinationPath,
-              })
-            : new WorkspaceMoveEntryOperationError({
-                ...errorContext,
-                resolvedPath: effectiveDestinationPath,
-                operationPath: effectiveDestinationPath,
-                operation,
-                cause,
-              }),
-      });
-
-    if (sourceStat.isSymbolicLink()) {
-      const linkTarget = yield* Effect.tryPromise({
-        try: () => NodeFSP.readlink(effectiveSourcePath),
-        catch: (cause) =>
-          (cause as NodeJS.ErrnoException).code === "ENOENT"
-            ? new WorkspaceMoveEntrySourceNotFoundError({
-                ...errorContext,
-                resolvedPath: effectiveSourcePath,
-              })
-            : new WorkspaceMoveEntryOperationError({
-                ...errorContext,
-                resolvedPath: effectiveSourcePath,
-                operationPath: effectiveSourcePath,
-                operation: "readlink-source",
-                cause,
-              }),
-      });
-      yield* claimDestination("symlink-destination", () =>
-        NodeFSP.symlink(linkTarget, effectiveDestinationPath),
-      );
-    } else {
-      // link(2) claims a previously absent destination atomically. Unlike rename(2), it fails
-      // with EEXIST when another process creates the destination concurrently and preserves the
-      // source inode and metadata until the old name is removed below.
-      yield* claimDestination("link-destination", () =>
-        NodeFSP.link(effectiveSourcePath, effectiveDestinationPath),
-      );
-    }
-
-    const removalError = yield* Effect.promise(async () => {
-      try {
-        await NodeFSP.unlink(effectiveSourcePath);
-        return null;
-      } catch (cause) {
-        try {
-          await NodeFSP.unlink(effectiveDestinationPath);
-        } catch (rollbackCause) {
+      catch: (cause) => {
+        if (!(cause instanceof SecureWorkspaceMoveError)) {
           return new WorkspaceMoveEntryOperationError({
             ...errorContext,
-            resolvedPath: effectiveDestinationPath,
-            operationPath: effectiveDestinationPath,
-            operation: "rollback-destination",
-            cause: new AggregateError(
-              [cause, rollbackCause],
-              "Failed to remove the move source and roll back its claimed destination.",
-            ),
+            resolvedPath: destination.absolutePath,
+            operationPath: destination.absolutePath,
+            operation: "rename",
+            cause,
           });
         }
-        return new WorkspaceMoveEntryOperationError({
-          ...errorContext,
-          resolvedPath: effectiveSourcePath,
-          operationPath: effectiveSourcePath,
-          operation: "unlink-source",
-          cause,
-        });
-      }
+        switch (cause.failure) {
+          case "path-escape":
+            return new WorkspaceMoveEntryPathEscapeError({
+              ...errorContext,
+              resolvedWorkspaceRoot: input.cwd,
+              resolvedPath: cause.operationPath,
+            });
+          case "source-not-found":
+            return new WorkspaceMoveEntrySourceNotFoundError({
+              ...errorContext,
+              resolvedPath: cause.operationPath,
+            });
+          case "source-kind-mismatch":
+            return new WorkspaceMoveEntrySourceKindMismatchError({
+              ...errorContext,
+              resolvedPath: cause.operationPath,
+            });
+          case "destination-exists":
+            return new WorkspaceMoveEntryDestinationExistsError({
+              ...errorContext,
+              resolvedPath: cause.operationPath,
+            });
+          case "destination-parent-not-found":
+            return new WorkspaceMoveEntryDestinationParentNotFoundError({
+              ...errorContext,
+              resolvedPath: cause.operationPath,
+            });
+          case "destination-parent-not-directory":
+            return new WorkspaceMoveEntryDestinationParentNotDirectoryError({
+              ...errorContext,
+              resolvedPath: cause.operationPath,
+            });
+          case "operation-failed":
+          case "unsupported-platform":
+            return new WorkspaceMoveEntryOperationError({
+              ...errorContext,
+              resolvedPath: destination.absolutePath,
+              operationPath: cause.operationPath,
+              operation: "rename",
+              cause,
+            });
+        }
+      },
     });
-    if (removalError !== null) {
-      return yield* removalError;
-    }
     yield* workspaceEntries.refresh(input.cwd);
     return {
       sourceRelativePath: source.relativePath,
