@@ -1,4 +1,10 @@
-import { type EnvironmentId, type ProjectReadFileResult, WS_METHODS } from "@t3tools/contracts";
+import {
+  type EnvironmentId,
+  type ProjectListEntriesInput,
+  type ProjectMoveEntryInput,
+  type ProjectReadFileResult,
+  WS_METHODS,
+} from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import { Atom } from "effect/unstable/reactivity";
@@ -38,6 +44,29 @@ export interface OptimisticProjectFileTarget {
 
 function optimisticProjectFileKey(target: OptimisticProjectFileTarget): string {
   return JSON.stringify([target.environmentId, target.cwd, target.relativePath]);
+}
+
+export function projectEntryParentDirectory(relativePath: string): string | undefined {
+  const lastSeparator = relativePath.lastIndexOf("/");
+  return lastSeparator < 0 ? undefined : relativePath.slice(0, lastSeparator);
+}
+
+export function projectMoveListRefreshInputs(
+  input: ProjectMoveEntryInput,
+): ReadonlyArray<ProjectListEntriesInput> {
+  const directories = new Set<string | undefined>([
+    undefined,
+    projectEntryParentDirectory(input.sourceRelativePath),
+    projectEntryParentDirectory(input.destinationRelativePath),
+  ]);
+  return Array.from(directories).flatMap((directory) => [
+    { cwd: input.cwd, ...(directory === undefined ? {} : { directory }) },
+    {
+      cwd: input.cwd,
+      ...(directory === undefined ? {} : { directory }),
+      includeIgnored: true,
+    },
+  ]);
 }
 
 export function createProjectEnvironmentAtoms<R, E>(
@@ -118,6 +147,24 @@ export function createProjectEnvironmentAtoms<R, E>(
               input: { cwd: input.cwd, relativePath: input.relativePath },
             }),
           );
+        }),
+    }),
+    moveEntry: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projects:move-entry",
+      tag: WS_METHODS.projectsMoveEntry,
+      scheduler: fileScheduler,
+      concurrency: {
+        mode: "serial",
+        key: ({ environmentId, input }) => JSON.stringify([environmentId, input.cwd]),
+      },
+      onSuccess: ({ environmentId, input }, registry) =>
+        Effect.sync(() => {
+          for (const listInput of projectMoveListRefreshInputs(input)) {
+            registry.refresh(listEntries({ environmentId, input: listInput }));
+          }
+          for (const relativePath of [input.sourceRelativePath, input.destinationRelativePath]) {
+            registry.refresh(readFile({ environmentId, input: { cwd: input.cwd, relativePath } }));
+          }
         }),
     }),
     writeFile: createEnvironmentRpcCommand(runtime, {
