@@ -24,7 +24,6 @@ import {
   GitGraph,
   GitPullRequest,
   Globe2,
-  GripVertical,
   MessageSquare,
   MoreHorizontal,
   Plus,
@@ -937,7 +936,10 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     <SortableRightPanelTab key={surface.id} id={surface.id}>
                       {(sortable) => (
                         <div
-                          ref={sortable.setNodeRef}
+                          ref={(element) => {
+                            sortable.setNodeRef(element);
+                            sortable.setActivatorNodeRef(element);
+                          }}
                           style={{
                             transform: CSS.Translate.toString(sortable.transform),
                             transition: sortable.transition,
@@ -946,10 +948,15 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                           role="presentation"
                           data-active-tab={active}
                           onMouseDown={handleTabMouseDown}
+                          onPointerDown={(event) => {
+                            // File tabs can still be Option-dragged into the composer as mentions.
+                            if (composerMention !== null && event.altKey) return;
+                            sortable.listeners?.onPointerDown?.(event);
+                          }}
                           onAuxClick={(event) => handleTabAuxClick(event, surface)}
                           onContextMenu={(event) => void handleTabContextMenu(event, surface)}
                           className={cn(
-                            "cursor-pointer group/tab flex h-6 max-w-36 shrink-0 items-center gap-0.5 rounded-md pr-2 pl-1.5 text-xs",
+                            "group/tab flex h-6 max-w-36 shrink-0 cursor-grab items-center gap-0.5 rounded-md pr-2 pl-1.5 text-xs active:cursor-grabbing",
                             active
                               ? "bg-accent text-foreground"
                               : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
@@ -964,6 +971,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                                 ? `Close and delete ${title}`
                                 : `Close ${title}`
                             }
+                            onPointerDown={(event) => event.stopPropagation()}
                             onClick={() => void closeSurfaceAndRestoreFocus(surface)}
                           >
                             <span className="relative flex size-3 items-center justify-center group-hover/tab:hidden group-focus-visible/close:hidden">
@@ -989,6 +997,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                               value={renamingChatTitle}
                               onChange={(event) => setRenamingChatTitle(event.target.value)}
                               onBlur={commitChatRename}
+                              onPointerDown={(event) => event.stopPropagation()}
                               onClick={(event) => event.stopPropagation()}
                               onKeyDown={(event) => {
                                 if (event.key === "Enter") {
@@ -1007,6 +1016,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                                 render={
                                   <button
                                     type="button"
+                                    {...sortable.attributes}
                                     ref={(element) => {
                                       if (element) tabButtonRefs.current.set(surface.id, element);
                                       else tabButtonRefs.current.delete(surface.id);
@@ -1016,13 +1026,18 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                                     aria-selected={active}
                                     aria-controls="right-panel-active-surface"
                                     tabIndex={active ? 0 : -1}
-                                    className="cursor-pointer flex min-w-0 items-center"
+                                    className="flex min-w-0 cursor-grab items-center active:cursor-grabbing"
                                     draggable={composerMention !== null}
                                     onDragStart={(event) =>
                                       handleTabDragStart(event, composerMention)
                                     }
                                     onClick={() => props.onActivate(surface)}
-                                    onKeyDown={(event) => handleTabKeyDown(event, surface)}
+                                    onKeyDown={(event) => {
+                                      handleTabKeyDown(event, surface);
+                                      if (!event.defaultPrevented && event.key === " ") {
+                                        sortable.listeners?.onKeyDown?.(event);
+                                      }
+                                    }}
                                     onDoubleClick={() => {
                                       if (surface.kind === "chat")
                                         beginChatRename(surface.threadId);
@@ -1035,17 +1050,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                               <TooltipPopup>{title}</TooltipPopup>
                             </Tooltip>
                           )}
-                          <button
-                            ref={sortable.setActivatorNodeRef}
-                            type="button"
-                            {...sortable.attributes}
-                            {...sortable.listeners}
-                            aria-label={`Reorder ${title}`}
-                            title="Drag to reorder"
-                            className="inline-flex size-4 shrink-0 cursor-grab items-center justify-center rounded-sm text-muted-foreground/60 opacity-0 outline-none hover:bg-muted hover:text-foreground group-hover/tab:opacity-100 active:cursor-grabbing focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-ring"
-                          >
-                            <GripVertical aria-hidden className="size-3" />
-                          </button>
                           {chat?.running || chat?.needsAttention || chat?.unread ? (
                             <span
                               className={cn(
