@@ -432,6 +432,10 @@ describe("DesktopWindow", () => {
         assert.isUndefined(createdWindowOptions[0]?.x);
         assert.isUndefined(createdWindowOptions[0]?.y);
         assert.isTrue(createdWindowOptions[0]?.disableAutoHideCursor);
+        assert.equal(createdWindowOptions[0]?.titleBarStyle, "hiddenInset");
+        assert.deepEqual(createdWindowOptions[0]?.trafficLightPosition, { x: 16, y: 18 });
+        assert.equal(createdWindowOptions[0]?.vibrancy, "sidebar");
+        assert.equal(createdWindowOptions[0]?.visualEffectState, "followWindow");
         assert.isFalse(createdWindowOptions[0]?.webPreferences?.backgroundThrottling);
         assert.deepEqual(fakeWindow.setAutoHideCursor.mock.calls, [[false]]);
         assert.deepEqual(fakeWindow.loadURL.mock.calls[0], ["t3code-dev://app/"]);

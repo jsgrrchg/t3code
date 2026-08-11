@@ -44,7 +44,7 @@ const DEVELOPMENT_RETRYABLE_LOAD_ERROR_CODES = new Set([
 
 type WindowTitleBarOptions = Pick<
   Electron.BrowserWindowConstructorOptions,
-  "titleBarOverlay" | "titleBarStyle" | "trafficLightPosition"
+  "titleBarOverlay" | "titleBarStyle" | "trafficLightPosition" | "vibrancy" | "visualEffectState"
 >;
 
 type DesktopWindowRuntimeServices =
@@ -204,6 +204,8 @@ function getWindowTitleBarOptions(
     return {
       titleBarStyle: "hiddenInset",
       trafficLightPosition: { x: 16, y: 18 },
+      vibrancy: "sidebar",
+      visualEffectState: "followWindow",
     };
   }
 

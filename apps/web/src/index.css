@@ -1391,6 +1391,26 @@ html.dark[data-theme-id="t3-chat"] [data-app-sidebar] {
   border-color: var(--sidebar-border);
 }
 
+/* The macOS desktop window supplies the semantic sidebar material through
+   Electron/AppKit. Keep the document backdrop clear so that material can
+   reach the renderer, then tint it with the same user-controlled opacity as
+   every other glass surface. Only one sidebar layer owns the tint; the inner
+   layer retains its grain image without compositing the tint twice. */
+html.electron-macos:has([data-app-sidebar]),
+html.electron-macos:has([data-app-sidebar]) body {
+  background-color: transparent !important;
+}
+
+html.electron-macos [data-app-sidebar] {
+  --native-sidebar-tint: color-mix(in srgb, var(--sidebar) var(--glass-opacity), transparent);
+  --sidebar-stage-fade: var(--native-sidebar-tint);
+  background-color: var(--native-sidebar-tint);
+}
+
+html.electron-macos [data-app-sidebar] [data-slot="sidebar-inner"] {
+  background-color: transparent;
+}
+
 .theme-json-key {
   color: var(--app-theme-accent, var(--color-blue-600));
 }
