@@ -179,6 +179,16 @@ const ReviewBranchDiffCursor = Schema.Struct({
   offset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
 type ReviewBranchDiffCursor = typeof ReviewBranchDiffCursor.Type;
+const ReviewWorkingTreeDiffCursor = Schema.Struct({
+  version: Schema.Literal(1),
+  sourceKind: Schema.Literal("working-tree"),
+  snapshotId: Schema.String.check(Schema.isNonEmpty()),
+  baseTreeSha: GitObjectId,
+  worktreeTreeSha: GitObjectId,
+  ignoreWhitespace: Schema.Boolean,
+  offset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+type ReviewWorkingTreeDiffCursor = typeof ReviewWorkingTreeDiffCursor.Type;
 const decodeGitHistoryTotalCount = Schema.decodeUnknownEffect(
   Schema.NumberFromString.check(Schema.isGreaterThanOrEqualTo(0)),
 );
@@ -2516,7 +2526,21 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     ignoreWhitespace: boolean,
   ) => hashReviewDiffValue(cwd, `${mergeBaseSha}\0${headSha}\0${ignoreWhitespace ? "1" : "0"}`);
 
+  const snapshotIdForReviewWorkingTree = (
+    cwd: string,
+    baseTreeSha: string,
+    worktreeTreeSha: string,
+    ignoreWhitespace: boolean,
+  ) =>
+    hashReviewDiffValue(
+      cwd,
+      `working-tree\0${baseTreeSha}\0${worktreeTreeSha}\0${ignoreWhitespace ? "1" : "0"}`,
+    );
+
   const encodeReviewBranchCursor = (cursor: ReviewBranchDiffCursor): string =>
+    Encoding.encodeBase64Url(JSON.stringify(cursor));
+
+  const encodeReviewWorkingTreeCursor = (cursor: ReviewWorkingTreeDiffCursor): string =>
     Encoding.encodeBase64Url(JSON.stringify(cursor));
 
   const decodeReviewBranchCursor = Effect.fn("decodeReviewBranchCursor")(function* (
@@ -2614,9 +2638,158 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     } satisfies ReviewBranchDiffCursor;
   });
 
-  const readReviewBranchPagePatch = Effect.fn("readReviewBranchPagePatch")(function* (
+  const decodeReviewWorkingTreeCursor = Effect.fn("decodeReviewWorkingTreeCursor")(function* (
     input: ReviewDiffPreviewInput,
-    cursor: ReviewBranchDiffCursor,
+    encoded: string,
+  ) {
+    const decodedText = Encoding.decodeBase64UrlString(encoded);
+    if (Result.isFailure(decodedText)) {
+      return yield* reviewDiffPageError(input.cwd, "Review diff cursor is not valid base64url.");
+    }
+    const decoded = decodeJsonResult(ReviewWorkingTreeDiffCursor)(decodedText.success);
+    if (Result.isFailure(decoded)) {
+      return yield* reviewDiffPageError(
+        input.cwd,
+        "Review diff cursor has an invalid shape.",
+        decoded.failure,
+      );
+    }
+    const cursor = decoded.success;
+    if (cursor.ignoreWhitespace !== (input.ignoreWhitespace ?? false)) {
+      return yield* reviewDiffPageError(
+        input.cwd,
+        "Review diff cursor belongs to a different comparison scope.",
+      );
+    }
+    const expectedSnapshotId = yield* snapshotIdForReviewWorkingTree(
+      input.cwd,
+      cursor.baseTreeSha,
+      cursor.worktreeTreeSha,
+      cursor.ignoreWhitespace,
+    );
+    if (expectedSnapshotId !== cursor.snapshotId) {
+      return yield* reviewDiffPageError(input.cwd, "Review diff cursor snapshot is invalid.");
+    }
+    return cursor;
+  });
+
+  const resolveReviewWorkingTreeCursor = Effect.fn("resolveReviewWorkingTreeCursor")(function* (
+    input: ReviewDiffPreviewInput,
+  ) {
+    const encodedCursor = input.pagination?.cursor;
+    if (encodedCursor !== undefined) {
+      return yield* decodeReviewWorkingTreeCursor(input, encodedCursor);
+    }
+
+    const repositoryPaths = yield* resolveRepositoryPaths(input.cwd);
+    if (repositoryPaths?.worktreeRoot === null || repositoryPaths === null) {
+      return yield* reviewDiffPageError(input.cwd, "Review diff has no working tree to paginate.");
+    }
+    const worktreeRoot = repositoryPaths.worktreeRoot;
+    const headResult = yield* executeGit(
+      "GitVcsDriver.getReviewDiffPreview.workingTreeSnapshot.head",
+      worktreeRoot,
+      ["rev-parse", "--verify", "HEAD^{commit}"],
+      { allowNonZeroExit: true, maxOutputBytes: 256 },
+    );
+    const baseTreeSha =
+      headResult.exitCode === 0
+        ? yield* decodeGitObjectId(headResult.stdout.trim()).pipe(
+            Effect.mapError((cause) =>
+              reviewDiffPageError(
+                input.cwd,
+                "Git returned an invalid working-tree base object ID.",
+                cause,
+              ),
+            ),
+          )
+        : yield* executeGit(
+            "GitVcsDriver.getReviewDiffPreview.workingTreeSnapshot.emptyTree",
+            worktreeRoot,
+            ["hash-object", "-t", "tree", "--stdin"],
+            { stdin: "", maxOutputBytes: 256 },
+          ).pipe(
+            Effect.flatMap((result) => decodeGitObjectId(result.stdout.trim())),
+            Effect.mapError((cause) =>
+              reviewDiffPageError(
+                input.cwd,
+                "Failed to resolve the empty Git tree for an unborn working tree.",
+                cause,
+              ),
+            ),
+          );
+    const worktreeTreeSha = yield* Effect.acquireUseRelease(
+      fileSystem
+        .makeTempDirectory({ prefix: "t3code-review-index-" })
+        .pipe(
+          Effect.mapError((cause) =>
+            reviewDiffPageError(input.cwd, "Failed to create a temporary review index.", cause),
+          ),
+        ),
+      (tempDirectory) => {
+        const indexPath = path.join(tempDirectory, "index");
+        const env = { GIT_INDEX_FILE: indexPath };
+        return Effect.gen(function* () {
+          yield* executeGit(
+            "GitVcsDriver.getReviewDiffPreview.workingTreeSnapshot.readTree",
+            worktreeRoot,
+            ["read-tree", baseTreeSha],
+            { env, fallbackErrorDetail: "Failed to initialize the temporary review index." },
+          );
+          yield* executeGit(
+            "GitVcsDriver.getReviewDiffPreview.workingTreeSnapshot.add",
+            worktreeRoot,
+            ["add", "-A", "--", "."],
+            { env, fallbackErrorDetail: "Failed to snapshot the working tree." },
+          );
+          const treeResult = yield* executeGit(
+            "GitVcsDriver.getReviewDiffPreview.workingTreeSnapshot.writeTree",
+            worktreeRoot,
+            ["write-tree"],
+            {
+              env,
+              maxOutputBytes: 256,
+              fallbackErrorDetail: "Failed to write the working-tree snapshot.",
+            },
+          );
+          return yield* decodeGitObjectId(treeResult.stdout.trim()).pipe(
+            Effect.mapError((cause) =>
+              reviewDiffPageError(
+                input.cwd,
+                "Git returned an invalid working-tree snapshot object ID.",
+                cause,
+              ),
+            ),
+          );
+        });
+      },
+      (tempDirectory) =>
+        fileSystem.remove(tempDirectory, { recursive: true }).pipe(Effect.catch(() => Effect.void)),
+    );
+    const ignoreWhitespace = input.ignoreWhitespace ?? false;
+    return {
+      version: 1 as const,
+      sourceKind: "working-tree" as const,
+      snapshotId: yield* snapshotIdForReviewWorkingTree(
+        input.cwd,
+        baseTreeSha,
+        worktreeTreeSha,
+        ignoreWhitespace,
+      ),
+      baseTreeSha,
+      worktreeTreeSha,
+      ignoreWhitespace,
+      offset: 0,
+    } satisfies ReviewWorkingTreeDiffCursor;
+  });
+
+  const readReviewDiffPagePatch = Effect.fn("readReviewDiffPagePatch")(function* (
+    input: ReviewDiffPreviewInput,
+    comparison: {
+      readonly baseSha: string;
+      readonly headSha: string;
+      readonly ignoreWhitespace: boolean;
+    },
     files: ReturnType<typeof parseCommitChangedPaths>,
   ): Effect.fn.Return<
     { readonly patch: string; readonly consumed: number; readonly truncated: boolean },
@@ -2637,9 +2810,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         "--no-ext-diff",
         "--no-textconv",
         "--minimal",
-        ...(cursor.ignoreWhitespace ? ["--ignore-all-space"] : []),
-        cursor.mergeBaseSha,
-        cursor.headSha,
+        ...(comparison.ignoreWhitespace ? ["--ignore-all-space"] : []),
+        comparison.baseSha,
+        comparison.headSha,
         "--",
         ...paths,
       ],
@@ -2659,9 +2832,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         truncated: true,
       };
     }
-    return yield* readReviewBranchPagePatch(
+    return yield* readReviewDiffPagePatch(
       input,
-      cursor,
+      comparison,
       files.slice(0, Math.ceil(files.length / 2)),
     );
   });
@@ -2708,7 +2881,15 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const page =
       candidates.length === 0
         ? { patch: "", consumed: 0, truncated: false }
-        : yield* readReviewBranchPagePatch(input, cursor, candidates);
+        : yield* readReviewDiffPagePatch(
+            input,
+            {
+              baseSha: cursor.mergeBaseSha,
+              headSha: cursor.headSha,
+              ignoreWhitespace: cursor.ignoreWhitespace,
+            },
+            candidates,
+          );
     const nextOffset = cursor.offset + page.consumed;
     const nextCursor =
       nextOffset < manifest.length
@@ -2740,6 +2921,87 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     };
   });
 
+  const getPagedReviewWorkingTreeDiff = Effect.fn("getPagedReviewWorkingTreeDiff")(function* (
+    input: ReviewDiffPreviewInput,
+  ) {
+    const cursor = yield* resolveReviewWorkingTreeCursor(input);
+    const diffOptions = [
+      "diff",
+      "-M",
+      "-C",
+      ...(cursor.ignoreWhitespace ? ["--ignore-all-space"] : []),
+    ];
+    const [manifestResult, numstatResult] = yield* Effect.all(
+      [
+        executeGit(
+          "GitVcsDriver.getReviewDiffPreview.workingTreePage.manifest",
+          input.cwd,
+          [...diffOptions, "--name-status", "-z", cursor.baseTreeSha, cursor.worktreeTreeSha, "--"],
+          {
+            maxOutputBytes: REVIEW_DIFF_MANIFEST_MAX_OUTPUT_BYTES,
+            fallbackErrorDetail: "Working-tree diff manifest exceeded the configured limit.",
+          },
+        ),
+        executeGit(
+          "GitVcsDriver.getReviewDiffPreview.workingTreePage.numstat",
+          input.cwd,
+          [...diffOptions, "--numstat", "-z", cursor.baseTreeSha, cursor.worktreeTreeSha, "--"],
+          {
+            maxOutputBytes: REVIEW_DIFF_MANIFEST_MAX_OUTPUT_BYTES,
+            fallbackErrorDetail: "Working-tree diff statistics exceeded the configured limit.",
+          },
+        ),
+      ],
+      { concurrency: 2 },
+    );
+    const manifest = parseCommitChangedPaths(manifestResult.stdout);
+    if (cursor.offset > manifest.length) {
+      return yield* reviewDiffPageError(input.cwd, "Review diff cursor is past the manifest end.");
+    }
+    const candidates = manifest.slice(cursor.offset, cursor.offset + REVIEW_DIFF_PAGE_FILE_LIMIT);
+    const page =
+      candidates.length === 0
+        ? { patch: "", consumed: 0, truncated: false }
+        : yield* readReviewDiffPagePatch(
+            input,
+            {
+              baseSha: cursor.baseTreeSha,
+              headSha: cursor.worktreeTreeSha,
+              ignoreWhitespace: cursor.ignoreWhitespace,
+            },
+            candidates,
+          );
+    const nextOffset = cursor.offset + page.consumed;
+    const nextCursor =
+      nextOffset < manifest.length
+        ? encodeReviewWorkingTreeCursor({ ...cursor, offset: nextOffset })
+        : null;
+    const stats = parseCommitNumstat(numstatResult.stdout);
+    const diffHash = yield* hashReviewDiffValue(input.cwd, page.patch);
+    const source: ReviewDiffPreviewSource = {
+      id: "working-tree",
+      kind: "working-tree",
+      title: "Dirty worktree",
+      baseRef: cursor.baseTreeSha,
+      headRef: cursor.worktreeTreeSha,
+      diff: page.patch,
+      diffHash,
+      truncated: page.truncated,
+      nextCursor,
+      snapshotId: cursor.snapshotId,
+      stats: {
+        fileCount: manifest.length,
+        additions: stats.insertions,
+        deletions: stats.deletions,
+      },
+    };
+    return {
+      cwd: input.cwd,
+      generatedAt: yield* DateTime.now,
+      sources: [source],
+    };
+  });
+
   const getReviewDiffPreview = Effect.fn("getReviewDiffPreview")(function* (
     input: ReviewDiffPreviewInput,
   ) {
@@ -2750,6 +3012,10 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         generatedAt: yield* DateTime.now,
         sources: [],
       };
+    }
+
+    if (input.pagination?.sourceKind === "working-tree") {
+      return yield* getPagedReviewWorkingTreeDiff(input);
     }
 
     const branch = details.branch;
@@ -3006,22 +3272,33 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     input: ReviewDiffFileContentsInput,
   ) {
     if (input.sourceKind === "working-tree") {
-      const repositoryRoot = yield* runGitStdout(
-        "GitVcsDriver.getReviewDiffFileContents.repositoryRoot",
-        input.cwd,
-        ["rev-parse", "--show-toplevel"],
-      ).pipe(Effect.map((value) => value.trim()));
-      if (repositoryRoot.length === 0) {
+      const repositoryRoot =
+        input.headRef === null
+          ? yield* runGitStdout(
+              "GitVcsDriver.getReviewDiffFileContents.repositoryRoot",
+              input.cwd,
+              ["rev-parse", "--show-toplevel"],
+            ).pipe(Effect.map((value) => value.trim()))
+          : null;
+      if (repositoryRoot !== null && repositoryRoot.length === 0) {
         return yield* reviewDiffFileError(input, "Could not resolve the Git repository root.");
       }
+      const newContentsEffect =
+        input.changeType === "deleted"
+          ? Effect.succeed("")
+          : input.headRef !== null
+            ? readReviewFileAtRevision(input, input.headRef, input.newPath)
+            : repositoryRoot !== null
+              ? readWorkingTreeReviewFile(input, repositoryRoot)
+              : Effect.fail(
+                  reviewDiffFileError(input, "Could not resolve the working-tree diff source."),
+                );
       const [oldContents, newContents] = yield* Effect.all(
         [
           input.changeType === "new"
             ? Effect.succeed("")
             : readReviewFileAtRevision(input, input.baseRef ?? "HEAD", input.oldPath),
-          input.changeType === "deleted"
-            ? Effect.succeed("")
-            : readWorkingTreeReviewFile(input, repositoryRoot),
+          newContentsEffect,
         ],
         { concurrency: 2 },
       );

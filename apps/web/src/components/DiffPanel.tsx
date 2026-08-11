@@ -14,7 +14,12 @@ import {
   type LoadedDiffSlice,
 } from "@t3tools/client-runtime/state/paged-diff";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
-import type { ReviewDiffPreviewSource, ScopedThreadRef, TurnId } from "@t3tools/contracts";
+import type {
+  ReviewDiffPreviewSource,
+  ReviewDiffPreviewSourceKind,
+  ScopedThreadRef,
+  TurnId,
+} from "@t3tools/contracts";
 import {
   ArrowRightIcon,
   CheckIcon,
@@ -47,7 +52,11 @@ import {
   resolveFileDiffPath,
   type RenderablePatch,
 } from "../lib/diffRendering";
-import { areAllDiffFilesCollapsed, toggleAllDiffFiles } from "../lib/diffCollapse";
+import {
+  areAllDiffFilesCollapsed,
+  isDiffFileCollapsed,
+  type DiffFoldOverride,
+} from "../lib/diffCollapse";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useProject, useThread } from "../state/entities";
 import { resolveThreadRouteRef } from "../threadRoutes";
@@ -85,12 +94,13 @@ import { reviewEnvironment } from "../state/review";
 import { vcsEnvironment } from "../state/vcs";
 import { buildBaseRefChoices, filterBaseRefChoices } from "../lib/baseRefChoices";
 import { createGitDiffFileContentsLoader } from "../lib/diffFileContents";
-import { branchDiffPageFromSource, branchReviewDiffScopeKey } from "../lib/reviewDiffPagination";
+import { reviewDiffPageFromSource, reviewDiffScopeKey } from "../lib/reviewDiffPagination";
 import {
   diffPanelViewStateKey,
   getDiffPanelViewState,
   isDiffPanelRevealRequestHandled,
-  rememberDiffPanelCollapsedFileKeys,
+  rememberDiffPanelFoldState,
+  rememberDiffPanelPagedDiff,
   rememberDiffPanelRevealRequest,
 } from "../diffPanelViewState";
 import { useRememberedDiffPanelScroll } from "./diffs/useRememberedDiffPanelScroll";
@@ -98,12 +108,7 @@ import { useRememberedDiffPanelScroll } from "./diffs/useRememberedDiffPanelScro
 type DiffThemeType = "light" | "dark";
 const AUTOMATIC_BASE_REF = "__automatic_base_ref__";
 
-interface CollapsedDiffFilesState {
-  readonly scopeKey: string | null;
-  readonly fileKeys: ReadonlySet<string>;
-}
-
-const EMPTY_COLLAPSED_DIFF_FILE_KEYS: ReadonlySet<string> = new Set();
+const EMPTY_TOGGLED_DIFF_FILE_KEYS: ReadonlySet<string> = new Set();
 const EMPTY_DIFF_SLICES: ReadonlyArray<LoadedDiffSlice> = [];
 
 interface DiffPanelProps {
@@ -129,11 +134,6 @@ export default function DiffPanel({
   const [wordWrap, setWordWrap] = useState(settings.wordWrap);
   const [diffIgnoreWhitespace, setDiffIgnoreWhitespace] = useState(settings.diffIgnoreWhitespace);
   const [baseRefQuery, setBaseRefQuery] = useState("");
-  const [collapsedDiffFiles, setCollapsedDiffFiles] = useState<CollapsedDiffFilesState>(() => ({
-    scopeKey: null,
-    fileKeys: EMPTY_COLLAPSED_DIFF_FILE_KEYS,
-  }));
-  const [codeViewRevision, setCodeViewRevision] = useState(0);
   const codeViewRef = useRef<AnnotatableCodeViewHandle>(null);
   const codeViewRootRef = useRef<HTMLDivElement>(null);
   const branchParseCacheRef = useRef(new Map<string, RenderablePatch>());
@@ -210,6 +210,8 @@ export default function DiffPanel({
 
   const selectedTurnId = diffSelection.kind === "turn" ? diffSelection.turnId : null;
   const selectedGitScope = diffSelection.kind === "unstaged" ? "unstaged" : "branch";
+  const selectedGitSourceKind: ReviewDiffPreviewSourceKind =
+    selectedGitScope === "unstaged" ? "working-tree" : "branch-range";
   const selectedBaseRef = diffSelection.kind === "branch" ? diffSelection.baseRef : null;
   const selectedFilePath = diffSelection.kind === "turn" ? diffSelection.filePath : null;
   const selectedFileRevealRequestId =
@@ -235,19 +237,39 @@ export default function DiffPanel({
   const collapseScopeKey = routeThreadRef
     ? diffPanelViewStateKey(routeThreadRef, reviewSectionId)
     : null;
-  const codeViewMountKey = `${collapseScopeKey ?? reviewSectionId}:${codeViewRevision}`;
-  const rememberedCollapsedDiffFileKeys = useMemo(
-    () =>
-      collapseScopeKey
-        ? (getDiffPanelViewState(collapseScopeKey)?.collapsedFileKeys ??
-          EMPTY_COLLAPSED_DIFF_FILE_KEYS)
-        : EMPTY_COLLAPSED_DIFF_FILE_KEYS,
+  const rememberedViewState = useMemo(
+    () => (collapseScopeKey ? getDiffPanelViewState(collapseScopeKey) : null),
     [collapseScopeKey],
   );
-  const collapsedDiffFileKeys =
-    collapsedDiffFiles.scopeKey === collapseScopeKey
-      ? collapsedDiffFiles.fileKeys
-      : rememberedCollapsedDiffFileKeys;
+  const [foldOverrideState, setFoldOverrideState] = useState<{
+    readonly scopeKey: string | null;
+    readonly value: DiffFoldOverride;
+  }>(() => ({ scopeKey: collapseScopeKey, value: rememberedViewState?.foldOverride ?? null }));
+  const [toggledDiffFilesState, setToggledDiffFilesState] = useState<{
+    readonly scopeKey: string | null;
+    readonly fileKeys: ReadonlySet<string>;
+  }>(() => ({
+    scopeKey: collapseScopeKey,
+    fileKeys: rememberedViewState?.toggledFileKeys ?? EMPTY_TOGGLED_DIFF_FILE_KEYS,
+  }));
+  const foldOverride =
+    foldOverrideState.scopeKey === collapseScopeKey
+      ? foldOverrideState.value
+      : (rememberedViewState?.foldOverride ?? null);
+  const toggledDiffFileKeys =
+    toggledDiffFilesState.scopeKey === collapseScopeKey
+      ? toggledDiffFilesState.fileKeys
+      : (rememberedViewState?.toggledFileKeys ?? EMPTY_TOGGLED_DIFF_FILE_KEYS);
+  useEffect(() => {
+    setFoldOverrideState({
+      scopeKey: collapseScopeKey,
+      value: rememberedViewState?.foldOverride ?? null,
+    });
+    setToggledDiffFilesState({
+      scopeKey: collapseScopeKey,
+      fileKeys: rememberedViewState?.toggledFileKeys ?? EMPTY_TOGGLED_DIFF_FILE_KEYS,
+    });
+  }, [collapseScopeKey, rememberedViewState]);
   const reviewSectionTitle = selectedTurn
     ? `Turn ${selectedCheckpointTurnCount ?? "?"}`
     : selectedGitScope === "unstaged"
@@ -276,30 +298,40 @@ export default function DiffPanel({
   );
   const primaryBranchScopeKey =
     activeThread && activeCwd
-      ? branchReviewDiffScopeKey({
+      ? reviewDiffScopeKey({
           environmentId: activeThread.environmentId,
           cwd: activeCwd,
+          sourceKind: selectedGitSourceKind,
           baseRef: selectedBaseRef,
           ignoreWhitespace: diffIgnoreWhitespace,
         })
       : "inactive";
   const fallbackBranchScopeKey =
     activeThread && serverConfig?.cwd
-      ? branchReviewDiffScopeKey({
+      ? reviewDiffScopeKey({
           environmentId: activeThread.environmentId,
           cwd: serverConfig.cwd,
+          sourceKind: selectedGitSourceKind,
           baseRef: selectedBaseRef,
           ignoreWhitespace: diffIgnoreWhitespace,
         })
       : "inactive-fallback";
+  const rememberedPrimaryPagedDiff =
+    rememberedViewState?.pagedDiff?.scopeKey === primaryBranchScopeKey
+      ? rememberedViewState.pagedDiff
+      : null;
   const [branchSliceState, setBranchSliceState] = useState(() =>
-    createPagedDiffState(primaryBranchScopeKey),
+    createPagedDiffState(primaryBranchScopeKey, rememberedPrimaryPagedDiff?.slices),
   );
   const [branchSourceState, setBranchSourceState] = useState<{
     readonly scopeKey: string;
     readonly source: ReviewDiffPreviewSource | null;
     readonly legacy: boolean;
-  }>(() => ({ scopeKey: primaryBranchScopeKey, source: null, legacy: false }));
+  }>(() => ({
+    scopeKey: primaryBranchScopeKey,
+    source: rememberedPrimaryPagedDiff?.source ?? null,
+    legacy: rememberedPrimaryPagedDiff?.legacy ?? false,
+  }));
   const primaryBranchCursor =
     branchSliceState.scopeKey === primaryBranchScopeKey ? branchSliceState.requestCursor : null;
   const primaryBranchDiffPreview = useEnvironmentQuery(
@@ -310,14 +342,10 @@ export default function DiffPanel({
             cwd: activeCwd,
             ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
             ignoreWhitespace: diffIgnoreWhitespace,
-            ...(selectedGitScope === "branch"
-              ? {
-                  pagination: {
-                    sourceKind: "branch-range" as const,
-                    ...(primaryBranchCursor ? { cursor: primaryBranchCursor } : {}),
-                  },
-                }
-              : {}),
+            pagination: {
+              sourceKind: selectedGitSourceKind,
+              ...(primaryBranchCursor ? { cursor: primaryBranchCursor } : {}),
+            },
           },
         })
       : null,
@@ -335,17 +363,13 @@ export default function DiffPanel({
             cwd: serverConfig.cwd,
             ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
             ignoreWhitespace: diffIgnoreWhitespace,
-            ...(selectedGitScope === "branch"
-              ? {
-                  pagination: {
-                    sourceKind: "branch-range" as const,
-                    ...(branchSliceState.scopeKey === fallbackBranchScopeKey &&
-                    branchSliceState.requestCursor
-                      ? { cursor: branchSliceState.requestCursor }
-                      : {}),
-                  },
-                }
-              : {}),
+            pagination: {
+              sourceKind: selectedGitSourceKind,
+              ...(branchSliceState.scopeKey === fallbackBranchScopeKey &&
+              branchSliceState.requestCursor
+                ? { cursor: branchSliceState.requestCursor }
+                : {}),
+            },
           },
         })
       : null,
@@ -356,46 +380,42 @@ export default function DiffPanel({
   const activeBranchScopeKey = shouldRetryBranchDiffAtEnvironmentCwd
     ? fallbackBranchScopeKey
     : primaryBranchScopeKey;
+  const rememberedActivePagedDiff =
+    rememberedViewState?.pagedDiff?.scopeKey === activeBranchScopeKey
+      ? rememberedViewState.pagedDiff
+      : null;
   const activeReviewCwd = shouldRetryBranchDiffAtEnvironmentCwd
     ? (serverConfig?.cwd ?? activeCwd)
     : activeCwd;
   const activeBranchCursor =
     branchSliceState.scopeKey === activeBranchScopeKey ? branchSliceState.requestCursor : null;
   const firstPrimaryBranchDiffPreview = useEnvironmentQuery(
-    selectedTurnId === null && selectedGitScope === "branch" && activeThread && activeCwd
+    selectedTurnId === null && activeThread && activeCwd
       ? reviewEnvironment.diffPreview({
           environmentId: activeThread.environmentId,
           input: {
             cwd: activeCwd,
             ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
             ignoreWhitespace: diffIgnoreWhitespace,
-            pagination: { sourceKind: "branch-range" },
+            pagination: { sourceKind: selectedGitSourceKind },
           },
         })
       : null,
   );
   const firstFallbackBranchDiffPreview = useEnvironmentQuery(
-    selectedTurnId === null &&
-      selectedGitScope === "branch" &&
-      shouldRetryBranchDiffAtEnvironmentCwd &&
-      activeThread &&
-      serverConfig
+    selectedTurnId === null && shouldRetryBranchDiffAtEnvironmentCwd && activeThread && serverConfig
       ? reviewEnvironment.diffPreview({
           environmentId: activeThread.environmentId,
           input: {
             cwd: serverConfig.cwd,
             ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
             ignoreWhitespace: diffIgnoreWhitespace,
-            pagination: { sourceKind: "branch-range" },
+            pagination: { sourceKind: selectedGitSourceKind },
           },
         })
       : null,
   );
   const refreshBranchDiffPreview = useCallback(() => {
-    if (selectedGitScope !== "branch") {
-      branchDiffPreview.refresh();
-      return;
-    }
     setBranchSliceState(createPagedDiffState(activeBranchScopeKey));
     setBranchSourceState({ scopeKey: activeBranchScopeKey, source: null, legacy: false });
     branchParseCacheRef.current.clear();
@@ -403,10 +423,8 @@ export default function DiffPanel({
     else firstPrimaryBranchDiffPreview.refresh();
   }, [
     activeBranchScopeKey,
-    branchDiffPreview,
     firstFallbackBranchDiffPreview,
     firstPrimaryBranchDiffPreview,
-    selectedGitScope,
     shouldRetryBranchDiffAtEnvironmentCwd,
   ]);
   const canRefreshGitDiff =
@@ -416,17 +434,25 @@ export default function DiffPanel({
     : null;
 
   useEffect(() => {
-    if (selectedGitScope !== "branch" || branchSliceState.scopeKey === activeBranchScopeKey) return;
-    setBranchSliceState(createPagedDiffState(activeBranchScopeKey));
-    setBranchSourceState({ scopeKey: activeBranchScopeKey, source: null, legacy: false });
+    if (selectedTurnId !== null || branchSliceState.scopeKey === activeBranchScopeKey) return;
+    setBranchSliceState(
+      createPagedDiffState(activeBranchScopeKey, rememberedActivePagedDiff?.slices),
+    );
+    setBranchSourceState({
+      scopeKey: activeBranchScopeKey,
+      source: rememberedActivePagedDiff?.source ?? null,
+      legacy: rememberedActivePagedDiff?.legacy ?? false,
+    });
     branchParseCacheRef.current.clear();
-  }, [activeBranchScopeKey, branchSliceState.scopeKey, selectedGitScope]);
+  }, [activeBranchScopeKey, branchSliceState.scopeKey, rememberedActivePagedDiff, selectedTurnId]);
 
   useEffect(() => {
-    if (selectedGitScope !== "branch") return;
-    const source = branchDiffPreview.data?.sources.find((entry) => entry.kind === "branch-range");
+    if (selectedTurnId !== null) return;
+    const source = branchDiffPreview.data?.sources.find(
+      (entry) => entry.kind === selectedGitSourceKind,
+    );
     if (!source) return;
-    const page = branchDiffPageFromSource(source);
+    const page = reviewDiffPageFromSource(source);
     setBranchSourceState({ scopeKey: activeBranchScopeKey, source, legacy: page.legacy });
     setBranchSliceState((previous) => {
       const scoped =
@@ -439,7 +465,13 @@ export default function DiffPanel({
         result: page.result,
       });
     });
-  }, [activeBranchCursor, activeBranchScopeKey, branchDiffPreview.data, selectedGitScope]);
+  }, [
+    activeBranchCursor,
+    activeBranchScopeKey,
+    branchDiffPreview.data,
+    selectedGitSourceKind,
+    selectedTurnId,
+  ]);
 
   useEffect(() => {
     if (!canRefreshGitDiff) return;
@@ -467,9 +499,9 @@ export default function DiffPanel({
   }, [activeThreadRefreshKey, canRefreshGitDiff, latestTurn?.turnId, refreshBranchDiffPreview]);
 
   const selectedGitSource =
-    selectedGitScope === "branch" && branchSourceState.scopeKey === activeBranchScopeKey
+    selectedTurnId === null && branchSourceState.scopeKey === activeBranchScopeKey
       ? branchSourceState.source
-      : branchDiffPreview.data?.sources.find((source) => source.kind === "working-tree");
+      : null;
   const loadDiffFiles = useMemo<FileDiffContentsLoader | undefined>(() => {
     if (selectedTurnId !== null || !activeThread || !activeReviewCwd || !selectedGitSource) {
       return undefined;
@@ -526,38 +558,44 @@ export default function DiffPanel({
     ...(baseRefQuery.trim().length === 0 ? [AUTOMATIC_BASE_REF] : []),
     ...matchingBaseRefChoices.map(valueForBaseRefChoice),
   ];
-  const gitDiff = selectedGitSource?.diff;
   const branchLoadedSlices = selectPagedDiffSlices(
     branchSliceState,
     activeBranchScopeKey,
-    EMPTY_DIFF_SLICES,
+    rememberedActivePagedDiff?.slices ?? EMPTY_DIFF_SLICES,
   );
   const branchNextCursor = selectNextDiffCursor(branchLoadedSlices);
   const branchResponseIsLegacy =
     branchSourceState.scopeKey === activeBranchScopeKey && branchSourceState.legacy;
-  const selectedPatch = selectedTurn
-    ? activeCheckpointDiff.data?.diff
-    : selectedGitScope === "unstaged"
-      ? gitDiff
-      : undefined;
+  useEffect(() => {
+    if (!collapseScopeKey || selectedTurnId !== null) return;
+    rememberDiffPanelPagedDiff(collapseScopeKey, {
+      scopeKey: activeBranchScopeKey,
+      slices: branchLoadedSlices,
+      source: selectedGitSource,
+      legacy: branchResponseIsLegacy,
+    });
+  }, [
+    activeBranchScopeKey,
+    branchLoadedSlices,
+    branchResponseIsLegacy,
+    collapseScopeKey,
+    selectedGitSource,
+    selectedTurnId,
+  ]);
+  const selectedPatch = selectedTurn ? activeCheckpointDiff.data?.diff : undefined;
   const isSelectedPatchTruncated = selectedTurn
     ? false
-    : selectedGitScope === "branch"
-      ? branchLoadedSlices.some((slice) => slice.truncated)
-      : selectedGitSource?.truncated === true;
+    : branchLoadedSlices.some((slice) => slice.truncated);
   const isLoadingSelectedPatch = selectedTurn
     ? activeCheckpointDiff.isPending
-    : selectedGitScope === "branch"
-      ? branchLoadedSlices.length === 0 && branchDiffPreview.isPending
-      : branchDiffPreview.isPending;
+    : branchLoadedSlices.length === 0 && branchDiffPreview.isPending;
   const selectedPatchError = selectedTurn ? activeCheckpointDiff.error : branchDiffPreview.error;
-  const hasResolvedPatch =
-    selectedGitScope === "branch" && !selectedTurn
-      ? branchLoadedSlices.length > 0
-      : typeof selectedPatch === "string";
+  const hasResolvedPatch = !selectedTurn
+    ? branchLoadedSlices.length > 0
+    : typeof selectedPatch === "string";
   const hasNoNetChanges =
     hasResolvedPatch &&
-    (selectedGitScope === "branch" && !selectedTurn
+    (!selectedTurn
       ? branchNextCursor === null && branchLoadedSlices.every((slice) => slice.patch.trim() === "")
       : selectedPatch?.trim().length === 0);
   const directRenderablePatch = useMemo(
@@ -584,10 +622,9 @@ export default function DiffPanel({
       }),
     [activeBranchScopeKey, branchLoadedSlices, resolvedTheme, selectedGitSource?.snapshotId],
   );
-  const selectedRenderablePatches =
-    selectedGitScope === "branch" && !selectedTurn
-      ? branchRenderablePatches
-      : [directRenderablePatch];
+  const selectedRenderablePatches = !selectedTurn
+    ? branchRenderablePatches
+    : [directRenderablePatch];
   const renderableFiles = useMemo(() => {
     return selectedRenderablePatches.flatMap((patch) =>
       patch?.kind === "files"
@@ -622,16 +659,20 @@ export default function DiffPanel({
           fileDiff,
           filePath: resolveFileDiffPath(fileDiff),
           fileKey,
-          collapsed: collapsedDiffFileKeys.has(fileKey),
+          collapsed: isDiffFileCollapsed(fileKey, foldOverride, toggledDiffFileKeys, "expanded"),
         };
       }),
-    [collapsedDiffFileKeys, renderableFileEntries],
+    [foldOverride, renderableFileEntries, toggledDiffFileKeys],
   );
   const diffFileKeys = useMemo(() => codeViewFiles.map((file) => file.fileKey), [codeViewFiles]);
+  const collapsedDiffFileKeys = useMemo(
+    () => new Set(codeViewFiles.filter((file) => file.collapsed).map((file) => file.fileKey)),
+    [codeViewFiles],
+  );
   const allDiffFilesCollapsed = areAllDiffFilesCollapsed(diffFileKeys, collapsedDiffFileKeys);
   const renderedDiffLineStat = useMemo(() => getDiffLineStat(renderableFiles), [renderableFiles]);
   const diffLineStat =
-    selectedGitScope === "branch" && !selectedTurn && selectedGitSource?.stats
+    !selectedTurn && selectedGitSource?.stats
       ? {
           additions: selectedGitSource.stats.additions,
           deletions: selectedGitSource.stats.deletions,
@@ -641,6 +682,7 @@ export default function DiffPanel({
     ? (codeViewFiles.find((candidate) => candidate.filePath === selectedFilePath)?.fileKey ?? null)
     : null;
   const activeRevealRequestId = selectedDiffFileKey ? selectedFileRevealRequestId : null;
+  const codeViewMountKey = `${collapseScopeKey ?? reviewSectionId}:${branchLoadedSlices.length}:${codeViewFiles.length}`;
 
   useRememberedDiffPanelScroll({
     scrollKey: collapseScopeKey,
@@ -667,7 +709,7 @@ export default function DiffPanel({
   const [branchPageSentinel, setBranchPageSentinel] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     if (
-      selectedGitScope !== "branch" ||
+      selectedTurnId !== null ||
       branchPageSentinel === null ||
       branchNextCursor === null ||
       branchNextCursor === activeBranchCursor ||
@@ -694,12 +736,11 @@ export default function DiffPanel({
     branchDiffPreview.isPending,
     branchNextCursor,
     branchPageSentinel,
-    selectedGitScope,
+    selectedTurnId,
   ]);
 
   const branchCodeViewFooter =
-    selectedGitScope === "branch" &&
-    (rawRenderablePatches.length > 0 || branchNextCursor !== null) ? (
+    selectedTurnId === null && (rawRenderablePatches.length > 0 || branchNextCursor !== null) ? (
       <div className="border-t border-border/60">
         {rawRenderablePatches.map((patch) => (
           <div
@@ -765,24 +806,31 @@ export default function DiffPanel({
   );
   const toggleDiffFileCollapsed = useCallback(
     (fileKey: string) => {
-      const next = new Set(collapsedDiffFileKeys);
+      const next = new Set(toggledDiffFileKeys);
       if (next.has(fileKey)) {
         next.delete(fileKey);
       } else {
         next.add(fileKey);
       }
-      if (collapseScopeKey) rememberDiffPanelCollapsedFileKeys(collapseScopeKey, next);
-      setCollapsedDiffFiles({ scopeKey: collapseScopeKey, fileKeys: next });
+      if (collapseScopeKey) rememberDiffPanelFoldState(collapseScopeKey, foldOverride, next);
+      setToggledDiffFilesState({ scopeKey: collapseScopeKey, fileKeys: next });
     },
-    [collapseScopeKey, collapsedDiffFileKeys],
+    [collapseScopeKey, foldOverride, toggledDiffFileKeys],
   );
 
   const toggleDiffFileCollapse = useCallback(() => {
-    setCodeViewRevision((current) => current + 1);
-    const next = toggleAllDiffFiles(diffFileKeys, collapsedDiffFileKeys);
-    if (collapseScopeKey) rememberDiffPanelCollapsedFileKeys(collapseScopeKey, next);
-    setCollapsedDiffFiles({ scopeKey: collapseScopeKey, fileKeys: next });
-  }, [collapseScopeKey, collapsedDiffFileKeys, diffFileKeys]);
+    const nextOverride: Exclude<DiffFoldOverride, null> = allDiffFilesCollapsed
+      ? "expanded"
+      : "folded";
+    if (collapseScopeKey) {
+      rememberDiffPanelFoldState(collapseScopeKey, nextOverride, EMPTY_TOGGLED_DIFF_FILE_KEYS);
+    }
+    setFoldOverrideState({ scopeKey: collapseScopeKey, value: nextOverride });
+    setToggledDiffFilesState({
+      scopeKey: collapseScopeKey,
+      fileKeys: EMPTY_TOGGLED_DIFF_FILE_KEYS,
+    });
+  }, [allDiffFilesCollapsed, collapseScopeKey]);
 
   const selectTurn = (turnId: TurnId) => {
     if (!routeThreadRef) return;
@@ -1120,8 +1168,8 @@ export default function DiffPanel({
           <div className="diff-panel-viewport flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             {isSelectedPatchTruncated && (
               <p className="shrink-0 border-b border-border/70 bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground">
-                {selectedGitScope === "branch" && !branchResponseIsLegacy
-                  ? "Some individual files could not be shown inline. Every other branch file remains available."
+                {selectedTurnId === null && !branchResponseIsLegacy
+                  ? "Some individual files could not be shown inline. Every other changed file remains available."
                   : "This diff was truncated because it exceeded the preview limit. The changes shown are incomplete."}
               </p>
             )}

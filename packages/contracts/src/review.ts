@@ -3,6 +3,9 @@ import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { GitCommandError } from "./git.ts";
 import { VcsError } from "./vcs.ts";
 
+export const ReviewDiffPreviewSourceKind = Schema.Literals(["working-tree", "branch-range"]);
+export type ReviewDiffPreviewSourceKind = typeof ReviewDiffPreviewSourceKind.Type;
+
 export const ReviewDiffPreviewInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   baseRef: Schema.optional(TrimmedNonEmptyString),
@@ -10,15 +13,12 @@ export const ReviewDiffPreviewInput = Schema.Struct({
   /** Opts a compatible server into returning one immutable source slice instead of the legacy preview. */
   pagination: Schema.optional(
     Schema.Struct({
-      sourceKind: Schema.Literal("branch-range"),
+      sourceKind: ReviewDiffPreviewSourceKind,
       cursor: Schema.optional(TrimmedNonEmptyString),
     }),
   ),
 });
 export type ReviewDiffPreviewInput = typeof ReviewDiffPreviewInput.Type;
-
-export const ReviewDiffPreviewSourceKind = Schema.Literals(["working-tree", "branch-range"]);
-export type ReviewDiffPreviewSourceKind = typeof ReviewDiffPreviewSourceKind.Type;
 
 export const ReviewDiffPreviewSource = Schema.Struct({
   id: TrimmedNonEmptyString,
@@ -31,7 +31,7 @@ export const ReviewDiffPreviewSource = Schema.Struct({
   truncated: Schema.Boolean,
   /** Present for paged sources; absent identifies the legacy single-preview response. */
   nextCursor: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
-  /** Stable identity of the immutable merge-base/head comparison backing every page. */
+  /** Stable identity of the immutable Git comparison backing every page. */
   snapshotId: Schema.optional(TrimmedNonEmptyString),
   /** Whole-diff totals, repeated on every page so headers never show partial counts. */
   stats: Schema.optional(

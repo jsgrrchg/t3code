@@ -1147,6 +1147,90 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("pages every working-tree file, including untracked files", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* Effect.forEach(
+          Array.from({ length: 105 }, (_, index) => index),
+          (index) =>
+            writeTextFile(cwd, `working/file-${String(index).padStart(3, "0")}.txt`, `${index}\n`),
+          { concurrency: 16 },
+        );
+
+        const first = yield* driver.getReviewDiffPreview({
+          cwd,
+          pagination: { sourceKind: "working-tree" },
+        });
+        const firstSource = first.sources[0]!;
+        assert.equal(firstSource.kind, "working-tree");
+        assert.equal(firstSource.stats?.fileCount, 105);
+        assert.equal(firstSource.diff.match(/^diff --git /gm)?.length, 100);
+        assert.isString(firstSource.nextCursor);
+
+        const second = yield* driver.getReviewDiffPreview({
+          cwd,
+          pagination: {
+            sourceKind: "working-tree",
+            cursor: firstSource.nextCursor!,
+          },
+        });
+        const secondSource = second.sources[0]!;
+        assert.equal(secondSource.snapshotId, firstSource.snapshotId);
+        assert.equal(secondSource.diff.match(/^diff --git /gm)?.length, 5);
+        assert.isNull(secondSource.nextCursor);
+      }),
+    );
+
+    it.effect(
+      "keeps working-tree continuations and file expansion on their original snapshot",
+      () =>
+        Effect.gen(function* () {
+          const cwd = yield* makeTmpDir();
+          yield* initRepoWithCommit(cwd);
+          const driver = yield* GitVcsDriver.GitVcsDriver;
+          yield* Effect.forEach(
+            Array.from({ length: 101 }, (_, index) => index),
+            (index) =>
+              writeTextFile(
+                cwd,
+                `snapshot/file-${String(index).padStart(3, "0")}.txt`,
+                `original-${index}\n`,
+              ),
+            { concurrency: 16 },
+          );
+
+          const first = yield* driver.getReviewDiffPreview({
+            cwd,
+            pagination: { sourceKind: "working-tree" },
+          });
+          const firstSource = first.sources[0]!;
+          yield* writeTextFile(cwd, "snapshot/file-100.txt", "changed-after-cursor\n");
+
+          const continuation = yield* driver.getReviewDiffPreview({
+            cwd,
+            pagination: {
+              sourceKind: "working-tree",
+              cursor: firstSource.nextCursor!,
+            },
+          });
+          assert.include(continuation.sources[0]?.diff ?? "", "original-100");
+          assert.notInclude(continuation.sources[0]?.diff ?? "", "changed-after-cursor");
+
+          const contents = yield* driver.getReviewDiffFileContents(
+            makeReviewDiffFileContentsInput(cwd, {
+              changeType: "new",
+              baseRef: firstSource.baseRef,
+              headRef: firstSource.headRef,
+              oldPath: "snapshot/file-100.txt",
+              newPath: "snapshot/file-100.txt",
+            }),
+          );
+          assert.strictEqual(contents.newContents, "original-100\n");
+        }),
+    );
+
     it.effect("keeps a branch cursor on its original commits after HEAD moves", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();

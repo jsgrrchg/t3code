@@ -22,16 +22,57 @@ describe("diff panel view state", () => {
     );
   });
 
-  it("preserves scroll, collapse, and reveal state independently", () => {
+  it("preserves scroll, fold intent, pages, and reveal state independently", () => {
     const memory = createDiffPanelViewStateMemory();
     const key = diffPanelViewStateKey(threadA, "branch");
 
     memory.rememberScrollPosition(key, { top: 320, left: 24 });
-    memory.rememberCollapsedFileKeys(key, new Set(["src/app.ts"]));
+    memory.rememberFoldState(key, "folded", new Set(["src/app.ts"]));
+    memory.rememberPagedDiff(key, {
+      scopeKey: "branch-scope",
+      slices: [
+        { cursor: null, patch: "first", truncated: false, nextCursor: "page-2" },
+        { cursor: "page-2", patch: "second", truncated: false, nextCursor: null },
+      ],
+      source: {
+        id: "branch-range",
+        kind: "branch-range",
+        title: "Against main",
+        baseRef: "base",
+        headRef: "head",
+        diff: "second",
+        diffHash: "hash",
+        truncated: false,
+        nextCursor: null,
+        snapshotId: "snapshot",
+      },
+      legacy: false,
+    });
     memory.rememberRevealRequest(key, 4);
 
     expect(memory.get(key)).toEqual({
-      collapsedFileKeys: new Set(["src/app.ts"]),
+      foldOverride: "folded",
+      toggledFileKeys: new Set(["src/app.ts"]),
+      pagedDiff: {
+        scopeKey: "branch-scope",
+        slices: [
+          { cursor: null, patch: "first", truncated: false, nextCursor: "page-2" },
+          { cursor: "page-2", patch: "second", truncated: false, nextCursor: null },
+        ],
+        source: {
+          id: "branch-range",
+          kind: "branch-range",
+          title: "Against main",
+          baseRef: "base",
+          headRef: "head",
+          diff: "second",
+          diffHash: "hash",
+          truncated: false,
+          nextCursor: null,
+          snapshotId: "snapshot",
+        },
+        legacy: false,
+      },
       scrollPosition: { top: 320, left: 24 },
       revealRequestId: 4,
     });
@@ -42,24 +83,28 @@ describe("diff panel view state", () => {
     const key = diffPanelViewStateKey(threadA, "unstaged");
     const sourceKeys = new Set(["README.md"]);
 
-    memory.rememberCollapsedFileKeys(key, sourceKeys);
+    memory.rememberFoldState(key, "expanded", sourceKeys);
     memory.rememberScrollPosition(key, { top: Number.POSITIVE_INFINITY, left: -10 });
     memory.rememberRevealRequest(key, -1);
     sourceKeys.add("package.json");
 
     const remembered = memory.get(key);
     expect(remembered).toEqual({
-      collapsedFileKeys: new Set(["README.md"]),
+      foldOverride: "expanded",
+      toggledFileKeys: new Set(["README.md"]),
+      pagedDiff: null,
       scrollPosition: { top: 0, left: 0 },
       revealRequestId: null,
     });
-    (remembered?.collapsedFileKeys as Set<string> | undefined)?.add("mutable.ts");
-    expect(memory.get(key)?.collapsedFileKeys).toEqual(new Set(["README.md"]));
+    (remembered?.toggledFileKeys as Set<string> | undefined)?.add("mutable.ts");
+    expect(memory.get(key)?.toggledFileKeys).toEqual(new Set(["README.md"]));
   });
 
   it("lets a new file reveal win over old scroll and restores a consumed reveal", () => {
     const entry = {
-      collapsedFileKeys: new Set<string>(),
+      foldOverride: null,
+      toggledFileKeys: new Set<string>(),
+      pagedDiff: null,
       scrollPosition: { top: 420, left: 12 },
       revealRequestId: 7,
     };

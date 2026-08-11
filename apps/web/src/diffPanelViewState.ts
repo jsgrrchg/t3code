@@ -1,5 +1,8 @@
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import type { ScopedThreadRef } from "@t3tools/contracts";
+import type { LoadedDiffSlice } from "@t3tools/client-runtime/state/paged-diff";
+import type { ReviewDiffPreviewSource, ScopedThreadRef } from "@t3tools/contracts";
+
+import type { DiffFoldOverride } from "~/lib/diffCollapse";
 
 export interface DiffPanelScrollPosition {
   readonly top: number;
@@ -7,12 +10,20 @@ export interface DiffPanelScrollPosition {
 }
 
 export interface DiffPanelViewStateEntry {
-  readonly collapsedFileKeys: ReadonlySet<string>;
+  readonly foldOverride: DiffFoldOverride;
+  readonly toggledFileKeys: ReadonlySet<string>;
+  readonly pagedDiff: {
+    readonly scopeKey: string;
+    readonly slices: ReadonlyArray<LoadedDiffSlice>;
+    readonly source: ReviewDiffPreviewSource | null;
+    readonly legacy: boolean;
+  } | null;
   readonly scrollPosition: DiffPanelScrollPosition | null;
   readonly revealRequestId: number | null;
 }
 
-const MAX_REMEMBERED_DIFF_PANEL_VIEWS = 100;
+// Paged views retain patch slices so a deep scroll has content to return to after a tab remount.
+const MAX_REMEMBERED_DIFF_PANEL_VIEWS = 20;
 
 function normalizedOffset(value: number): number {
   return Number.isFinite(value) ? Math.max(0, value) : 0;
@@ -24,7 +35,15 @@ function normalizedRevealRequestId(value: number | null | undefined): number | n
 
 function cloneEntry(entry: DiffPanelViewStateEntry): DiffPanelViewStateEntry {
   return {
-    collapsedFileKeys: new Set(entry.collapsedFileKeys),
+    foldOverride: entry.foldOverride,
+    toggledFileKeys: new Set(entry.toggledFileKeys),
+    pagedDiff: entry.pagedDiff
+      ? {
+          ...entry.pagedDiff,
+          slices: entry.pagedDiff.slices.map((slice) => ({ ...slice })),
+          source: entry.pagedDiff.source ? { ...entry.pagedDiff.source } : null,
+        }
+      : null,
     scrollPosition: entry.scrollPosition
       ? {
           top: normalizedOffset(entry.scrollPosition.top),
@@ -53,7 +72,9 @@ export function createDiffPanelViewStateMemory(maxEntries = MAX_REMEMBERED_DIFF_
 
   const currentOrEmpty = (key: string): DiffPanelViewStateEntry =>
     entries.get(key) ?? {
-      collapsedFileKeys: new Set(),
+      foldOverride: null,
+      toggledFileKeys: new Set(),
+      pagedDiff: null,
       scrollPosition: null,
       revealRequestId: null,
     };
@@ -65,8 +86,18 @@ export function createDiffPanelViewStateMemory(maxEntries = MAX_REMEMBERED_DIFF_
       write(key, entry);
       return cloneEntry(entry);
     },
-    rememberCollapsedFileKeys(key: string, fileKeys: ReadonlySet<string>): void {
-      write(key, { ...currentOrEmpty(key), collapsedFileKeys: fileKeys });
+    rememberFoldState(
+      key: string,
+      foldOverride: DiffFoldOverride,
+      toggledFileKeys: ReadonlySet<string>,
+    ): void {
+      write(key, { ...currentOrEmpty(key), foldOverride, toggledFileKeys });
+    },
+    rememberPagedDiff(
+      key: string,
+      pagedDiff: NonNullable<DiffPanelViewStateEntry["pagedDiff"]>,
+    ): void {
+      write(key, { ...currentOrEmpty(key), pagedDiff });
     },
     rememberScrollPosition(key: string, scrollPosition: DiffPanelScrollPosition): void {
       write(key, { ...currentOrEmpty(key), scrollPosition });
@@ -86,11 +117,19 @@ export function getDiffPanelViewState(key: string): DiffPanelViewStateEntry | nu
   return diffPanelViewStateMemory.get(key);
 }
 
-export function rememberDiffPanelCollapsedFileKeys(
+export function rememberDiffPanelFoldState(
   key: string,
-  fileKeys: ReadonlySet<string>,
+  foldOverride: DiffFoldOverride,
+  toggledFileKeys: ReadonlySet<string>,
 ): void {
-  diffPanelViewStateMemory.rememberCollapsedFileKeys(key, fileKeys);
+  diffPanelViewStateMemory.rememberFoldState(key, foldOverride, toggledFileKeys);
+}
+
+export function rememberDiffPanelPagedDiff(
+  key: string,
+  pagedDiff: NonNullable<DiffPanelViewStateEntry["pagedDiff"]>,
+): void {
+  diffPanelViewStateMemory.rememberPagedDiff(key, pagedDiff);
 }
 
 export function rememberDiffPanelScrollPosition(

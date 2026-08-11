@@ -1,7 +1,7 @@
 import { EnvironmentId, type ReviewDiffPreviewSource } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { branchDiffPageFromSource, branchReviewDiffScopeKey } from "./reviewDiffPagination.ts";
+import { reviewDiffPageFromSource, reviewDiffScopeKey } from "./reviewDiffPagination.ts";
 
 const source = (overrides: Partial<ReviewDiffPreviewSource> = {}): ReviewDiffPreviewSource => ({
   id: "branch-range",
@@ -15,9 +15,9 @@ const source = (overrides: Partial<ReviewDiffPreviewSource> = {}): ReviewDiffPre
   ...overrides,
 });
 
-describe("branch review diff pagination", () => {
+describe("review diff pagination", () => {
   it("recognizes an old server response as one legacy page", () => {
-    expect(branchDiffPageFromSource(source())).toEqual({
+    expect(reviewDiffPageFromSource(source())).toEqual({
       result: { patch: "patch", truncated: false, nextCursor: null },
       legacy: true,
     });
@@ -25,7 +25,7 @@ describe("branch review diff pagination", () => {
 
   it("keeps pagination separate from withheld content", () => {
     expect(
-      branchDiffPageFromSource(
+      reviewDiffPageFromSource(
         source({ nextCursor: "page-2", snapshotId: "snapshot", truncated: true }),
       ),
     ).toEqual({
@@ -38,13 +38,15 @@ describe("branch review diff pagination", () => {
     const common = {
       environmentId: EnvironmentId.make("environment"),
       cwd: "/repo",
+      sourceKind: "branch-range" as const,
       baseRef: "main",
       ignoreWhitespace: false,
     };
-    const scope = branchReviewDiffScopeKey(common);
+    const scope = reviewDiffScopeKey(common);
 
-    expect(branchReviewDiffScopeKey({ ...common, baseRef: "develop" })).not.toBe(scope);
-    expect(branchReviewDiffScopeKey({ ...common, ignoreWhitespace: true })).not.toBe(scope);
-    expect(branchReviewDiffScopeKey({ ...common, cwd: "/other" })).not.toBe(scope);
+    expect(reviewDiffScopeKey({ ...common, baseRef: "develop" })).not.toBe(scope);
+    expect(reviewDiffScopeKey({ ...common, ignoreWhitespace: true })).not.toBe(scope);
+    expect(reviewDiffScopeKey({ ...common, cwd: "/other" })).not.toBe(scope);
+    expect(reviewDiffScopeKey({ ...common, sourceKind: "working-tree" })).not.toBe(scope);
   });
 });

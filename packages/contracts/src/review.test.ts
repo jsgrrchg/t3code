@@ -58,4 +58,14 @@ describe("review diff pagination contracts", () => {
     expect(input.pagination?.cursor).toBe("opaque");
     expect(result.sources[0]?.stats).toEqual({ fileCount: 1, additions: 2, deletions: 1 });
   });
+
+  it("opts working-tree previews into the same paged protocol", () => {
+    const input = decodePreviewInput({
+      cwd: "/repo",
+      ignoreWhitespace: true,
+      pagination: { sourceKind: "working-tree", cursor: "opaque" },
+    });
+
+    expect(input.pagination).toEqual({ sourceKind: "working-tree", cursor: "opaque" });
+  });
 });

@@ -1,5 +1,8 @@
 import type { FileDiffMetadata } from "@pierre/diffs";
 import type { PullRequestDiffSide } from "@t3tools/contracts";
+import { isDiffFileCollapsed, type DiffFoldOverride } from "~/lib/diffCollapse";
+
+export type { DiffFoldOverride } from "~/lib/diffCollapse";
 
 /**
  * Whether a conversation's line is really in this file's hunks.
@@ -21,9 +24,6 @@ export function isLineInFileDiff(
   );
 }
 
-/** What the toolbar last asked of every file at once, null being the reader asking nothing yet. */
-export type DiffFoldOverride = "expanded" | "folded" | null;
-
 /**
  * Whether a file is drawn folded.
  *
@@ -39,6 +39,5 @@ export function isFileDiffCollapsed(
   foldOverride: DiffFoldOverride,
   toggledFileKeys: ReadonlySet<string>,
 ): boolean {
-  const foldedByDefault = foldOverride !== "expanded";
-  return toggledFileKeys.has(fileKey) ? !foldedByDefault : foldedByDefault;
+  return isDiffFileCollapsed(fileKey, foldOverride, toggledFileKeys, "folded");
 }
