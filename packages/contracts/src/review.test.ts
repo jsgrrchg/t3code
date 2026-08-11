@@ -3,13 +3,14 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { ReviewDiffPreviewInput, ReviewDiffPreviewResult } from "./review.ts";
 
+const decodePreviewInput = Schema.decodeUnknownSync(ReviewDiffPreviewInput);
+const decodePreviewResult = Schema.decodeUnknownSync(ReviewDiffPreviewResult);
+
 describe("review diff pagination contracts", () => {
   it("keeps the legacy request and response valid", () => {
-    expect(Schema.decodeUnknownSync(ReviewDiffPreviewInput)({ cwd: "/repo" })).toEqual({
-      cwd: "/repo",
-    });
+    expect(decodePreviewInput({ cwd: "/repo" })).toEqual({ cwd: "/repo" });
     expect(
-      Schema.decodeUnknownSync(ReviewDiffPreviewResult)({
+      decodePreviewResult({
         cwd: "/repo",
         generatedAt: "2026-08-11T00:00:00.000Z",
         sources: [
@@ -29,12 +30,12 @@ describe("review diff pagination contracts", () => {
   });
 
   it("decodes the paged source metadata", () => {
-    const input = Schema.decodeUnknownSync(ReviewDiffPreviewInput)({
+    const input = decodePreviewInput({
       cwd: "/repo",
       baseRef: "main",
       pagination: { sourceKind: "branch-range", cursor: "opaque" },
     });
-    const result = Schema.decodeUnknownSync(ReviewDiffPreviewResult)({
+    const result = decodePreviewResult({
       cwd: "/repo",
       generatedAt: "2026-08-11T00:00:00.000Z",
       sources: [

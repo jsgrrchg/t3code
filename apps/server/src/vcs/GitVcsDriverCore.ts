@@ -58,6 +58,7 @@ const RANGE_COMMIT_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_PATCH_MAX_OUTPUT_BYTES = 59_000;
 const REVIEW_DIFF_PATCH_MAX_OUTPUT_BYTES = 120_000;
+const REVIEW_DIFF_PAGE_MAX_OUTPUT_BYTES = 120_000;
 const REVIEW_DIFF_PAGE_FILE_LIMIT = 100;
 const REVIEW_DIFF_MANIFEST_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 const REVIEW_UNTRACKED_DIFF_MAX_OUTPUT_BYTES = 80_000;
@@ -2643,7 +2644,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         ...paths,
       ],
       {
-        maxOutputBytes: REVIEW_DIFF_PATCH_MAX_OUTPUT_BYTES,
+        maxOutputBytes: REVIEW_DIFF_PAGE_MAX_OUTPUT_BYTES,
         appendTruncationMarker: true,
         fallbackErrorDetail: "Failed to read a review diff page.",
       },

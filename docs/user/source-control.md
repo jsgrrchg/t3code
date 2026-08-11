@@ -46,6 +46,18 @@ T3 Code works with the platforms your team already uses:
 - Open the review directly in your browser with one click
 - Check out a teammate's branch to review code locally
 
+**Review local branch changes completely**
+
+Open the Diff panel and choose **Branch changes** to compare the current branch with its selected
+base. Files load progressively as you approach the end of the diff, so a large branch remains
+quick to open while every changed file stays reachable. The additions and deletions in the header
+always describe the complete branch comparison, including files that have not loaded yet.
+
+Loading another page does not mean the diff is incomplete. A partial-diff notice appears only when
+an individual file cannot be shown inline, such as an unusually large or binary change. Other files
+continue loading normally. When connected to an older T3 Code server, the app retains the former
+bounded preview and says explicitly if that legacy preview was truncated.
+
 ### Know Your Setup at a Glance
 
 The **Source Control settings** page shows you exactly what's connected:
