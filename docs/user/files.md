@@ -15,10 +15,11 @@ composer. They stay out of the default Files tree, but appear when their path ma
 Drag a file from the Files tree, or drag the label of an open file tab, onto the composer to add it
 as file context.
 
-On web and desktop, drag one file onto a folder in the Files tree to move it into that folder. Drop
-it at the tree root to move it to the project root. Moving folders and moving several selected files
-at once are not supported yet. If the destination already contains an entry with the same name,
-T3 Code rejects the move and does not overwrite it.
+On web and desktop, when the connected server runs on macOS or Linux, drag one file onto a folder
+in the Files tree to move it into that folder. Drop it at the tree root to move it to the project
+root. Moving folders and moving several selected files at once are not supported yet. If the
+destination already contains an entry with the same name, T3 Code rejects the move and does not
+overwrite it.
 
 Open file tabs remember their source, rendered Markdown, or image scroll position for the current
 session when you switch tabs or chats and return.

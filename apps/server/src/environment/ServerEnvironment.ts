@@ -62,6 +62,10 @@ function platformArch(
   }
 }
 
+export function supportsWorkspaceEntryMove(platform: NodeJS.Platform): boolean {
+  return platform === "darwin" || platform === "linux";
+}
+
 export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -153,7 +157,7 @@ export const make = Effect.gen(function* () {
       panelChats: true,
       gitHistory: true,
       gitFetchAll: true,
-      workspaceEntryMove: true,
+      workspaceEntryMove: supportsWorkspaceEntryMove(hostPlatform),
       ...(serverSelfUpdate === null ? {} : { serverSelfUpdate }),
       ...(serverSelfUpdate === "boot-service" ? { serverSelfUpdateProgress: true } : {}),
     },

@@ -13,6 +13,12 @@ const isServerEnvironmentIdPersistenceError = Schema.is(
   ServerEnvironment.ServerEnvironmentIdPersistenceError,
 );
 
+it("advertises workspace moves only on supported server platforms", () => {
+  expect(ServerEnvironment.supportsWorkspaceEntryMove("darwin")).toBe(true);
+  expect(ServerEnvironment.supportsWorkspaceEntryMove("linux")).toBe(true);
+  expect(ServerEnvironment.supportsWorkspaceEntryMove("win32")).toBe(false);
+});
+
 const makeServerEnvironmentLayer = (baseDir: string) =>
   ServerEnvironment.layer.pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), baseDir)));
 
@@ -74,7 +80,9 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
       expect(second.capabilities.panelChats).toBe(true);
       expect(second.capabilities.gitHistory).toBe(true);
       expect(second.capabilities.gitFetchAll).toBe(true);
-      expect(second.capabilities.workspaceEntryMove).toBe(true);
+      expect(second.capabilities.workspaceEntryMove).toBe(
+        ServerEnvironment.supportsWorkspaceEntryMove(process.platform),
+      );
     }),
   );
 
