@@ -1,7 +1,11 @@
 import type { FileTreeDropContext } from "@pierre/trees";
 import { describe, expect, it } from "vite-plus/test";
 
-import { fileTreeMoveDestination, resolveFileTreeMove } from "./fileTreeMove";
+import {
+  fileTreeDirectoryDropTarget,
+  fileTreeMoveDestination,
+  resolveFileTreeMove,
+} from "./fileTreeMove";
 
 const entryKinds = new Map([
   ["src", "directory" as const],
@@ -37,6 +41,29 @@ const policy = {
 };
 
 describe("file tree moves", () => {
+  it("resolves nested Pierre folder rows from composed drag events", () => {
+    const node = (attributes: Record<string, string>) => ({
+      getAttribute: (name: string) => attributes[name] ?? null,
+    });
+    expect(
+      fileTreeDirectoryDropTarget({
+        composedPath: () => [
+          node({}),
+          node({
+            "data-type": "item",
+            "data-item-type": "folder",
+            "data-item-path": "archive/new-folder/",
+          }),
+        ],
+      }),
+    ).toEqual({
+      kind: "directory",
+      directoryPath: "archive/new-folder/",
+      flattenedSegmentPath: null,
+      hoveredPath: "archive/new-folder/",
+    });
+  });
+
   it("calculates folder, nested folder, and root destinations", () => {
     expect(fileTreeMoveDestination("src/index.ts", context([], "components/"))).toBe(
       "components/index.ts",

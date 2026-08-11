@@ -34,7 +34,7 @@ import { useProjectPathSearch } from "~/state/queries";
 import { useAtomCommand } from "~/state/use-atom-command";
 
 import { createFileTreeDragMentionController } from "./fileTreeDragMention";
-import { resolveFileTreeMove } from "./fileTreeMove";
+import { fileTreeDirectoryDropTarget, resolveFileTreeMove } from "./fileTreeMove";
 import { loadProjectDirectoryEntries } from "./projectFilesQueryState";
 
 interface FileBrowserPanelProps {
@@ -721,13 +721,43 @@ export default function FileBrowserPanel({
       dragMention.handleDragEnd();
       setTreeDragActive(false);
     };
+    const handleDragOver = (event: DragEvent) => {
+      const target = fileTreeDirectoryDropTarget(event);
+      if (
+        target === null ||
+        resolveMove({ draggedPaths: dragMention.getDraggedPaths(), target }) === null
+      ) {
+        return;
+      }
+      event.preventDefault();
+      if (event.dataTransfer !== null) event.dataTransfer.dropEffect = "move";
+    };
+    const handleDrop = (event: DragEvent) => {
+      const target = fileTreeDirectoryDropTarget(event);
+      if (target === null) return;
+      const draggedPaths = dragMention.getDraggedPaths();
+      if (resolveMove({ draggedPaths, target }) === null) return;
+      // Pierre owns the drag gesture and visual target. Complete persistence here before the
+      // shadow tree can lose its source row to virtualization during a cross-folder drop.
+      event.preventDefault();
+      event.stopPropagation();
+      completeMoveRef.current({
+        draggedPaths,
+        target,
+        operation: draggedPaths.length > 1 ? "batch" : "move",
+      });
+    };
     panel.addEventListener("dragstart", handleDragStart, true);
+    panel.addEventListener("dragover", handleDragOver, true);
+    panel.addEventListener("drop", handleDrop, true);
     panel.addEventListener("dragend", handleDragEnd);
     return () => {
       panel.removeEventListener("dragstart", handleDragStart, true);
+      panel.removeEventListener("dragover", handleDragOver, true);
+      panel.removeEventListener("drop", handleDrop, true);
       panel.removeEventListener("dragend", handleDragEnd);
     };
-  }, [dragMention]);
+  }, [dragMention, resolveMove]);
 
   const rootDraggedPaths = dragMention.getDraggedPaths();
   const rootDropAvailable =

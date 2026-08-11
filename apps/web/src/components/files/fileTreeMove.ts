@@ -1,4 +1,4 @@
-import type { FileTreeDropContext } from "@pierre/trees";
+import type { FileTreeDropContext, FileTreeDropTarget } from "@pierre/trees";
 import type { ProjectEntry } from "@t3tools/contracts";
 
 export interface FileTreeMovePolicy {
@@ -12,6 +12,44 @@ export interface FileTreeMovePolicy {
 export interface FileTreeMoveTarget {
   readonly sourceRelativePath: string;
   readonly destinationRelativePath: string;
+}
+
+interface FileTreeDropEventLike {
+  composedPath(): ReadonlyArray<unknown>;
+}
+
+function elementAttribute(node: unknown, name: string): string | null {
+  if (typeof node !== "object" || node === null) return null;
+  const element = node as { getAttribute?: (attributeName: string) => string | null };
+  return typeof element.getAttribute === "function" ? element.getAttribute(name) : null;
+}
+
+/** Resolve a Pierre folder row from a composed shadow-DOM drag event. */
+export function fileTreeDirectoryDropTarget(
+  event: FileTreeDropEventLike,
+): FileTreeDropTarget | null {
+  let flattenedSegmentPath: string | null = null;
+  let hoveredPath: string | null = null;
+  let directoryPath: string | null = null;
+  for (const node of event.composedPath()) {
+    flattenedSegmentPath ??= elementAttribute(node, "data-item-flattened-subitem");
+    if (hoveredPath !== null || elementAttribute(node, "data-type") !== "item") continue;
+    hoveredPath = elementAttribute(node, "data-item-path");
+    if (elementAttribute(node, "data-item-type") === "folder") {
+      directoryPath = hoveredPath;
+    }
+  }
+  if (flattenedSegmentPath?.endsWith("/")) {
+    return {
+      kind: "directory",
+      directoryPath: flattenedSegmentPath,
+      flattenedSegmentPath,
+      hoveredPath,
+    };
+  }
+  return directoryPath === null
+    ? null
+    : { kind: "directory", directoryPath, flattenedSegmentPath: null, hoveredPath };
 }
 
 export function stripCanonicalDirectorySlash(path: string): string {
