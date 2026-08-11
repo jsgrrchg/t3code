@@ -75,6 +75,14 @@ import { reviewEnvironment } from "../state/review";
 import { vcsEnvironment } from "../state/vcs";
 import { buildBaseRefChoices, filterBaseRefChoices } from "../lib/baseRefChoices";
 import { createGitDiffFileContentsLoader } from "../lib/diffFileContents";
+import {
+  diffPanelViewStateKey,
+  getDiffPanelViewState,
+  isDiffPanelRevealRequestHandled,
+  rememberDiffPanelCollapsedFileKeys,
+  rememberDiffPanelRevealRequest,
+} from "../diffPanelViewState";
+import { useRememberedDiffPanelScroll } from "./diffs/useRememberedDiffPanelScroll";
 
 type DiffThemeType = "light" | "dark";
 const AUTOMATIC_BASE_REF = "__automatic_base_ref__";
@@ -115,6 +123,7 @@ export default function DiffPanel({
   }));
   const [codeViewRevision, setCodeViewRevision] = useState(0);
   const codeViewRef = useRef<AnnotatableCodeViewHandle>(null);
+  const codeViewRootRef = useRef<HTMLDivElement>(null);
   const lastCompletedTurnRefreshRef = useRef<{
     readonly threadKey: string | null;
     readonly turnId: TurnId | null;
@@ -211,13 +220,21 @@ export default function DiffPanel({
         : `Turn ${selectedCheckpointTurnCount ?? "?"}`;
   const reviewSectionId = selectedTurn ? `turn:${selectedTurn.turnId}` : selectedGitScope;
   const collapseScopeKey = routeThreadRef
-    ? `${routeThreadRef.environmentId}:${routeThreadRef.threadId}:${reviewSectionId}`
+    ? diffPanelViewStateKey(routeThreadRef, reviewSectionId)
     : null;
   const codeViewMountKey = `${collapseScopeKey ?? reviewSectionId}:${codeViewRevision}`;
+  const rememberedCollapsedDiffFileKeys = useMemo(
+    () =>
+      collapseScopeKey
+        ? (getDiffPanelViewState(collapseScopeKey)?.collapsedFileKeys ??
+          EMPTY_COLLAPSED_DIFF_FILE_KEYS)
+        : EMPTY_COLLAPSED_DIFF_FILE_KEYS,
+    [collapseScopeKey],
+  );
   const collapsedDiffFileKeys =
     collapsedDiffFiles.scopeKey === collapseScopeKey
       ? collapsedDiffFiles.fileKeys
-      : EMPTY_COLLAPSED_DIFF_FILE_KEYS;
+      : rememberedCollapsedDiffFileKeys;
   const reviewSectionTitle = selectedTurn
     ? `Turn ${selectedCheckpointTurnCount ?? "?"}`
     : selectedGitScope === "unstaged"
@@ -434,11 +451,29 @@ export default function DiffPanel({
   const selectedDiffFileKey = selectedFilePath
     ? (codeViewFiles.find((candidate) => candidate.filePath === selectedFilePath)?.fileKey ?? null)
     : null;
+  const activeRevealRequestId = selectedDiffFileKey ? selectedFileRevealRequestId : null;
+
+  useRememberedDiffPanelScroll({
+    scrollKey: collapseScopeKey,
+    mountKey: codeViewMountKey,
+    rootRef: codeViewRootRef,
+    revealRequestId: activeRevealRequestId,
+    enabled: renderablePatch?.kind === "files",
+  });
 
   useEffect(() => {
-    if (!selectedDiffFileKey) return;
+    if (!selectedDiffFileKey || !collapseScopeKey) return;
+    if (
+      isDiffPanelRevealRequestHandled(
+        getDiffPanelViewState(collapseScopeKey),
+        selectedFileRevealRequestId,
+      )
+    ) {
+      return;
+    }
     codeViewRef.current?.scrollTo({ type: "item", id: selectedDiffFileKey, align: "start" });
-  }, [codeViewMountKey, selectedDiffFileKey, selectedFileRevealRequestId]);
+    rememberDiffPanelRevealRequest(collapseScopeKey, selectedFileRevealRequestId);
+  }, [codeViewMountKey, collapseScopeKey, selectedDiffFileKey, selectedFileRevealRequestId]);
 
   const openDiffFile = useCallback(
     (filePath: string) => {
@@ -469,31 +504,24 @@ export default function DiffPanel({
   );
   const toggleDiffFileCollapsed = useCallback(
     (fileKey: string) => {
-      setCollapsedDiffFiles((current) => {
-        const next = new Set(current.scopeKey === collapseScopeKey ? current.fileKeys : []);
-        if (next.has(fileKey)) {
-          next.delete(fileKey);
-        } else {
-          next.add(fileKey);
-        }
-        return { scopeKey: collapseScopeKey, fileKeys: next };
-      });
+      const next = new Set(collapsedDiffFileKeys);
+      if (next.has(fileKey)) {
+        next.delete(fileKey);
+      } else {
+        next.add(fileKey);
+      }
+      if (collapseScopeKey) rememberDiffPanelCollapsedFileKeys(collapseScopeKey, next);
+      setCollapsedDiffFiles({ scopeKey: collapseScopeKey, fileKeys: next });
     },
-    [collapseScopeKey],
+    [collapseScopeKey, collapsedDiffFileKeys],
   );
 
   const toggleDiffFileCollapse = useCallback(() => {
     setCodeViewRevision((current) => current + 1);
-    setCollapsedDiffFiles((current) => {
-      const currentKeys =
-        current.scopeKey === collapseScopeKey ? current.fileKeys : EMPTY_COLLAPSED_DIFF_FILE_KEYS;
-
-      return {
-        scopeKey: collapseScopeKey,
-        fileKeys: toggleAllDiffFiles(diffFileKeys, currentKeys),
-      };
-    });
-  }, [collapseScopeKey, diffFileKeys]);
+    const next = toggleAllDiffFiles(diffFileKeys, collapsedDiffFileKeys);
+    if (collapseScopeKey) rememberDiffPanelCollapsedFileKeys(collapseScopeKey, next);
+    setCollapsedDiffFiles({ scopeKey: collapseScopeKey, fileKeys: next });
+  }, [collapseScopeKey, collapsedDiffFileKeys, diffFileKeys]);
 
   const selectTurn = (turnId: TurnId) => {
     if (!routeThreadRef) return;
@@ -862,6 +890,7 @@ export default function DiffPanel({
               )
             ) : renderablePatch.kind === "files" ? (
               <div
+                ref={codeViewRootRef}
                 className="min-h-0 flex-1"
                 onClickCapture={(event) => {
                   const composedPath = event.nativeEvent.composedPath?.() ?? [];
