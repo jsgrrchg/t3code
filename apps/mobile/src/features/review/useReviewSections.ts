@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo } from "react";
 
+import { selectNextDiffCursor } from "@t3tools/client-runtime/state/paged-diff";
 import type { EnvironmentId, OrchestrationCheckpointSummary, ThreadId } from "@t3tools/contracts";
 
 import { useCheckpointDiff } from "../../state/queries";
@@ -14,8 +15,15 @@ import {
   getReviewSectionIdForCheckpoint,
 } from "./reviewModel";
 import {
+  buildReviewBranchDiffScopeKey,
+  ensureReviewBranchDiffScope,
+  receiveReviewBranchDiffPage,
+  requestNextReviewBranchDiffPage,
+  resetReviewBranchDiff,
   setReviewAsyncError,
+  setReviewBranchDiffRequestState,
   setReviewGitSections,
+  setReviewGitSection,
   setReviewSelectedSectionId,
   setReviewTurnDiff,
   setReviewTurnDiffLoading,
@@ -32,7 +40,7 @@ export function useReviewSections(input: {
   const enabled = input.enabled ?? true;
   const selectedThread = useSelectedThreadDetail();
   const { selectedThreadCwd } = useSelectedThreadWorktree();
-  const diffPreview = useEnvironmentQuery(
+  const worktreeDiffPreview = useEnvironmentQuery(
     enabled && environmentId !== undefined && selectedThreadCwd !== null
       ? reviewEnvironment.diffPreview({
           environmentId,
@@ -40,13 +48,89 @@ export function useReviewSections(input: {
         })
       : null,
   );
+  const branchScopeKey =
+    reviewCache.threadKey && selectedThreadCwd
+      ? buildReviewBranchDiffScopeKey(reviewCache.threadKey, selectedThreadCwd)
+      : "inactive";
+  const branchCursor =
+    reviewCache.branchDiff.pageState.scopeKey === branchScopeKey
+      ? reviewCache.branchDiff.pageState.requestCursor
+      : null;
+  const branchDiffPreview = useEnvironmentQuery(
+    enabled && environmentId !== undefined && selectedThreadCwd !== null
+      ? reviewEnvironment.diffPreview({
+          environmentId,
+          input: {
+            cwd: selectedThreadCwd,
+            pagination: {
+              sourceKind: "branch-range",
+              ...(branchCursor ? { cursor: branchCursor } : {}),
+            },
+          },
+        })
+      : null,
+  );
+  const firstBranchDiffPreview = useEnvironmentQuery(
+    enabled && environmentId !== undefined && selectedThreadCwd !== null
+      ? reviewEnvironment.diffPreview({
+          environmentId,
+          input: {
+            cwd: selectedThreadCwd,
+            pagination: { sourceKind: "branch-range" },
+          },
+        })
+      : null,
+  );
   const { loadingTurnIds } = reviewCache.asyncState;
+  const branchCacheIsActive = reviewCache.branchDiff.pageState.scopeKey === branchScopeKey;
+  const branchSlices = branchCacheIsActive ? reviewCache.branchDiff.pageState.slices : [];
 
   useEffect(() => {
-    if (reviewCache.threadKey && diffPreview.data) {
-      setReviewGitSections(reviewCache.threadKey, diffPreview.data.sources);
+    if (!reviewCache.threadKey) return;
+    if (reviewCache.branchDiff.pageState.scopeKey !== branchScopeKey) {
+      setReviewGitSections(
+        reviewCache.threadKey,
+        reviewCache.gitSections.filter((section) => section.kind !== "branch-range"),
+      );
     }
-  }, [diffPreview.data, reviewCache.threadKey]);
+    ensureReviewBranchDiffScope(reviewCache.threadKey, branchScopeKey);
+  }, [
+    branchScopeKey,
+    reviewCache.branchDiff.pageState.scopeKey,
+    reviewCache.gitSections,
+    reviewCache.threadKey,
+  ]);
+
+  useEffect(() => {
+    if (!reviewCache.threadKey || !worktreeDiffPreview.data) return;
+    const workingTree = worktreeDiffPreview.data.sources.find(
+      (source) => source.kind === "working-tree",
+    );
+    if (workingTree) setReviewGitSection(reviewCache.threadKey, workingTree);
+  }, [reviewCache.threadKey, worktreeDiffPreview.data]);
+
+  useEffect(() => {
+    if (!reviewCache.threadKey) return;
+    const source = branchDiffPreview.data?.sources.find(
+      (candidate) => candidate.kind === "branch-range",
+    );
+    if (!source) return;
+    receiveReviewBranchDiffPage({
+      threadKey: reviewCache.threadKey,
+      scopeKey: branchScopeKey,
+      cursor: branchCursor,
+      source,
+    });
+    setReviewGitSection(reviewCache.threadKey, source);
+  }, [branchCursor, branchDiffPreview.data, branchScopeKey, reviewCache.threadKey]);
+
+  useEffect(() => {
+    if (!reviewCache.threadKey) return;
+    setReviewBranchDiffRequestState(reviewCache.threadKey, branchScopeKey, {
+      isLoading: branchDiffPreview.isPending,
+      error: branchDiffPreview.error,
+    });
+  }, [branchDiffPreview.error, branchDiffPreview.isPending, branchScopeKey, reviewCache.threadKey]);
 
   const readyCheckpoints = useMemo(
     () => getReadyReviewCheckpoints(selectedThread?.checkpoints ?? []),
@@ -69,13 +153,20 @@ export function useReviewSections(input: {
         gitSections: reviewCache.gitSections,
         turnDiffById: reviewCache.turnDiffById,
         loadingTurnIds,
-        loadingGitSections: diffPreview.isPending,
+        loadingGitSections: worktreeDiffPreview.isPending,
+        branchDiffSlices: branchSlices,
+        branchDiffLoading: branchCacheIsActive && reviewCache.branchDiff.isLoading,
+        branchDiffLegacy: branchCacheIsActive && reviewCache.branchDiff.legacy,
       }),
     [
-      diffPreview.isPending,
+      worktreeDiffPreview.isPending,
       loadingTurnIds,
       readyCheckpoints,
       reviewCache.gitSections,
+      reviewCache.branchDiff.isLoading,
+      reviewCache.branchDiff.legacy,
+      branchSlices,
+      branchCacheIsActive,
       reviewCache.turnDiffById,
     ],
   );
@@ -159,8 +250,37 @@ export function useReviewSections(input: {
       activeTurnDiff.refresh();
       return;
     }
-    diffPreview.refresh();
-  }, [activeTurnDiff, diffPreview, enabled, selectedSection?.kind]);
+    if (selectedSection?.kind === "branch-range" && reviewCache.threadKey) {
+      resetReviewBranchDiff(reviewCache.threadKey, branchScopeKey);
+      setReviewGitSections(
+        reviewCache.threadKey,
+        reviewCache.gitSections.filter((section) => section.kind !== "branch-range"),
+      );
+      firstBranchDiffPreview.refresh();
+      return;
+    }
+    worktreeDiffPreview.refresh();
+  }, [
+    activeTurnDiff,
+    branchScopeKey,
+    enabled,
+    firstBranchDiffPreview,
+    reviewCache.gitSections,
+    reviewCache.threadKey,
+    selectedSection?.kind,
+    worktreeDiffPreview,
+  ]);
+
+  const prefetchBranchDiff = useCallback(() => {
+    if (!reviewCache.threadKey || reviewCache.branchDiff.isLoading) return;
+    const nextCursor = selectNextDiffCursor(branchSlices);
+    if (nextCursor === null) return;
+    requestNextReviewBranchDiffPage(reviewCache.threadKey, branchScopeKey, nextCursor);
+  }, [branchScopeKey, reviewCache.branchDiff.isLoading, branchSlices, reviewCache.threadKey]);
+
+  const retryBranchDiff = useCallback(() => {
+    branchDiffPreview.refresh();
+  }, [branchDiffPreview]);
 
   const selectSection = useCallback(
     (sectionId: string) => {
@@ -172,12 +292,18 @@ export function useReviewSections(input: {
   );
 
   return {
-    error: diffPreview.error ?? activeTurnDiff.error ?? reviewCache.asyncState.error,
-    loadingGitDiffs: diffPreview.isPending,
+    error:
+      worktreeDiffPreview.error ??
+      reviewCache.branchDiff.error ??
+      activeTurnDiff.error ??
+      reviewCache.asyncState.error,
+    loadingGitDiffs: worktreeDiffPreview.isPending || reviewCache.branchDiff.isLoading,
     loadingTurnIds,
     reviewSections,
     selectedSection,
     refreshSelectedSection,
+    prefetchBranchDiff,
+    retryBranchDiff,
     selectSection,
   };
 }

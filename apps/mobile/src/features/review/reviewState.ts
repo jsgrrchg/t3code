@@ -1,17 +1,34 @@
 import { useAtomValue } from "@effect/atom-react";
+import {
+  createPagedDiffState,
+  receiveDiffSlice,
+  requestDiffSlice,
+  type PagedDiffState,
+} from "@t3tools/client-runtime/state/paged-diff";
 
 import type { EnvironmentId, ReviewDiffPreviewSource, ThreadId } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
 
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import { appAtomRegistry } from "../../state/atom-registry";
-import { buildReviewParsedDiff, type ReviewParsedDiff } from "./reviewModel";
+import {
+  buildReviewParsedDiff,
+  combineReviewParsedDiffSlices,
+  type ReviewParsedDiff,
+} from "./reviewModel";
 
 const EMPTY_GIT_REVIEW_SECTIONS = Object.freeze<ReadonlyArray<ReviewDiffPreviewSource>>([]);
 const EMPTY_REVIEW_TURN_DIFFS = Object.freeze<Readonly<Record<string, string>>>({});
 const EMPTY_REVIEW_LOADING_TURN_IDS = Object.freeze<Readonly<Record<string, boolean>>>({});
 const EMPTY_REVIEW_ASYNC_STATE = Object.freeze<ReviewAsyncState>({
   loadingTurnIds: EMPTY_REVIEW_LOADING_TURN_IDS,
+  error: null,
+});
+const EMPTY_REVIEW_BRANCH_DIFF = Object.freeze<ReviewBranchDiffCache>({
+  pageState: createPagedDiffState("inactive"),
+  source: null,
+  legacy: false,
+  isLoading: false,
   error: null,
 });
 const EMPTY_REVIEW_SECTION_FILE_IDS = Object.freeze<
@@ -32,6 +49,10 @@ const EMPTY_REVIEW_SELECTED_SECTION_ID_ATOM = Atom.make<string | null>(null).pip
 const EMPTY_REVIEW_ASYNC_STATE_ATOM = Atom.make(EMPTY_REVIEW_ASYNC_STATE).pipe(
   Atom.keepAlive,
   Atom.withLabel("mobile:review:async-state:null"),
+);
+const EMPTY_REVIEW_BRANCH_DIFF_ATOM = Atom.make(EMPTY_REVIEW_BRANCH_DIFF).pipe(
+  Atom.keepAlive,
+  Atom.withLabel("mobile:review:branch-diff:null"),
 );
 const EMPTY_REVIEW_SECTION_FILE_IDS_ATOM = Atom.make(EMPTY_REVIEW_SECTION_FILE_IDS).pipe(
   Atom.keepAlive,
@@ -63,6 +84,12 @@ const reviewAsyncStateByThreadKeyAtom = Atom.family((threadKey: string) =>
   Atom.make(EMPTY_REVIEW_ASYNC_STATE).pipe(
     Atom.keepAlive,
     Atom.withLabel(`mobile:review:async-state:${threadKey}`),
+  ),
+);
+const reviewBranchDiffByThreadKeyAtom = Atom.family((threadKey: string) =>
+  Atom.make(EMPTY_REVIEW_BRANCH_DIFF).pipe(
+    Atom.keepAlive,
+    Atom.withLabel(`mobile:review:branch-diff:${threadKey}`),
   ),
 );
 
@@ -100,11 +127,20 @@ export interface ReviewCacheForThread {
   readonly turnDiffById: Readonly<Record<string, string>>;
   readonly selectedSectionId: string | null;
   readonly asyncState: ReviewAsyncState;
+  readonly branchDiff: ReviewBranchDiffCache;
   readonly expandedFileIdsBySection: Readonly<Record<string, ReadonlyArray<string> | undefined>>;
   readonly revealedLargeFileIdsBySection: Readonly<
     Record<string, ReadonlyArray<string> | undefined>
   >;
   readonly viewedFileIdsBySection: Readonly<Record<string, ReadonlyArray<string> | undefined>>;
+}
+
+export interface ReviewBranchDiffCache {
+  readonly pageState: PagedDiffState;
+  readonly source: ReviewDiffPreviewSource | null;
+  readonly legacy: boolean;
+  readonly isLoading: boolean;
+  readonly error: string | null;
 }
 
 export interface ReviewAsyncState {
@@ -123,6 +159,10 @@ function buildThreadKey(input: {
 
 function buildSectionCacheKey(threadKey: string, sectionId: string): string {
   return `${threadKey}:${sectionId}`;
+}
+
+export function buildReviewBranchDiffScopeKey(threadKey: string, cwd: string): string {
+  return JSON.stringify([threadKey, cwd]);
 }
 
 export function useReviewCacheForThread(input: {
@@ -144,6 +184,9 @@ export function useReviewCacheForThread(input: {
   const asyncState = useAtomValue(
     threadKey ? reviewAsyncStateByThreadKeyAtom(threadKey) : EMPTY_REVIEW_ASYNC_STATE_ATOM,
   );
+  const branchDiff = useAtomValue(
+    threadKey ? reviewBranchDiffByThreadKeyAtom(threadKey) : EMPTY_REVIEW_BRANCH_DIFF_ATOM,
+  );
   const expandedFileIdsBySection = useAtomValue(
     threadKey
       ? reviewExpandedFileIdsByThreadKeyAtom(threadKey)
@@ -164,10 +207,89 @@ export function useReviewCacheForThread(input: {
     turnDiffById,
     selectedSectionId,
     asyncState,
+    branchDiff,
     expandedFileIdsBySection,
     revealedLargeFileIdsBySection,
     viewedFileIdsBySection,
   };
+}
+
+export function ensureReviewBranchDiffScope(threadKey: string, scopeKey: string): void {
+  const atom = reviewBranchDiffByThreadKeyAtom(threadKey);
+  const current = appAtomRegistry.get(atom);
+  if (current.pageState.scopeKey === scopeKey) return;
+  appAtomRegistry.set(atom, {
+    pageState: createPagedDiffState(scopeKey),
+    source: null,
+    legacy: false,
+    isLoading: false,
+    error: null,
+  });
+}
+
+export function resetReviewBranchDiff(threadKey: string, scopeKey: string): void {
+  const atom = reviewBranchDiffByThreadKeyAtom(threadKey);
+  appAtomRegistry.set(atom, {
+    pageState: createPagedDiffState(scopeKey),
+    source: null,
+    legacy: false,
+    isLoading: false,
+    error: null,
+  });
+}
+
+export function receiveReviewBranchDiffPage(input: {
+  readonly threadKey: string;
+  readonly scopeKey: string;
+  readonly cursor: string | null;
+  readonly source: ReviewDiffPreviewSource;
+}): void {
+  const atom = reviewBranchDiffByThreadKeyAtom(input.threadKey);
+  const current = appAtomRegistry.get(atom);
+  if (current.pageState.scopeKey !== input.scopeKey) return;
+  appAtomRegistry.set(atom, {
+    ...current,
+    pageState: receiveDiffSlice(current.pageState, {
+      scopeKey: input.scopeKey,
+      cursor: input.cursor,
+      result: {
+        patch: input.source.diff,
+        truncated: input.source.truncated,
+        nextCursor: input.source.nextCursor ?? null,
+      },
+    }),
+    source: input.source,
+    legacy: input.source.nextCursor === undefined || input.source.snapshotId === undefined,
+    isLoading: false,
+    error: null,
+  });
+}
+
+export function requestNextReviewBranchDiffPage(
+  threadKey: string,
+  scopeKey: string,
+  cursor: string,
+): void {
+  const atom = reviewBranchDiffByThreadKeyAtom(threadKey);
+  const current = appAtomRegistry.get(atom);
+  const pageState = requestDiffSlice(current.pageState, scopeKey, cursor);
+  if (pageState === current.pageState) return;
+  appAtomRegistry.set(atom, { ...current, pageState, isLoading: true, error: null });
+}
+
+export function setReviewBranchDiffRequestState(
+  threadKey: string,
+  scopeKey: string,
+  state: { readonly isLoading: boolean; readonly error: string | null },
+): void {
+  const atom = reviewBranchDiffByThreadKeyAtom(threadKey);
+  const current = appAtomRegistry.get(atom);
+  if (current.pageState.scopeKey !== scopeKey) return;
+  appAtomRegistry.set(atom, { ...current, ...state });
+}
+
+export function getReviewBranchDiffSnapshot(threadKey: string): ReviewBranchDiffCache {
+  return appAtomRegistry.get(reviewBranchDiffByThreadKeyAtom(threadKey));
 }
 
 export function setReviewGitSections(
@@ -175,6 +297,15 @@ export function setReviewGitSections(
   sections: ReadonlyArray<ReviewDiffPreviewSource>,
 ): void {
   appAtomRegistry.set(reviewGitSectionsByThreadKeyAtom(threadKey), sections);
+}
+
+export function setReviewGitSection(threadKey: string, section: ReviewDiffPreviewSource): void {
+  const atom = reviewGitSectionsByThreadKeyAtom(threadKey);
+  const current = appAtomRegistry.get(atom);
+  const withoutKind = current.filter((candidate) => candidate.kind !== section.kind);
+  const next =
+    section.kind === "working-tree" ? [section, ...withoutKind] : [...withoutKind, section];
+  appAtomRegistry.set(atom, next);
 }
 
 export function setReviewTurnDiff(threadKey: string, sectionId: string, diff: string): void {
@@ -293,4 +424,31 @@ export function getCachedReviewParsedDiff(input: {
     parsed,
   });
   return parsed;
+}
+
+export function getCachedReviewParsedDiffSlices(input: {
+  readonly threadKey: string | null;
+  readonly sectionId: string;
+  readonly snapshotId: string;
+  readonly slices: PagedDiffState["slices"];
+  readonly stats?: {
+    readonly fileCount: number;
+    readonly additions: number;
+    readonly deletions: number;
+  };
+  readonly legacy: boolean;
+}): ReviewParsedDiff {
+  const parsedSlices = input.slices.map((slice) =>
+    getCachedReviewParsedDiff({
+      threadKey: input.threadKey,
+      sectionId: `${input.sectionId}:slice:${input.snapshotId}:${slice.cursor ?? "first"}`,
+      diff: slice.patch,
+    }),
+  );
+  return combineReviewParsedDiffSlices({
+    slices: input.slices,
+    parsedSlices,
+    ...(input.stats ? { stats: input.stats } : {}),
+    legacy: input.legacy,
+  });
 }

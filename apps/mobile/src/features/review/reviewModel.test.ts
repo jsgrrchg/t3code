@@ -11,6 +11,7 @@ import {
   buildReviewListItems,
   buildReviewParsedDiff,
   buildReviewSectionItems,
+  combineReviewParsedDiffSlices,
   getDefaultReviewSectionId,
   getReviewFilePreviewState,
   getReviewSectionIdForCheckpoint,
@@ -350,5 +351,41 @@ describe("buildReviewParsedDiff", () => {
         actionLabel: "Load diff",
       }),
     ]);
+  });
+});
+
+describe("combineReviewParsedDiffSlices", () => {
+  it("keeps parsed pages separate while exposing global statistics", () => {
+    const patch = (path: string, line: string) =>
+      [
+        `diff --git a/${path} b/${path}`,
+        "new file mode 100644",
+        "--- /dev/null",
+        `+++ b/${path}`,
+        "@@ -0,0 +1 @@",
+        `+${line}`,
+      ].join("\n");
+    const slices = [
+      { cursor: null, patch: patch("a.ts", "a"), truncated: false, nextCursor: "page-2" },
+      { cursor: "page-2", patch: patch("b.ts", "b"), truncated: false, nextCursor: null },
+    ];
+    const combined = combineReviewParsedDiffSlices({
+      slices,
+      parsedSlices: slices.map((slice, index) =>
+        buildReviewParsedDiff(slice.patch, `slice-${index}`),
+      ),
+      stats: { fileCount: 2, additions: 20, deletions: 3 },
+      legacy: false,
+    });
+
+    expect(combined).toMatchObject({
+      kind: "files",
+      fileCount: 2,
+      additions: 20,
+      deletions: 3,
+    });
+    if (combined.kind === "files") {
+      expect(combined.files.map((file) => file.path)).toEqual(["a.ts", "b.ts"]);
+    }
   });
 });

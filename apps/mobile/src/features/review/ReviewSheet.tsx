@@ -377,13 +377,21 @@ export function ReviewSheet(props: ReviewSheetProps) {
   useEffect(() => {
     showAuxiliaryPane("inspector");
   }, [environmentId, showAuxiliaryPane, threadId]);
-  const { error, reviewSections, selectedSection, refreshSelectedSection, selectSection } =
-    useReviewSections({
-      enabled: isEnvironmentReady,
-      environmentId,
-      threadId,
-      reviewCache,
-    });
+  const {
+    error,
+    loadingGitDiffs,
+    prefetchBranchDiff,
+    retryBranchDiff,
+    reviewSections,
+    selectedSection,
+    refreshSelectedSection,
+    selectSection,
+  } = useReviewSections({
+    enabled: isEnvironmentReady,
+    environmentId,
+    threadId,
+    reviewCache,
+  });
   useReviewDiffPrewarming({
     threadKey: reviewCache.threadKey,
     sections: reviewSections,
@@ -431,7 +439,7 @@ export function ReviewSheet(props: ReviewSheetProps) {
   const nativeBridge = useNativeReviewDiffBridge({
     threadKey: reviewCache.threadKey,
     sectionId: selectedSection?.id ?? null,
-    diff: selectedSection?.diff,
+    diff: selectedSection?.diffIdentity ?? selectedSection?.diff,
     data: nativeReviewDiffData,
     scheme: selectedTheme,
     collapsedFileIds,
@@ -477,9 +485,13 @@ export function ReviewSheet(props: ReviewSheetProps) {
   );
   const handleVisibleFileChange = useCallback(
     (event: NativeSyntheticEvent<{ readonly fileId?: string | null }>) => {
-      reviewFileNavigatorRef.current?.setVisibleFile(event.nativeEvent.fileId ?? null);
+      const fileId = event.nativeEvent.fileId ?? null;
+      reviewFileNavigatorRef.current?.setVisibleFile(fileId);
+      if (selectedSection?.kind !== "branch-range" || fileId === null) return;
+      const visibleIndex = reviewFiles.findIndex((file) => file.id === fileId);
+      if (visibleIndex >= Math.max(0, reviewFiles.length - 5)) prefetchBranchDiff();
     },
-    [],
+    [prefetchBranchDiff, reviewFiles, selectedSection?.kind],
   );
   const renderInspector = useCallback(
     () => (
@@ -518,8 +530,11 @@ export function ReviewSheet(props: ReviewSheetProps) {
 
   const parsedDiffNotice =
     parsedDiff.kind === "files" || parsedDiff.kind === "raw" ? parsedDiff.notice : null;
-  const hasCachedSelectedDiff = selectedSection?.diff != null;
-  const hasAnyCachedDiff = reviewSections.some((section) => section.diff != null);
+  const hasCachedSelectedDiff =
+    selectedSection?.diff != null || (selectedSection?.diffSlices?.length ?? 0) > 0;
+  const hasAnyCachedDiff = reviewSections.some(
+    (section) => section.diff != null || (section.diffSlices?.length ?? 0) > 0,
+  );
   const sectionMenu = useMemo(() => buildReviewSectionMenu(reviewSections), [reviewSections]);
   const { showConnectionNotice, showSectionToolbar } = resolveReviewAvailability({
     hasEnvironmentPresentation: environment.isReady,
@@ -608,6 +623,31 @@ export function ReviewSheet(props: ReviewSheetProps) {
         <View key="review-error" className="border-b border-border bg-card px-4 py-3">
           <Text className="text-sm font-t3-bold text-foreground">Review unavailable</Text>
           <Text className="text-xs leading-normal text-foreground-muted">{error}</Text>
+          {selectedSection?.kind === "branch-range" && reviewCache.branchDiff.error ? (
+            <Pressable
+              accessibilityRole="button"
+              className="mt-2 self-start rounded-md bg-foreground px-3 py-1.5"
+              onPress={retryBranchDiff}
+            >
+              <Text className="text-xs font-t3-bold text-background">Retry</Text>
+            </Pressable>
+          ) : null}
+        </View>,
+      );
+    }
+
+    if (
+      loadingGitDiffs &&
+      selectedSection?.kind === "branch-range" &&
+      (selectedSection.diffSlices?.length ?? 0) > 0
+    ) {
+      children.push(
+        <View
+          key="review-loading-more"
+          className="flex-row items-center gap-2 border-b border-border bg-card px-4 py-2"
+        >
+          <ActivityIndicator size="small" />
+          <Text className="text-xs text-foreground-muted">Loading more files…</Text>
         </View>,
       );
     }
@@ -621,7 +661,15 @@ export function ReviewSheet(props: ReviewSheetProps) {
     }
 
     return <>{children}</>;
-  }, [error, parsedDiffNotice]);
+  }, [
+    error,
+    loadingGitDiffs,
+    parsedDiffNotice,
+    retryBranchDiff,
+    reviewCache.branchDiff.error,
+    selectedSection?.diffSlices?.length,
+    selectedSection?.kind,
+  ]);
   const headerSubtitle = [
     headerDiffSummary.additions,
     headerDiffSummary.deletions,

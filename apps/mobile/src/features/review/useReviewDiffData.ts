@@ -3,7 +3,7 @@ import { useEffect, useMemo } from "react";
 import { countReviewCommentContexts, parseReviewInlineComments } from "./reviewCommentSelection";
 import { getCachedNativeReviewDiffData } from "./nativeReviewDiffAdapter";
 import { markReviewEvent, measureReviewWork } from "./reviewPerf";
-import { getCachedReviewParsedDiff } from "./reviewState";
+import { getCachedReviewParsedDiff, getCachedReviewParsedDiffSlices } from "./reviewState";
 import type { ReviewParsedDiff, ReviewSectionItem } from "./reviewModel";
 
 const EMPTY_INLINE_REVIEW_COMMENTS = Object.freeze([]);
@@ -48,14 +48,33 @@ export function useReviewDiffData(input: {
   const selectedSectionId = selectedSection?.id ?? null;
   const parsedDiff = useMemo(
     () =>
-      measureReviewWork("parse-diff", () =>
-        getCachedReviewParsedDiff({
+      measureReviewWork("parse-diff", () => {
+        if (selectedSection?.diffSlices) {
+          return getCachedReviewParsedDiffSlices({
+            threadKey,
+            sectionId: selectedSection.id,
+            snapshotId: selectedSection.diffSnapshotId ?? selectedSection.id,
+            slices: selectedSection.diffSlices,
+            ...(selectedSection.diffStats ? { stats: selectedSection.diffStats } : {}),
+            legacy: selectedSection.legacyDiff === true,
+          });
+        }
+        return getCachedReviewParsedDiff({
           threadKey,
           sectionId: selectedSection?.id ?? null,
           diff: selectedSection?.diff,
-        }),
-      ),
-    [selectedSection?.diff, selectedSection?.id, threadKey],
+        });
+      }),
+    [
+      selectedSection?.diff,
+      selectedSection?.diffIdentity,
+      selectedSection?.diffSlices,
+      selectedSection?.diffSnapshotId,
+      selectedSection?.diffStats,
+      selectedSection?.id,
+      selectedSection?.legacyDiff,
+      threadKey,
+    ],
   );
   const headerDiffSummary = useMemo(() => formatHeaderDiffSummary(parsedDiff), [parsedDiff]);
   const inlineReviewComments = useMemo(

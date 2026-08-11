@@ -2,7 +2,7 @@ import { useEffect } from "react";
 
 import { getCachedNativeReviewDiffData } from "./nativeReviewDiffAdapter";
 import type { ReviewSectionItem } from "./reviewModel";
-import { getCachedReviewParsedDiff } from "./reviewState";
+import { getCachedReviewParsedDiff, getCachedReviewParsedDiffSlices } from "./reviewState";
 
 interface IdleDeadlineLike {
   readonly didTimeout: boolean;
@@ -35,15 +35,24 @@ export function prewarmReviewDiffSection(input: {
   readonly section: ReviewSectionItem;
 }): void {
   const { section, threadKey } = input;
-  if (section.diff === null) {
+  if (section.diff === null && !section.diffSlices) {
     return;
   }
 
-  const parsedDiff = getCachedReviewParsedDiff({
-    threadKey,
-    sectionId: section.id,
-    diff: section.diff,
-  });
+  const parsedDiff = section.diffSlices
+    ? getCachedReviewParsedDiffSlices({
+        threadKey,
+        sectionId: section.id,
+        snapshotId: section.diffSnapshotId ?? section.id,
+        slices: section.diffSlices,
+        ...(section.diffStats ? { stats: section.diffStats } : {}),
+        legacy: section.legacyDiff === true,
+      })
+    : getCachedReviewParsedDiff({
+        threadKey,
+        sectionId: section.id,
+        diff: section.diff,
+      });
   getCachedNativeReviewDiffData({ parsedDiff, comments: [] });
 }
 
@@ -61,7 +70,9 @@ export function useReviewDiffPrewarming(input: {
     }
 
     const pendingSections = sections.filter(
-      (section) => section.id !== selectedSectionId && section.diff !== null,
+      (section) =>
+        section.id !== selectedSectionId &&
+        (section.diff !== null || (section.diffSlices?.length ?? 0) > 0),
     );
     if (pendingSections.length === 0) {
       return;

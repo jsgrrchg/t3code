@@ -1,5 +1,6 @@
 import type { ChangeTypes, FileDiffMetadata } from "@pierre/diffs";
 import { parsePatchFiles } from "@pierre/diffs/utils/parsePatchFiles";
+import type { LoadedDiffSlice } from "@t3tools/client-runtime/state/paged-diff";
 import type { OrchestrationCheckpointSummary, ReviewDiffPreviewSource } from "@t3tools/contracts";
 import * as Arr from "effect/Array";
 import { pipe } from "effect/Function";
@@ -18,6 +19,15 @@ export interface ReviewSectionItem {
   readonly subtitle: string | null;
   readonly diff: string | null;
   readonly isLoading: boolean;
+  readonly diffSlices?: ReadonlyArray<LoadedDiffSlice>;
+  readonly diffStats?: {
+    readonly fileCount: number;
+    readonly additions: number;
+    readonly deletions: number;
+  };
+  readonly legacyDiff?: boolean;
+  readonly diffIdentity?: string;
+  readonly diffSnapshotId?: string;
 }
 
 export interface ReviewRenderableHunkRow {
@@ -531,6 +541,9 @@ export function buildReviewSectionItems(input: {
   readonly turnDiffById: Readonly<Record<string, string | undefined>>;
   readonly loadingTurnIds: Readonly<Record<string, boolean | undefined>>;
   readonly loadingGitSections: boolean;
+  readonly branchDiffSlices?: ReadonlyArray<LoadedDiffSlice>;
+  readonly branchDiffLoading?: boolean;
+  readonly branchDiffLegacy?: boolean;
 }): ReadonlyArray<ReviewSectionItem> {
   const turnItems = getReadyReviewCheckpoints(input.checkpoints).map<ReviewSectionItem>(
     (checkpoint) => {
@@ -546,14 +559,26 @@ export function buildReviewSectionItems(input: {
     },
   );
 
-  const gitItems = input.gitSections.map<ReviewSectionItem>((section) => ({
-    id: `git:${section.kind}`,
-    kind: section.kind,
-    title: section.title,
-    subtitle: gitSubtitle(section),
-    diff: section.diff,
-    isLoading: false,
-  }));
+  const gitItems = input.gitSections.map<ReviewSectionItem>((section) => {
+    const branchSlices = section.kind === "branch-range" ? input.branchDiffSlices : undefined;
+    return {
+      id: `git:${section.kind}`,
+      kind: section.kind,
+      title: section.title,
+      subtitle: gitSubtitle(section),
+      diff: branchSlices?.[0]?.patch ?? section.diff,
+      isLoading: section.kind === "branch-range" ? input.branchDiffLoading === true : false,
+      ...(branchSlices ? { diffSlices: branchSlices } : {}),
+      ...(section.stats ? { diffStats: section.stats } : {}),
+      ...(section.kind === "branch-range"
+        ? {
+            legacyDiff: input.branchDiffLegacy === true,
+            diffIdentity: `${section.snapshotId ?? section.diffHash}:${branchSlices?.length ?? 1}`,
+            diffSnapshotId: section.snapshotId ?? section.diffHash,
+          }
+        : {}),
+    };
+  });
   const hasDirtyWorktreeItem = gitItems.some((item) => item.id === DIRTY_WORKTREE_SECTION_ID);
   const visibleGitItems =
     input.loadingGitSections && !hasDirtyWorktreeItem
@@ -636,4 +661,52 @@ export function buildReviewParsedDiff(
       notice,
     };
   }
+}
+
+export function combineReviewParsedDiffSlices(input: {
+  readonly slices: ReadonlyArray<LoadedDiffSlice>;
+  readonly parsedSlices: ReadonlyArray<ReviewParsedDiff>;
+  readonly stats?: {
+    readonly fileCount: number;
+    readonly additions: number;
+    readonly deletions: number;
+  };
+  readonly legacy: boolean;
+}): ReviewParsedDiff {
+  if (input.parsedSlices.length === 0) return { kind: "empty" };
+  const files = input.parsedSlices.flatMap((parsed) =>
+    parsed.kind === "files" ? parsed.files : [],
+  );
+  const rawSlices = input.parsedSlices.filter(
+    (parsed): parsed is Extract<ReviewParsedDiff, { kind: "raw" }> => parsed.kind === "raw",
+  );
+  const withheld = input.slices.some((slice) => slice.truncated);
+  const notice = input.legacy
+    ? (input.parsedSlices.find(
+        (parsed): parsed is Extract<ReviewParsedDiff, { kind: "files" | "raw" }> =>
+          parsed.kind !== "empty" && parsed.notice !== null,
+      )?.notice ?? null)
+    : withheld || rawSlices.length > 0
+      ? "Some individual files could not be shown inline. Every other branch file remains available."
+      : null;
+
+  if (files.length > 0) {
+    return {
+      kind: "files",
+      files,
+      fileCount: input.stats?.fileCount ?? files.length,
+      additions: input.stats?.additions ?? files.reduce((total, file) => total + file.additions, 0),
+      deletions: input.stats?.deletions ?? files.reduce((total, file) => total + file.deletions, 0),
+      notice,
+    };
+  }
+  if (rawSlices.length > 0) {
+    return {
+      kind: "raw",
+      text: rawSlices.map((parsed) => parsed.text).join("\n"),
+      reason: rawSlices[0]?.reason ?? "Unsupported diff format. Showing raw patch.",
+      notice,
+    };
+  }
+  return { kind: "empty" };
 }
