@@ -153,6 +153,7 @@ export const make = Effect.gen(function* () {
       panelChats: true,
       gitHistory: true,
       gitFetchAll: true,
+      workspaceEntryMove: true,
       ...(serverSelfUpdate === null ? {} : { serverSelfUpdate }),
       ...(serverSelfUpdate === "boot-service" ? { serverSelfUpdateProgress: true } : {}),
     },

@@ -45,6 +45,12 @@ describe("RPC authorization scopes", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.gitFetchAll)).toBe(AuthOrchestrationOperateScope);
   });
 
+  it("requires orchestration operate access to move workspace files", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.projectsMoveEntry)).toBe(
+      AuthOrchestrationOperateScope,
+    );
+  });
+
   it("allows relay status reads without granting relay installation access", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.cloudGetRelayClientStatus)).toBe(
       AuthRelayReadScope,

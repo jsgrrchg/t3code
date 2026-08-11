@@ -109,6 +109,9 @@ import {
   ProjectListEntriesError,
   ProjectListEntriesInput,
   ProjectListEntriesResult,
+  ProjectMoveEntryError,
+  ProjectMoveEntryInput,
+  ProjectMoveEntryResult,
   ProjectReadFileError,
   ProjectReadFileInput,
   ProjectReadFileResult,
@@ -206,6 +209,7 @@ export const WS_METHODS = {
   projectsRemove: "projects.remove",
   projectsDeleteEntry: "projects.deleteEntry",
   projectsListEntries: "projects.listEntries",
+  projectsMoveEntry: "projects.moveEntry",
   projectsReadFile: "projects.readFile",
   projectsSearchContents: "projects.searchContents",
   projectsSearchEntries: "projects.searchEntries",
@@ -626,6 +630,12 @@ export const WsProjectsListEntriesRpc = Rpc.make(WS_METHODS.projectsListEntries,
   error: Schema.Union([ProjectListEntriesError, EnvironmentAuthorizationError]),
 });
 
+export const WsProjectsMoveEntryRpc = Rpc.make(WS_METHODS.projectsMoveEntry, {
+  payload: ProjectMoveEntryInput,
+  success: ProjectMoveEntryResult,
+  error: Schema.Union([ProjectMoveEntryError, EnvironmentAuthorizationError]),
+});
+
 export const WsProjectsReadFileRpc = Rpc.make(WS_METHODS.projectsReadFile, {
   payload: ProjectReadFileInput,
   success: ProjectReadFileResult,
@@ -1041,6 +1051,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSourceControlPublishRepositoryRpc,
   WsProjectsDeleteEntryRpc,
   WsProjectsListEntriesRpc,
+  WsProjectsMoveEntryRpc,
   WsProjectsReadFileRpc,
   WsProjectsSearchContentsRpc,
   WsProjectsSearchEntriesRpc,

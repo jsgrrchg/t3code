@@ -12,6 +12,8 @@ import * as NodeFSP from "node:fs/promises";
 import type {
   ProjectDeleteEntryInput,
   ProjectDeleteEntryResult,
+  ProjectMoveEntryInput,
+  ProjectMoveEntryResult,
   ProjectReadFileInput,
   ProjectReadFileResult,
   ProjectWriteFileInput,
@@ -132,6 +134,110 @@ export const WorkspaceFileSystemError = Schema.Union([
 ]);
 export type WorkspaceFileSystemError = typeof WorkspaceFileSystemError.Type;
 
+export class WorkspaceMoveEntryOperationError extends Schema.TaggedErrorClass<WorkspaceMoveEntryOperationError>()(
+  "WorkspaceMoveEntryOperationError",
+  {
+    workspaceRoot: Schema.String,
+    sourceRelativePath: Schema.String,
+    destinationRelativePath: Schema.String,
+    resolvedPath: Schema.String,
+    operationPath: Schema.String,
+    operation: Schema.Literals([
+      "lstat-source",
+      "lstat-destination",
+      "lstat-destination-parent",
+      "realpath-workspace-root",
+      "realpath-source-parent",
+      "realpath-destination-parent",
+      "rename",
+    ]),
+    cause: Schema.Defect(),
+  },
+) {}
+
+export class WorkspaceMoveEntryPathEscapeError extends Schema.TaggedErrorClass<WorkspaceMoveEntryPathEscapeError>()(
+  "WorkspaceMoveEntryPathEscapeError",
+  {
+    workspaceRoot: Schema.String,
+    sourceRelativePath: Schema.String,
+    destinationRelativePath: Schema.String,
+    resolvedWorkspaceRoot: Schema.String,
+    resolvedPath: Schema.String,
+  },
+) {}
+
+export class WorkspaceMoveEntrySourceNotFoundError extends Schema.TaggedErrorClass<WorkspaceMoveEntrySourceNotFoundError>()(
+  "WorkspaceMoveEntrySourceNotFoundError",
+  {
+    workspaceRoot: Schema.String,
+    sourceRelativePath: Schema.String,
+    destinationRelativePath: Schema.String,
+    resolvedPath: Schema.String,
+  },
+) {}
+
+export class WorkspaceMoveEntrySourceKindMismatchError extends Schema.TaggedErrorClass<WorkspaceMoveEntrySourceKindMismatchError>()(
+  "WorkspaceMoveEntrySourceKindMismatchError",
+  {
+    workspaceRoot: Schema.String,
+    sourceRelativePath: Schema.String,
+    destinationRelativePath: Schema.String,
+    resolvedPath: Schema.String,
+  },
+) {}
+
+export class WorkspaceMoveEntrySamePathError extends Schema.TaggedErrorClass<WorkspaceMoveEntrySamePathError>()(
+  "WorkspaceMoveEntrySamePathError",
+  {
+    workspaceRoot: Schema.String,
+    sourceRelativePath: Schema.String,
+    destinationRelativePath: Schema.String,
+    resolvedPath: Schema.String,
+  },
+) {}
+
+export class WorkspaceMoveEntryDestinationExistsError extends Schema.TaggedErrorClass<WorkspaceMoveEntryDestinationExistsError>()(
+  "WorkspaceMoveEntryDestinationExistsError",
+  {
+    workspaceRoot: Schema.String,
+    sourceRelativePath: Schema.String,
+    destinationRelativePath: Schema.String,
+    resolvedPath: Schema.String,
+  },
+) {}
+
+export class WorkspaceMoveEntryDestinationParentNotFoundError extends Schema.TaggedErrorClass<WorkspaceMoveEntryDestinationParentNotFoundError>()(
+  "WorkspaceMoveEntryDestinationParentNotFoundError",
+  {
+    workspaceRoot: Schema.String,
+    sourceRelativePath: Schema.String,
+    destinationRelativePath: Schema.String,
+    resolvedPath: Schema.String,
+  },
+) {}
+
+export class WorkspaceMoveEntryDestinationParentNotDirectoryError extends Schema.TaggedErrorClass<WorkspaceMoveEntryDestinationParentNotDirectoryError>()(
+  "WorkspaceMoveEntryDestinationParentNotDirectoryError",
+  {
+    workspaceRoot: Schema.String,
+    sourceRelativePath: Schema.String,
+    destinationRelativePath: Schema.String,
+    resolvedPath: Schema.String,
+  },
+) {}
+
+export const WorkspaceMoveEntryError = Schema.Union([
+  WorkspaceMoveEntryOperationError,
+  WorkspaceMoveEntryPathEscapeError,
+  WorkspaceMoveEntrySourceNotFoundError,
+  WorkspaceMoveEntrySourceKindMismatchError,
+  WorkspaceMoveEntrySamePathError,
+  WorkspaceMoveEntryDestinationExistsError,
+  WorkspaceMoveEntryDestinationParentNotFoundError,
+  WorkspaceMoveEntryDestinationParentNotDirectoryError,
+]);
+export type WorkspaceMoveEntryError = typeof WorkspaceMoveEntryError.Type;
+
 /** Service tag for workspace file operations. */
 export class WorkspaceFileSystem extends Context.Service<
   WorkspaceFileSystem,
@@ -149,6 +255,13 @@ export class WorkspaceFileSystem extends Context.Service<
     ) => Effect.Effect<
       ProjectDeleteEntryResult,
       WorkspaceFileSystemError | WorkspacePaths.WorkspacePathOutsideRootError
+    >;
+    /** Move a file or symlink to another workspace-relative path without intentional overwrite. */
+    readonly moveEntry: (
+      input: ProjectMoveEntryInput,
+    ) => Effect.Effect<
+      ProjectMoveEntryResult,
+      WorkspaceMoveEntryError | WorkspacePaths.WorkspacePathOutsideRootError
     >;
     /**
      * Write a file relative to the workspace root.
@@ -348,6 +461,171 @@ export const make = Effect.gen(function* () {
     return { relativePath: target.relativePath, kind: input.kind };
   });
 
+  const moveEntry: WorkspaceFileSystem["Service"]["moveEntry"] = Effect.fn(
+    "WorkspaceFileSystem.moveEntry",
+  )(function* (input) {
+    const source = yield* workspacePaths.resolveRelativePathWithinRoot({
+      workspaceRoot: input.cwd,
+      relativePath: input.sourceRelativePath,
+    });
+    const destination = yield* workspacePaths.resolveRelativePathWithinRoot({
+      workspaceRoot: input.cwd,
+      relativePath: input.destinationRelativePath,
+    });
+    const errorContext = {
+      workspaceRoot: input.cwd,
+      sourceRelativePath: source.relativePath,
+      destinationRelativePath: destination.relativePath,
+    };
+
+    if (source.absolutePath === destination.absolutePath) {
+      return yield* new WorkspaceMoveEntrySamePathError({
+        ...errorContext,
+        resolvedPath: source.absolutePath,
+      });
+    }
+
+    const sourceStat = yield* Effect.tryPromise({
+      try: () => NodeFSP.lstat(source.absolutePath),
+      catch: (cause) =>
+        (cause as NodeJS.ErrnoException).code === "ENOENT"
+          ? new WorkspaceMoveEntrySourceNotFoundError({
+              ...errorContext,
+              resolvedPath: source.absolutePath,
+            })
+          : new WorkspaceMoveEntryOperationError({
+              ...errorContext,
+              resolvedPath: source.absolutePath,
+              operationPath: source.absolutePath,
+              operation: "lstat-source",
+              cause,
+            }),
+    });
+    if (!sourceStat.isFile() && !sourceStat.isSymbolicLink()) {
+      return yield* new WorkspaceMoveEntrySourceKindMismatchError({
+        ...errorContext,
+        resolvedPath: source.absolutePath,
+      });
+    }
+
+    const realWorkspaceRoot = yield* Effect.tryPromise({
+      try: () => NodeFSP.realpath(input.cwd),
+      catch: (cause) =>
+        new WorkspaceMoveEntryOperationError({
+          ...errorContext,
+          resolvedPath: input.cwd,
+          operationPath: input.cwd,
+          operation: "realpath-workspace-root",
+          cause,
+        }),
+    });
+
+    const ensureRealParentWithinRoot = Effect.fn("WorkspaceFileSystem.ensureMoveParentWithinRoot")(
+      function* (
+        parentPath: string,
+        operation: "realpath-source-parent" | "realpath-destination-parent",
+      ) {
+        const realParent = yield* Effect.tryPromise({
+          try: () => NodeFSP.realpath(parentPath),
+          catch: (cause) =>
+            operation === "realpath-destination-parent" &&
+            (cause as NodeJS.ErrnoException).code === "ENOENT"
+              ? new WorkspaceMoveEntryDestinationParentNotFoundError({
+                  ...errorContext,
+                  resolvedPath: parentPath,
+                })
+              : new WorkspaceMoveEntryOperationError({
+                  ...errorContext,
+                  resolvedPath: parentPath,
+                  operationPath: parentPath,
+                  operation,
+                  cause,
+                }),
+        });
+        const relativeRealPath = path.relative(realWorkspaceRoot, realParent);
+        if (
+          relativeRealPath.startsWith(`..${path.sep}`) ||
+          relativeRealPath === ".." ||
+          path.isAbsolute(relativeRealPath)
+        ) {
+          return yield* new WorkspaceMoveEntryPathEscapeError({
+            ...errorContext,
+            resolvedWorkspaceRoot: realWorkspaceRoot,
+            resolvedPath: realParent,
+          });
+        }
+        return realParent;
+      },
+    );
+
+    yield* ensureRealParentWithinRoot(path.dirname(source.absolutePath), "realpath-source-parent");
+    const realDestinationParent = yield* ensureRealParentWithinRoot(
+      path.dirname(destination.absolutePath),
+      "realpath-destination-parent",
+    );
+    const destinationParentStat = yield* Effect.tryPromise({
+      try: () => NodeFSP.lstat(realDestinationParent),
+      catch: (cause) =>
+        new WorkspaceMoveEntryOperationError({
+          ...errorContext,
+          resolvedPath: realDestinationParent,
+          operationPath: realDestinationParent,
+          operation: "lstat-destination-parent",
+          cause,
+        }),
+    });
+    if (!destinationParentStat.isDirectory()) {
+      return yield* new WorkspaceMoveEntryDestinationParentNotDirectoryError({
+        ...errorContext,
+        resolvedPath: realDestinationParent,
+      });
+    }
+
+    const destinationExists = yield* Effect.tryPromise({
+      try: async () => {
+        try {
+          await NodeFSP.lstat(destination.absolutePath);
+          return true;
+        } catch (cause) {
+          if ((cause as NodeJS.ErrnoException).code === "ENOENT") return false;
+          throw cause;
+        }
+      },
+      catch: (cause) =>
+        new WorkspaceMoveEntryOperationError({
+          ...errorContext,
+          resolvedPath: destination.absolutePath,
+          operationPath: destination.absolutePath,
+          operation: "lstat-destination",
+          cause,
+        }),
+    });
+    if (destinationExists) {
+      return yield* new WorkspaceMoveEntryDestinationExistsError({
+        ...errorContext,
+        resolvedPath: destination.absolutePath,
+      });
+    }
+
+    yield* Effect.tryPromise({
+      try: () => NodeFSP.rename(source.absolutePath, destination.absolutePath),
+      catch: (cause) =>
+        new WorkspaceMoveEntryOperationError({
+          ...errorContext,
+          resolvedPath: destination.absolutePath,
+          operationPath: destination.absolutePath,
+          operation: "rename",
+          cause,
+        }),
+    });
+    yield* workspaceEntries.refresh(input.cwd);
+    return {
+      sourceRelativePath: source.relativePath,
+      destinationRelativePath: destination.relativePath,
+      kind: input.kind,
+    };
+  });
+
   const writeFile: WorkspaceFileSystem["Service"]["writeFile"] = Effect.fn(
     "WorkspaceFileSystem.writeFile",
   )(function* (input) {
@@ -386,7 +664,7 @@ export const make = Effect.gen(function* () {
     return { relativePath: target.relativePath };
   });
 
-  return WorkspaceFileSystem.of({ deleteEntry, readFile, writeFile });
+  return WorkspaceFileSystem.of({ deleteEntry, moveEntry, readFile, writeFile });
 });
 
 export const layer = Layer.effect(WorkspaceFileSystem, make);

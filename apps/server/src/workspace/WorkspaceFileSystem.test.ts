@@ -1,3 +1,6 @@
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeFSP from "node:fs/promises";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it, describe, expect } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -361,6 +364,218 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
             .stat(path.join(cwd, "linked.txt"))
             .pipe(Effect.orElseSucceed(() => null)),
         ).toBeNull();
+      }),
+    );
+  });
+
+  describe("moveEntry", () => {
+    it.effect("moves files between folders and refreshes workspace entries", () =>
+      Effect.gen(function* () {
+        const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "src/index.ts", "export const answer = 42;\n");
+        yield* fileSystem.makeDirectory(path.join(cwd, "components"));
+        yield* workspaceEntries.list({ cwd });
+
+        const result = yield* workspaceFileSystem.moveEntry({
+          cwd,
+          sourceRelativePath: "src/index.ts",
+          destinationRelativePath: "components/index.ts",
+          kind: "file",
+        });
+
+        expect(result).toEqual({
+          sourceRelativePath: "src/index.ts",
+          destinationRelativePath: "components/index.ts",
+          kind: "file",
+        });
+        expect(yield* fileSystem.readFileString(path.join(cwd, "components/index.ts"))).toBe(
+          "export const answer = 42;\n",
+        );
+        expect(
+          yield* fileSystem.stat(path.join(cwd, "src/index.ts")).pipe(Effect.option),
+        ).toMatchObject({ _tag: "None" });
+        const entries = (yield* workspaceEntries.list({ cwd })).entries;
+        expect(entries).toEqual(
+          expect.arrayContaining([expect.objectContaining({ path: "components/index.ts" })]),
+        );
+        expect(entries).not.toEqual(
+          expect.arrayContaining([expect.objectContaining({ path: "src/index.ts" })]),
+        );
+      }),
+    );
+
+    it.effect("moves a nested file to the workspace root", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "nested/readme.md", "hello\n");
+
+        yield* workspaceFileSystem.moveEntry({
+          cwd,
+          sourceRelativePath: "nested/readme.md",
+          destinationRelativePath: "readme.md",
+          kind: "file",
+        });
+
+        expect(yield* fileSystem.readFileString(path.join(cwd, "readme.md"))).toBe("hello\n");
+      }),
+    );
+
+    it.effect("rejects missing, directory, no-op, and colliding sources", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "source.txt", "source\n");
+        yield* writeTextFile(cwd, "destination.txt", "destination\n");
+        yield* fileSystem.makeDirectory(path.join(cwd, "directory"));
+
+        const missing = yield* workspaceFileSystem
+          .moveEntry({
+            cwd,
+            sourceRelativePath: "missing.txt",
+            destinationRelativePath: "moved.txt",
+            kind: "file",
+          })
+          .pipe(Effect.flip);
+        expect(missing).toBeInstanceOf(WorkspaceFileSystem.WorkspaceMoveEntrySourceNotFoundError);
+
+        const directory = yield* workspaceFileSystem
+          .moveEntry({
+            cwd,
+            sourceRelativePath: "directory",
+            destinationRelativePath: "moved-directory",
+            kind: "file",
+          })
+          .pipe(Effect.flip);
+        expect(directory).toBeInstanceOf(
+          WorkspaceFileSystem.WorkspaceMoveEntrySourceKindMismatchError,
+        );
+
+        const same = yield* workspaceFileSystem
+          .moveEntry({
+            cwd,
+            sourceRelativePath: "./source.txt",
+            destinationRelativePath: "source.txt",
+            kind: "file",
+          })
+          .pipe(Effect.flip);
+        expect(same).toBeInstanceOf(WorkspaceFileSystem.WorkspaceMoveEntrySamePathError);
+
+        const collision = yield* workspaceFileSystem
+          .moveEntry({
+            cwd,
+            sourceRelativePath: "source.txt",
+            destinationRelativePath: "destination.txt",
+            kind: "file",
+          })
+          .pipe(Effect.flip);
+        expect(collision).toBeInstanceOf(
+          WorkspaceFileSystem.WorkspaceMoveEntryDestinationExistsError,
+        );
+        expect(yield* fileSystem.readFileString(path.join(cwd, "source.txt"))).toBe("source\n");
+        expect(yield* fileSystem.readFileString(path.join(cwd, "destination.txt"))).toBe(
+          "destination\n",
+        );
+      }),
+    );
+
+    it.effect("rejects invalid destination parents and path traversal", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "source.txt", "source\n");
+        yield* writeTextFile(cwd, "not-a-directory", "file\n");
+
+        const missingParent = yield* workspaceFileSystem
+          .moveEntry({
+            cwd,
+            sourceRelativePath: "source.txt",
+            destinationRelativePath: "missing/moved.txt",
+            kind: "file",
+          })
+          .pipe(Effect.flip);
+        expect(missingParent).toBeInstanceOf(
+          WorkspaceFileSystem.WorkspaceMoveEntryDestinationParentNotFoundError,
+        );
+
+        const fileParent = yield* workspaceFileSystem
+          .moveEntry({
+            cwd,
+            sourceRelativePath: "source.txt",
+            destinationRelativePath: "not-a-directory/moved.txt",
+            kind: "file",
+          })
+          .pipe(Effect.flip);
+        expect(fileParent).toBeInstanceOf(
+          WorkspaceFileSystem.WorkspaceMoveEntryDestinationParentNotDirectoryError,
+        );
+
+        for (const [sourceRelativePath, destinationRelativePath] of [
+          ["../source.txt", "moved.txt"],
+          ["source.txt", "../moved.txt"],
+        ] as const) {
+          const traversal = yield* workspaceFileSystem
+            .moveEntry({ cwd, sourceRelativePath, destinationRelativePath, kind: "file" })
+            .pipe(Effect.flip);
+          expect(traversal).toBeInstanceOf(WorkspacePaths.WorkspacePathOutsideRootError);
+        }
+      }),
+    );
+
+    it.effect("rejects destination parents resolving outside the workspace", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        const outsideDir = yield* makeTempDir;
+        yield* writeTextFile(cwd, "source.txt", "source\n");
+        yield* fileSystem.symlink(outsideDir, path.join(cwd, "outside"));
+
+        const error = yield* workspaceFileSystem
+          .moveEntry({
+            cwd,
+            sourceRelativePath: "source.txt",
+            destinationRelativePath: "outside/moved.txt",
+            kind: "file",
+          })
+          .pipe(Effect.flip);
+
+        expect(error).toBeInstanceOf(WorkspaceFileSystem.WorkspaceMoveEntryPathEscapeError);
+      }),
+    );
+
+    it.effect("moves symlinks without moving their external targets", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        const outsideDir = yield* makeTempDir;
+        const target = path.join(outsideDir, "keep.txt");
+        yield* writeTextFile(outsideDir, "keep.txt", "keep\n");
+        yield* fileSystem.makeDirectory(path.join(cwd, "links"));
+        yield* fileSystem.symlink(target, path.join(cwd, "linked.txt"));
+
+        yield* workspaceFileSystem.moveEntry({
+          cwd,
+          sourceRelativePath: "linked.txt",
+          destinationRelativePath: "links/linked.txt",
+          kind: "file",
+        });
+
+        expect(yield* fileSystem.readFileString(target)).toBe("keep\n");
+        expect(
+          yield* Effect.promise(() => NodeFSP.readlink(path.join(cwd, "links/linked.txt"))),
+        ).toBe(target);
       }),
     );
   });

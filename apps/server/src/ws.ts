@@ -35,8 +35,11 @@ import {
   type ProjectEntriesFailure,
   type ProjectFileFailure,
   type ProjectFileOperation,
+  type ProjectMoveEntryFailure,
+  type ProjectMoveEntryOperation,
   ProjectDeleteEntryError,
   ProjectListEntriesError,
+  ProjectMoveEntryError,
   ProjectReadFileError,
   ProjectSearchContentsError,
   ProjectSearchEntriesError,
@@ -275,6 +278,48 @@ function projectFileFailureContext(
       return { failure: "path_kind_mismatch", resolvedPath: error.resolvedPath };
     case "WorkspaceBinaryFileError":
       return { failure: "binary_file", resolvedPath: error.resolvedPath };
+    default:
+      return unexpectedCompatibilityError(error);
+  }
+}
+
+function projectMoveEntryFailureContext(
+  error: WorkspaceFileSystem.WorkspaceMoveEntryError | WorkspacePaths.WorkspacePathOutsideRootError,
+): {
+  readonly failure: ProjectMoveEntryFailure;
+  readonly resolvedPath?: string;
+  readonly resolvedWorkspaceRoot?: string;
+  readonly operation?: ProjectMoveEntryOperation;
+  readonly operationPath?: string;
+} {
+  switch (error._tag) {
+    case "WorkspacePathOutsideRootError":
+      return { failure: "workspace_path_outside_root" };
+    case "WorkspaceMoveEntryOperationError":
+      return {
+        failure: "operation_failed",
+        resolvedPath: error.resolvedPath,
+        operation: error.operation,
+        operationPath: error.operationPath,
+      };
+    case "WorkspaceMoveEntryPathEscapeError":
+      return {
+        failure: "resolved_path_outside_root",
+        resolvedPath: error.resolvedPath,
+        resolvedWorkspaceRoot: error.resolvedWorkspaceRoot,
+      };
+    case "WorkspaceMoveEntrySourceNotFoundError":
+      return { failure: "source_not_found", resolvedPath: error.resolvedPath };
+    case "WorkspaceMoveEntrySourceKindMismatchError":
+      return { failure: "source_kind_mismatch", resolvedPath: error.resolvedPath };
+    case "WorkspaceMoveEntrySamePathError":
+      return { failure: "source_destination_same", resolvedPath: error.resolvedPath };
+    case "WorkspaceMoveEntryDestinationExistsError":
+      return { failure: "destination_exists", resolvedPath: error.resolvedPath };
+    case "WorkspaceMoveEntryDestinationParentNotFoundError":
+      return { failure: "destination_parent_not_found", resolvedPath: error.resolvedPath };
+    case "WorkspaceMoveEntryDestinationParentNotDirectoryError":
+      return { failure: "destination_parent_not_directory", resolvedPath: error.resolvedPath };
     default:
       return unexpectedCompatibilityError(error);
   }
@@ -1915,6 +1960,21 @@ const makeWsRpcLayer = (
                   new ProjectListEntriesError({
                     ...input,
                     ...projectEntriesFailureContext(cause),
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.projectsMoveEntry]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectsMoveEntry,
+            workspaceFileSystem.moveEntry(input).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProjectMoveEntryError({
+                    ...input,
+                    ...projectMoveEntryFailureContext(cause),
                     cause,
                   }),
               ),

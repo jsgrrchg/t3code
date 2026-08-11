@@ -5025,6 +5025,77 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("routes websocket rpc projects.moveEntry", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-project-move-" });
+      yield* fs.makeDirectory(path.join(workspaceDir, "source"));
+      yield* fs.makeDirectory(path.join(workspaceDir, "destination"));
+      yield* fs.writeFileString(path.join(workspaceDir, "source", "file.txt"), "moved");
+
+      yield* buildAppUnderTest();
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.projectsMoveEntry]({
+            cwd: workspaceDir,
+            sourceRelativePath: "source/file.txt",
+            destinationRelativePath: "destination/file.txt",
+            kind: "file",
+          }),
+        ),
+      );
+
+      assert.deepEqual(response, {
+        sourceRelativePath: "source/file.txt",
+        destinationRelativePath: "destination/file.txt",
+        kind: "file",
+      });
+      assert.equal(
+        yield* fs.readFileString(path.join(workspaceDir, "destination", "file.txt")),
+        "moved",
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes structured websocket rpc projects.moveEntry errors", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-project-move-" });
+      yield* fs.writeFileString(path.join(workspaceDir, "source.txt"), "source");
+      yield* fs.writeFileString(path.join(workspaceDir, "destination.txt"), "destination");
+
+      yield* buildAppUnderTest();
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const result = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.projectsMoveEntry]({
+            cwd: workspaceDir,
+            sourceRelativePath: "source.txt",
+            destinationRelativePath: "destination.txt",
+            kind: "file",
+          }),
+        ).pipe(Effect.result),
+      );
+
+      if (result._tag !== "Failure" || result.failure._tag !== "ProjectMoveEntryError") {
+        assert.fail("Expected a ProjectMoveEntryError");
+      }
+      assert.equal(result.failure.failure, "destination_exists");
+      assert.equal(result.failure.sourceRelativePath, "source.txt");
+      assert.equal(result.failure.destinationRelativePath, "destination.txt");
+      assert.equal(yield* fs.readFileString(path.join(workspaceDir, "source.txt")), "source");
+      assert.equal(
+        yield* fs.readFileString(path.join(workspaceDir, "destination.txt")),
+        "destination",
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("creates a missing workspace root during websocket project.create dispatch", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
