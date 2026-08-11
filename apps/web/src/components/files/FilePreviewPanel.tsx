@@ -6,14 +6,8 @@ import type {
 } from "@t3tools/contracts";
 import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
 import { VirtualizedFile, type SelectedLineRange } from "@pierre/diffs";
-import { Editor } from "@pierre/diffs/edit";
-import {
-  type CreateEditor,
-  EditProvider,
-  File,
-  type FileOptions,
-  Virtualizer,
-} from "@pierre/diffs/react";
+import { Editor } from "@pierre/diffs/editor";
+import { EditProvider, File, type FileOptions, Virtualizer } from "@pierre/diffs/react";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -559,11 +553,9 @@ function EditableFileSurface({
       }, []);
     return draftEntry ? appendFileCommentAnnotationEntry(persisted, draftEntry) : persisted;
   }, [draftEntry, relativePath, reviewComments]);
-  const editorRef = useRef<Editor<FileCommentAnnotationGroup> | null>(null);
-  const createEditor = useCallback<CreateEditor<FileCommentAnnotationGroup>>(
-    (editorOptions) => {
-      const editor = new Editor<FileCommentAnnotationGroup>({
-        ...editorOptions,
+  const editor = useMemo(
+    () =>
+      new Editor<FileCommentAnnotationGroup>({
         persistState: true,
         persistStateStorage: "inMemory",
         onChange: (file, nextLineAnnotations) => {
@@ -596,11 +588,15 @@ function EditableFileSurface({
             setDraftEntry(nextDraftEntry);
           }
         },
-      });
-      editorRef.current = editor;
-      return editor;
-    },
+      }),
     [addReviewComment, composerDraftTarget, cwd, environmentId, relativePath, saveCoordinator],
+  );
+
+  useEffect(
+    () => () => {
+      editor.cleanUp();
+    },
+    [editor],
   );
 
   const removeAnnotationEntry = useCallback(
@@ -654,15 +650,14 @@ function EditableFileSurface({
   const hasOpenCommentForm = draftEntry !== null;
   useEffect(() => {
     const root = surfaceRef.current;
-    const editor = editorRef.current;
-    if (!root || !editor) return;
+    if (!root) return;
     return installFileEditorDismissal({
       root,
       editor,
       isBlocked: () => hasOpenCommentForm,
       onDismiss: () => setSelectedRange(null),
     });
-  }, [hasOpenCommentForm, setSelectedRange]);
+  }, [editor, hasOpenCommentForm, setSelectedRange]);
   const handleLineSelectionEnd = useCallback(
     (range: SelectedLineRange | null) => {
       setSelectedRange(range);
@@ -693,7 +688,7 @@ function EditableFileSurface({
   );
 
   return (
-    <EditProvider createEditor={createEditor}>
+    <EditProvider editor={editor}>
       <div ref={surfaceRef} className="flex min-h-0 flex-1">
         <Virtualizer
           className="file-preview-virtualizer min-h-0 flex-1 overflow-auto"
@@ -711,7 +706,7 @@ function EditableFileSurface({
                 cwd,
                 relativePath,
                 contents,
-                editorRef.current?.getFile(),
+                editor.getFile(),
               ),
             }}
             options={{
@@ -746,7 +741,7 @@ function EditableFileSurface({
               </div>
             )}
             className="min-h-full"
-            edit
+            contentEditable
           />
         </Virtualizer>
       </div>
