@@ -71,12 +71,14 @@ import {
   filePreviewScrollKey,
   getRememberedFilePreviewScroll,
   rememberFilePreviewScroll,
+  remapRememberedFilePreviewScroll,
 } from "./filePreviewScrollState";
 import { FileSaveCoordinator } from "./fileSaveCoordinator";
 import {
   clearProjectFileQueryData,
   confirmProjectFileQueryData,
   getOptimisticProjectFileQueryData,
+  reconcileMovedProjectFileQueryData,
   setProjectFileQueryData,
   useProjectFileQuery,
 } from "./projectFilesQueryState";
@@ -98,6 +100,9 @@ interface FilePreviewPanelProps {
   onOpenFile: (relativePath: string) => void;
   onEntryDeleted: (relativePath: string, kind: "file" | "directory") => void;
   onPendingChange: (relativePath: string, pending: boolean) => void;
+  workspaceEntryMoveEnabled: boolean;
+  pendingFileSurfaceIds: ReadonlySet<string>;
+  onEntryMoved: (sourceRelativePath: string, destinationRelativePath: string) => void;
 }
 
 const FILE_EXPLORER_STORAGE_KEY = "t3code.fileExplorerOpen";
@@ -922,6 +927,9 @@ export default function FilePreviewPanel({
   onOpenFile,
   onEntryDeleted,
   onPendingChange,
+  workspaceEntryMoveEnabled,
+  pendingFileSurfaceIds,
+  onEntryMoved,
 }: FilePreviewPanelProps) {
   const { resolvedTheme } = useTheme();
   const wordWrap = useClientSettings((settings) => settings.wordWrap);
@@ -1014,6 +1022,36 @@ export default function FilePreviewPanel({
       onEntryDeleted(entryPath, kind);
     },
     [activeFileFallsWithinEntry, cwd, environmentId, onEntryDeleted, relativePath],
+  );
+  const handleBeforeMoveEntry = useCallback(
+    async (sourceRelativePath: string) => {
+      if (sourceRelativePath !== relativePath) {
+        return !pendingFileSurfaceIds.has(`file:${sourceRelativePath}`);
+      }
+      const coordinator = saveCoordinatorRef.current;
+      if (!coordinator) {
+        return !pendingFileSurfaceIds.has(`file:${sourceRelativePath}`);
+      }
+      await coordinator.flush();
+      return !coordinator.hasPendingChanges();
+    },
+    [pendingFileSurfaceIds, relativePath],
+  );
+  const handleEntryMoved = useCallback(
+    (sourceRelativePath: string, destinationRelativePath: string) => {
+      if (sourceRelativePath === relativePath) {
+        saveCoordinatorRef.current?.discard();
+      }
+      reconcileMovedProjectFileQueryData(
+        environmentId,
+        cwd,
+        sourceRelativePath,
+        destinationRelativePath,
+      );
+      remapRememberedFilePreviewScroll(threadRef, cwd, sourceRelativePath, destinationRelativePath);
+      onEntryMoved(sourceRelativePath, destinationRelativePath);
+    },
+    [cwd, environmentId, onEntryMoved, relativePath, threadRef],
   );
 
   useEffect(() => {
@@ -1306,6 +1344,10 @@ export default function FilePreviewPanel({
               onOpenFile={onOpenFile}
               onBeforeDeleteEntry={handleBeforeDeleteEntry}
               onEntryDeleted={handleEntryDeleted}
+              workspaceEntryMoveEnabled={workspaceEntryMoveEnabled}
+              pendingFileSurfaceIds={pendingFileSurfaceIds}
+              onBeforeMoveEntry={handleBeforeMoveEntry}
+              onEntryMoved={handleEntryMoved}
             />
           </aside>
         ) : null}

@@ -144,6 +144,7 @@ import {
 import { addBrowserSurface } from "./preview/addBrowserSurface";
 import { closePreviewSession } from "./preview/closePreviewSession";
 import { pathFallsWithinEntry } from "./files/filePath";
+import { remapComposerFileTokens, remapFileReviewComments } from "./files/fileMoveReconciliation";
 import { ThreadPreviewMiniPlayer } from "./preview/ThreadPreviewMiniPlayer";
 import { subscribePreviewAction } from "./preview/previewActionBus";
 import { getConfiguredPreviewUrls } from "./preview/previewEmptyStateLogic";
@@ -3540,6 +3541,55 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [activeThreadRef, rightPanelState.surfaces],
   );
+  const handleFileEntryMoved = useCallback(
+    (sourceRelativePath: string, destinationRelativePath: string) => {
+      if (!activeThreadRef) return;
+      useRightPanelStore
+        .getState()
+        .remapFileSurface(activeThreadRef, sourceRelativePath, destinationRelativePath);
+
+      if (activeProjectKey) {
+        setPendingFileSurfaceIdsByProject((currentByProject) => {
+          const current = currentByProject.get(activeProjectKey);
+          if (!current) return currentByProject;
+          const next = new Set(current);
+          next.delete(`file:${sourceRelativePath}`);
+          next.delete(`file:${destinationRelativePath}`);
+          if (next.size === current.size) return currentByProject;
+          const nextByProject = new Map(currentByProject);
+          if (next.size === 0) nextByProject.delete(activeProjectKey);
+          else nextByProject.set(activeProjectKey, next);
+          return nextByProject;
+        });
+      }
+
+      const draft = useComposerDraftStore.getState().getComposerDraft(composerDraftTarget);
+      if (!draft) return;
+      const prompt = remapComposerFileTokens(
+        draft.prompt,
+        sourceRelativePath,
+        destinationRelativePath,
+      );
+      if (prompt !== draft.prompt) {
+        setComposerDraftPrompt(composerDraftTarget, prompt);
+      }
+      const reviewComments = remapFileReviewComments(
+        draft.reviewComments,
+        sourceRelativePath,
+        destinationRelativePath,
+      );
+      if (reviewComments.some((comment, index) => comment !== draft.reviewComments[index])) {
+        setComposerDraftReviewComments(composerDraftTarget, reviewComments);
+      }
+    },
+    [
+      activeProjectKey,
+      activeThreadRef,
+      composerDraftTarget,
+      setComposerDraftPrompt,
+      setComposerDraftReviewComments,
+    ],
+  );
 
   // The thread's own change request, placed against the project it belongs to. Without a
   // project there is nothing to resolve it against, so the caller falls back to the browser.
@@ -6722,6 +6772,11 @@ function ChatViewContent(props: ChatViewProps) {
           onOpenFile={openFileSurface}
           onEntryDeleted={handleFileEntryDeleted}
           onPendingChange={handleFilePendingChange}
+          workspaceEntryMoveEnabled={
+            serverConfig?.environment.capabilities.workspaceEntryMove === true
+          }
+          pendingFileSurfaceIds={pendingFileSurfaceIds}
+          onEntryMoved={handleFileEntryMoved}
         />
       </Suspense>
     ) : null

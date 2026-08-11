@@ -1,6 +1,8 @@
 import type {
   ContextMenuItem as TreeContextMenuItem,
   ContextMenuOpenContext as TreeContextMenuOpenContext,
+  FileTreeDropContext,
+  FileTreeDropResult,
 } from "@pierre/trees";
 import type { EnvironmentId, ProjectEntry } from "@t3tools/contracts";
 import {
@@ -31,6 +33,7 @@ import { useProjectPathSearch } from "~/state/queries";
 import { useAtomCommand } from "~/state/use-atom-command";
 
 import { createFileTreeDragMentionController } from "./fileTreeDragMention";
+import { resolveFileTreeMove } from "./fileTreeMove";
 import { loadProjectDirectoryEntries } from "./projectFilesQueryState";
 
 interface FileBrowserPanelProps {
@@ -44,6 +47,13 @@ interface FileBrowserPanelProps {
   onOpenFile: (relativePath: string) => void;
   onBeforeDeleteEntry: (relativePath: string, kind: ProjectEntry["kind"]) => Promise<void>;
   onEntryDeleted: (relativePath: string, kind: ProjectEntry["kind"]) => void;
+  workspaceEntryMoveEnabled: boolean;
+  pendingFileSurfaceIds: ReadonlySet<string>;
+  onBeforeMoveEntry: (
+    sourceRelativePath: string,
+    destinationRelativePath: string,
+  ) => Promise<boolean>;
+  onEntryMoved: (sourceRelativePath: string, destinationRelativePath: string) => void;
 }
 
 const TREE_UNSAFE_CSS = `
@@ -149,6 +159,10 @@ export default function FileBrowserPanel({
   onOpenFile,
   onBeforeDeleteEntry,
   onEntryDeleted,
+  workspaceEntryMoveEnabled,
+  pendingFileSurfaceIds,
+  onBeforeMoveEntry,
+  onEntryMoved,
 }: FileBrowserPanelProps) {
   const { resolvedTheme } = useTheme();
   const composerRef = useComposerHandleContext();
@@ -160,6 +174,8 @@ export default function FileBrowserPanel({
     Schema.Boolean,
   );
   const deleteEntry = useAtomCommand(projectEnvironment.deleteEntry);
+  const moveEntry = useAtomCommand(projectEnvironment.moveEntry);
+  const [movePending, setMovePending] = useState(false);
   const [searchValue, setSearchValue] = useState("");
   const normalizedSearchValue = searchValue.trim();
   const searchActive = normalizedSearchValue.length > 0;
@@ -187,6 +203,20 @@ export default function FileBrowserPanel({
   const syncingSelectionRef = useRef(false);
   const treeSelectionPathRef = useRef<string | null>(null);
   const handledRevealRef = useRef<{ path: string; revealId: number } | null>(null);
+  const movePolicyRef = useRef({
+    workspaceEntryMoveEnabled,
+    pendingFileSurfaceIds,
+    selectedPath,
+    movePending,
+  });
+  movePolicyRef.current = {
+    workspaceEntryMoveEnabled,
+    pendingFileSurfaceIds,
+    selectedPath,
+    movePending,
+  };
+  const moveCallbacksRef = useRef({ onBeforeMoveEntry, onEntryMoved });
+  moveCallbacksRef.current = { onBeforeMoveEntry, onEntryMoved };
 
   // The tree renders rows in shadow DOM and its anchor rect is unreliable, so
   // capture the right-click position ourselves; contextmenu is a composed
@@ -330,6 +360,74 @@ export default function FileBrowserPanel({
       }),
     [],
   );
+  const resolveMove = useCallback((context: FileTreeDropContext) => {
+    const policy = movePolicyRef.current;
+    return resolveFileTreeMove(context, {
+      enabled: policy.workspaceEntryMoveEnabled,
+      movePending: policy.movePending,
+      entryKinds: entryKindsRef.current,
+      pendingSurfaceIds: policy.pendingFileSurfaceIds,
+      activeRelativePath: policy.selectedPath,
+    });
+  }, []);
+  const completeMoveRef = useRef<(event: FileTreeDropResult) => void>(() => undefined);
+  completeMoveRef.current = (event) => {
+    const move = resolveMove(event);
+    if (!move) {
+      refreshTreeRef.current();
+      return;
+    }
+    movePolicyRef.current = { ...movePolicyRef.current, movePending: true };
+    setMovePending(true);
+    void (async () => {
+      try {
+        const canContinue = await moveCallbacksRef.current.onBeforeMoveEntry(
+          move.sourceRelativePath,
+          move.destinationRelativePath,
+        );
+        if (!canContinue) {
+          toastManager.add({
+            type: "error",
+            title: "File not moved",
+            description: "Save the file before moving it.",
+          });
+          return;
+        }
+        const result = await moveEntry({
+          environmentId,
+          input: { cwd, ...move, kind: "file" },
+        });
+        if (result._tag === "Success") {
+          moveCallbacksRef.current.onEntryMoved(
+            result.value.sourceRelativePath,
+            result.value.destinationRelativePath,
+          );
+          toastManager.add({
+            type: "success",
+            title: "File moved",
+            description: result.value.destinationRelativePath,
+          });
+        } else if (!isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          toastManager.add({
+            type: "error",
+            title: "Failed to move file",
+            description: error instanceof Error ? error.message : "An unexpected error occurred.",
+          });
+        }
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: "Failed to move file",
+          description: error instanceof Error ? error.message : "An unexpected error occurred.",
+        });
+      } finally {
+        movePolicyRef.current = { ...movePolicyRef.current, movePending: false };
+        setMovePending(false);
+        refreshTreeRef.current();
+      }
+    })();
+  };
   const { model } = useFileTree({
     composition: {
       contextMenu: {
@@ -339,9 +437,14 @@ export default function FileBrowserPanel({
         },
       },
     },
-    // Rows only need to be draggable so entries can be dropped into the chat
-    // composer; rearranging files inside the tree stays off.
-    dragAndDrop: { canDrop: () => false },
+    dragAndDrop: {
+      canDrop: (context) => resolveMove(context) !== null,
+      onDropComplete: (event) => completeMoveRef.current(event),
+      onDropError: (error) => {
+        refreshTreeRef.current();
+        toastManager.add({ type: "error", title: "Failed to move file", description: error });
+      },
+    },
     density: "compact",
     fileTreeSearchMode: "hide-non-matches",
     flattenEmptyDirectories: false,
@@ -614,6 +717,7 @@ export default function FileBrowserPanel({
       ref={panelRef}
       className="flex min-h-0 flex-1 flex-col bg-background"
       data-file-browser-panel={`${environmentId}:${cwd}`}
+      aria-busy={movePending}
     >
       <div className="surface-subheader gap-1 px-2" data-surface-subheader>
         <RefreshFilesButton
