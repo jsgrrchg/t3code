@@ -24,6 +24,7 @@ import {
   GitGraph,
   GitPullRequest,
   Globe2,
+  GripVertical,
   MessageSquare,
   MoreHorizontal,
   Plus,
@@ -948,15 +949,12 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                           role="presentation"
                           data-active-tab={active}
                           onMouseDown={handleTabMouseDown}
-                          onPointerDown={(event) => {
-                            // File tabs can still be Option-dragged into the composer as mentions.
-                            if (composerMention !== null && event.altKey) return;
-                            sortable.listeners?.onPointerDown?.(event);
-                          }}
+                          onPointerDown={(event) => sortable.listeners?.onPointerDown?.(event)}
                           onAuxClick={(event) => handleTabAuxClick(event, surface)}
                           onContextMenu={(event) => void handleTabContextMenu(event, surface)}
                           className={cn(
-                            "group/tab flex h-6 max-w-36 shrink-0 cursor-grab items-center gap-0.5 rounded-md pr-2 pl-1.5 text-xs active:cursor-grabbing",
+                            "group/tab flex h-6 max-w-36 shrink-0 items-center gap-0.5 rounded-md pr-2 pl-1.5 text-xs",
+                            composerMention === null && "cursor-grab active:cursor-grabbing",
                             active
                               ? "bg-accent text-foreground"
                               : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
@@ -1016,7 +1014,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                                 render={
                                   <button
                                     type="button"
-                                    {...sortable.attributes}
+                                    {...(composerMention === null ? sortable.attributes : {})}
                                     ref={(element) => {
                                       if (element) tabButtonRefs.current.set(surface.id, element);
                                       else tabButtonRefs.current.delete(surface.id);
@@ -1026,15 +1024,29 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                                     aria-selected={active}
                                     aria-controls="right-panel-active-surface"
                                     tabIndex={active ? 0 : -1}
-                                    className="flex min-w-0 cursor-grab items-center active:cursor-grabbing"
+                                    className={cn(
+                                      "flex min-w-0 items-center",
+                                      composerMention === null
+                                        ? "cursor-grab active:cursor-grabbing"
+                                        : "cursor-pointer",
+                                    )}
                                     draggable={composerMention !== null}
+                                    onPointerDown={
+                                      composerMention === null
+                                        ? undefined
+                                        : (event) => event.stopPropagation()
+                                    }
                                     onDragStart={(event) =>
                                       handleTabDragStart(event, composerMention)
                                     }
                                     onClick={() => props.onActivate(surface)}
                                     onKeyDown={(event) => {
                                       handleTabKeyDown(event, surface);
-                                      if (!event.defaultPrevented && event.key === " ") {
+                                      if (
+                                        composerMention === null &&
+                                        !event.defaultPrevented &&
+                                        event.key === " "
+                                      ) {
                                         sortable.listeners?.onKeyDown?.(event);
                                       }
                                     }}
@@ -1050,6 +1062,18 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                               <TooltipPopup>{title}</TooltipPopup>
                             </Tooltip>
                           )}
+                          {composerMention !== null ? (
+                            <button
+                              type="button"
+                              {...sortable.attributes}
+                              aria-label={`Reorder ${title}`}
+                              title="Drag to reorder"
+                              onKeyDown={(event) => sortable.listeners?.onKeyDown?.(event)}
+                              className="inline-flex size-4 shrink-0 cursor-grab items-center justify-center rounded-sm text-muted-foreground/60 opacity-0 outline-none hover:bg-muted hover:text-foreground group-hover/tab:opacity-100 active:cursor-grabbing focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-ring"
+                            >
+                              <GripVertical aria-hidden className="size-3" />
+                            </button>
+                          ) : null}
                           {chat?.running || chat?.needsAttention || chat?.unread ? (
                             <span
                               className={cn(
