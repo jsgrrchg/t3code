@@ -2,6 +2,10 @@ import { relayClerkTokenOptions } from "@t3tools/shared/relayAuth";
 import { normalizeSecureRelayUrl } from "@t3tools/shared/relayUrl";
 import * as Schema from "effect/Schema";
 
+import { isElectron } from "../env";
+
+const DESKTOP_DEVELOPMENT_PROTOCOL = "t3code-dev:";
+
 export class CloudPublicConfigMissingError extends Schema.TaggedErrorClass<CloudPublicConfigMissingError>()(
   "CloudPublicConfigMissingError",
   {
@@ -71,7 +75,28 @@ export function resolveRelayTracingConfig() {
 
 export function hasCloudPublicConfig(): boolean {
   const config = resolveCloudPublicConfig();
-  return Boolean(config.clerkPublishableKey && config.clerkJwtTemplate && config.relayUrl);
+  return Boolean(
+    config.clerkPublishableKey &&
+    config.clerkJwtTemplate &&
+    config.relayUrl &&
+    isClerkPublishableKeySupportedForRuntime({
+      publishableKey: config.clerkPublishableKey,
+      isElectron,
+      protocol: typeof window === "undefined" ? null : window.location.protocol,
+    }),
+  );
+}
+
+export function isClerkPublishableKeySupportedForRuntime(input: {
+  readonly publishableKey: string;
+  readonly isElectron: boolean;
+  readonly protocol: string | null;
+}): boolean {
+  return !(
+    input.isElectron &&
+    input.protocol === DESKTOP_DEVELOPMENT_PROTOCOL &&
+    input.publishableKey.trim().startsWith("pk_live_")
+  );
 }
 
 export function resolveRelayClerkTokenOptions() {

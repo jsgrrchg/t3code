@@ -42,6 +42,12 @@ Configuration precedence is:
 2. Repository-root `.env.local`.
 3. Repository-root `.env`.
 
+The hot desktop renderer uses `t3code-dev://app`, which Clerk production instances reject as an
+HTTP origin. When that renderer receives a `pk_live_` key, the client omits Clerk and the T3 Connect
+UI instead of issuing a request that is guaranteed to fail. Use a matching `pk_test_` development
+instance to exercise T3 Connect during desktop HMR. Packaged desktop builds continue to use the
+configured production key.
+
 The Clerk publishable key, JWT template name, CLI OAuth client ID, and relay URL are public
 identifiers, not secrets.
 Web, desktop, mobile, and bundled server builds statically inject the values they consume during

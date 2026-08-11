@@ -3,11 +3,51 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import {
   CloudPublicConfigMissingError,
   hasCloudPublicConfig,
+  isClerkPublishableKeySupportedForRuntime,
   resolveRelayClerkTokenOptions,
 } from "./publicConfig.ts";
 
 afterEach(() => {
   vi.unstubAllEnvs();
+});
+
+describe("isClerkPublishableKeySupportedForRuntime", () => {
+  it("rejects production keys in the hot desktop renderer", () => {
+    expect(
+      isClerkPublishableKeySupportedForRuntime({
+        publishableKey: "pk_live_example",
+        isElectron: true,
+        protocol: "t3code-dev:",
+      }),
+    ).toBe(false);
+  });
+
+  it("allows development keys in the hot desktop renderer", () => {
+    expect(
+      isClerkPublishableKeySupportedForRuntime({
+        publishableKey: "pk_test_example",
+        isElectron: true,
+        protocol: "t3code-dev:",
+      }),
+    ).toBe(true);
+  });
+
+  it("preserves production Clerk for packaged desktop and web clients", () => {
+    expect(
+      isClerkPublishableKeySupportedForRuntime({
+        publishableKey: "pk_live_example",
+        isElectron: true,
+        protocol: "t3code:",
+      }),
+    ).toBe(true);
+    expect(
+      isClerkPublishableKeySupportedForRuntime({
+        publishableKey: "pk_live_example",
+        isElectron: false,
+        protocol: "https:",
+      }),
+    ).toBe(true);
+  });
 });
 
 describe("hasCloudPublicConfig", () => {
