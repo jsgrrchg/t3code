@@ -1,9 +1,50 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import type { ReviewCommentContext } from "~/reviewCommentContext";
-import { remapComposerFileTokens, remapFileReviewComments } from "../../fileMoveReconciliation";
+import {
+  clearPendingFileMoveSurfaces,
+  remapComposerFileTokens,
+  remapFileReviewComments,
+  updatePendingFileSurface,
+  workspaceFileStateKey,
+} from "../../fileMoveReconciliation";
 
 describe("file move composer reconciliation", () => {
+  it("isolates pending file ids and move cleanup between worktrees", () => {
+    const firstWorktreeKey = workspaceFileStateKey({
+      environmentId: "env-1",
+      projectWorkspaceRoot: "/repo",
+      worktreePath: "/repo/.worktrees/first",
+    });
+    const secondWorktreeKey = workspaceFileStateKey({
+      environmentId: "env-1",
+      projectWorkspaceRoot: "/repo",
+      worktreePath: "/repo/.worktrees/second",
+    });
+    expect(firstWorktreeKey).not.toBeNull();
+    expect(secondWorktreeKey).not.toBeNull();
+    expect(firstWorktreeKey).not.toBe(secondWorktreeKey);
+
+    let pendingByWorkspace = new Map<string, ReadonlySet<string>>();
+    pendingByWorkspace = new Map(
+      updatePendingFileSurface(pendingByWorkspace, firstWorktreeKey!, "src/index.ts", true),
+    );
+    pendingByWorkspace = new Map(
+      updatePendingFileSurface(pendingByWorkspace, secondWorktreeKey!, "src/index.ts", true),
+    );
+    pendingByWorkspace = new Map(
+      clearPendingFileMoveSurfaces(
+        pendingByWorkspace,
+        firstWorktreeKey!,
+        "src/index.ts",
+        "lib/index.ts",
+      ),
+    );
+
+    expect(pendingByWorkspace.has(firstWorktreeKey!)).toBe(false);
+    expect(pendingByWorkspace.get(secondWorktreeKey!)).toEqual(new Set(["file:src/index.ts"]));
+  });
+
   it("remaps exact file tokens from right to left", () => {
     const prompt =
       'Compare [my file (draft).md](docs/my%20file%20%28draft%29.md) with @"docs/my file (draft).md" and @docs/my-file.md ';

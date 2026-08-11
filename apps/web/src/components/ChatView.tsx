@@ -144,6 +144,11 @@ import {
 import { addBrowserSurface } from "./preview/addBrowserSurface";
 import { closePreviewSession } from "./preview/closePreviewSession";
 import { pathFallsWithinEntry } from "./files/filePath";
+import {
+  clearPendingFileMoveSurfaces,
+  updatePendingFileSurface,
+  workspaceFileStateKey,
+} from "../fileMoveReconciliation";
 import { ThreadPreviewMiniPlayer } from "./preview/ThreadPreviewMiniPlayer";
 import { subscribePreviewAction } from "./preview/previewActionBus";
 import { getConfiguredPreviewUrls } from "./preview/previewEmptyStateLogic";
@@ -1831,35 +1836,33 @@ function ChatViewContent(props: ChatViewProps) {
     activeThread ? environmentShell.stateAtom(activeThread.environmentId) : null,
   );
   const activeEnvironmentBootstrapComplete = activeEnvironmentShell.data?.snapshot._tag === "Some";
-  const activeProjectKey = activeProject
-    ? `${activeProject.environmentId}:${activeProject.workspaceRoot}`
+  const activeProjectCwd = activeProject?.workspaceRoot ?? null;
+  const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
+  const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
+  const activeWorkspaceKey = activeThread
+    ? workspaceFileStateKey({
+        environmentId: activeThread.environmentId,
+        projectWorkspaceRoot: activeProjectCwd,
+        worktreePath: activeThreadWorktreePath,
+      })
     : null;
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const chatContentMaxWidth = useClientSettings((settings) => settings.chatContentMaxWidth);
   const clientSettingsHydrated = useClientSettingsHydrated();
-  const [pendingFileSurfaceIdsByProject, setPendingFileSurfaceIdsByProject] = useState<
+  const [pendingFileSurfaceIdsByWorkspace, setPendingFileSurfaceIdsByWorkspace] = useState<
     ReadonlyMap<string, ReadonlySet<string>>
   >(() => new Map());
-  const pendingFileSurfaceIds = activeProjectKey
-    ? (pendingFileSurfaceIdsByProject.get(activeProjectKey) ?? EMPTY_PENDING_FILE_SURFACE_IDS)
+  const pendingFileSurfaceIds = activeWorkspaceKey
+    ? (pendingFileSurfaceIdsByWorkspace.get(activeWorkspaceKey) ?? EMPTY_PENDING_FILE_SURFACE_IDS)
     : EMPTY_PENDING_FILE_SURFACE_IDS;
   const handleFilePendingChange = useCallback(
     (relativePath: string, pending: boolean) => {
-      if (!activeProjectKey) return;
-      setPendingFileSurfaceIdsByProject((currentByProject) => {
-        const current = currentByProject.get(activeProjectKey) ?? EMPTY_PENDING_FILE_SURFACE_IDS;
-        const surfaceId = `file:${relativePath}`;
-        if (current.has(surfaceId) === pending) return currentByProject;
-        const next = new Set(current);
-        if (pending) next.add(surfaceId);
-        else next.delete(surfaceId);
-        const nextByProject = new Map(currentByProject);
-        if (next.size === 0) nextByProject.delete(activeProjectKey);
-        else nextByProject.set(activeProjectKey, next);
-        return nextByProject;
-      });
+      if (!activeWorkspaceKey) return;
+      setPendingFileSurfaceIdsByWorkspace((currentByWorkspace) =>
+        updatePendingFileSurface(currentByWorkspace, activeWorkspaceKey, relativePath, pending),
+      );
     },
-    [activeProjectKey],
+    [activeWorkspaceKey],
   );
   const configuredPreviewUrls = useMemo(
     () => getConfiguredPreviewUrls(activeProject?.scripts),
@@ -2778,9 +2781,6 @@ function ChatViewContent(props: ChatViewProps) {
     ? activeProviderStatus
     : null;
   const hasTimelineTopBanner = Boolean(threadError) || visibleProviderStatus !== null;
-  const activeProjectCwd = activeProject?.workspaceRoot ?? null;
-  const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
-  const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
   const activeTerminalLaunchContext =
     terminalUiLaunchContext?.threadId === activeThreadId ? terminalUiLaunchContext : null;
   // Default true while loading to avoid toolbar flicker.
@@ -3547,7 +3547,12 @@ function ChatViewContent(props: ChatViewProps) {
       for (const thread of allThreadShells) {
         if (
           thread.environmentId !== activeThread.environmentId ||
-          thread.projectId !== activeThread.projectId
+          thread.projectId !== activeThread.projectId ||
+          workspaceFileStateKey({
+            environmentId: thread.environmentId,
+            projectWorkspaceRoot: activeProjectCwd,
+            worktreePath: thread.worktreePath,
+          }) !== activeWorkspaceKey
         ) {
           continue;
         }
@@ -3558,7 +3563,12 @@ function ChatViewContent(props: ChatViewProps) {
       for (const [draftKey, draftSession] of Object.entries(draftThreadsByThreadKey)) {
         if (
           draftSession.environmentId !== activeThread.environmentId ||
-          draftSession.projectId !== activeThread.projectId
+          draftSession.projectId !== activeThread.projectId ||
+          workspaceFileStateKey({
+            environmentId: draftSession.environmentId,
+            projectWorkspaceRoot: activeProjectCwd,
+            worktreePath: draftSession.worktreePath,
+          }) !== activeWorkspaceKey
         ) {
           continue;
         }
@@ -3579,22 +3589,25 @@ function ChatViewContent(props: ChatViewProps) {
           destinationRelativePath,
         );
 
-      if (activeProjectKey) {
-        setPendingFileSurfaceIdsByProject((currentByProject) => {
-          const current = currentByProject.get(activeProjectKey);
-          if (!current) return currentByProject;
-          const next = new Set(current);
-          next.delete(`file:${sourceRelativePath}`);
-          next.delete(`file:${destinationRelativePath}`);
-          if (next.size === current.size) return currentByProject;
-          const nextByProject = new Map(currentByProject);
-          if (next.size === 0) nextByProject.delete(activeProjectKey);
-          else nextByProject.set(activeProjectKey, next);
-          return nextByProject;
-        });
+      if (activeWorkspaceKey) {
+        setPendingFileSurfaceIdsByWorkspace((currentByWorkspace) =>
+          clearPendingFileMoveSurfaces(
+            currentByWorkspace,
+            activeWorkspaceKey,
+            sourceRelativePath,
+            destinationRelativePath,
+          ),
+        );
       }
     },
-    [activeThread, activeProjectKey, activeThreadRef, allThreadShells, draftThreadsByThreadKey],
+    [
+      activeProjectCwd,
+      activeThread,
+      activeThreadRef,
+      activeWorkspaceKey,
+      allThreadShells,
+      draftThreadsByThreadKey,
+    ],
   );
 
   // The thread's own change request, placed against the project it belongs to. Without a
