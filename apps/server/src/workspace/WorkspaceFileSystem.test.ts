@@ -578,5 +578,35 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
         ).toBe(target);
       }),
     );
+
+    it.effect("moves through in-workspace symlink parents using their validated real paths", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "real-source/file.txt", "safe\n");
+        yield* fileSystem.makeDirectory(path.join(cwd, "real-destination"));
+        yield* fileSystem.symlink(path.join(cwd, "real-source"), path.join(cwd, "source-link"));
+        yield* fileSystem.symlink(
+          path.join(cwd, "real-destination"),
+          path.join(cwd, "destination-link"),
+        );
+
+        yield* workspaceFileSystem.moveEntry({
+          cwd,
+          sourceRelativePath: "source-link/file.txt",
+          destinationRelativePath: "destination-link/file.txt",
+          kind: "file",
+        });
+
+        expect(yield* fileSystem.readFileString(path.join(cwd, "real-destination/file.txt"))).toBe(
+          "safe\n",
+        );
+        expect(
+          yield* fileSystem.stat(path.join(cwd, "real-source/file.txt")).pipe(Effect.option),
+        ).toMatchObject({ _tag: "None" });
+      }),
+    );
   });
 });

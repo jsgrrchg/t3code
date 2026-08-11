@@ -485,29 +485,6 @@ export const make = Effect.gen(function* () {
       });
     }
 
-    const sourceStat = yield* Effect.tryPromise({
-      try: () => NodeFSP.lstat(source.absolutePath),
-      catch: (cause) =>
-        (cause as NodeJS.ErrnoException).code === "ENOENT"
-          ? new WorkspaceMoveEntrySourceNotFoundError({
-              ...errorContext,
-              resolvedPath: source.absolutePath,
-            })
-          : new WorkspaceMoveEntryOperationError({
-              ...errorContext,
-              resolvedPath: source.absolutePath,
-              operationPath: source.absolutePath,
-              operation: "lstat-source",
-              cause,
-            }),
-    });
-    if (!sourceStat.isFile() && !sourceStat.isSymbolicLink()) {
-      return yield* new WorkspaceMoveEntrySourceKindMismatchError({
-        ...errorContext,
-        resolvedPath: source.absolutePath,
-      });
-    }
-
     const realWorkspaceRoot = yield* Effect.tryPromise({
       try: () => NodeFSP.realpath(input.cwd),
       catch: (cause) =>
@@ -528,12 +505,16 @@ export const make = Effect.gen(function* () {
         const realParent = yield* Effect.tryPromise({
           try: () => NodeFSP.realpath(parentPath),
           catch: (cause) =>
-            operation === "realpath-destination-parent" &&
             (cause as NodeJS.ErrnoException).code === "ENOENT"
-              ? new WorkspaceMoveEntryDestinationParentNotFoundError({
-                  ...errorContext,
-                  resolvedPath: parentPath,
-                })
+              ? operation === "realpath-destination-parent"
+                ? new WorkspaceMoveEntryDestinationParentNotFoundError({
+                    ...errorContext,
+                    resolvedPath: parentPath,
+                  })
+                : new WorkspaceMoveEntrySourceNotFoundError({
+                    ...errorContext,
+                    resolvedPath: source.absolutePath,
+                  })
               : new WorkspaceMoveEntryOperationError({
                   ...errorContext,
                   resolvedPath: parentPath,
@@ -558,11 +539,43 @@ export const make = Effect.gen(function* () {
       },
     );
 
-    yield* ensureRealParentWithinRoot(path.dirname(source.absolutePath), "realpath-source-parent");
+    const realSourceParent = yield* ensureRealParentWithinRoot(
+      path.dirname(source.absolutePath),
+      "realpath-source-parent",
+    );
     const realDestinationParent = yield* ensureRealParentWithinRoot(
       path.dirname(destination.absolutePath),
       "realpath-destination-parent",
     );
+    // Operate through the already-validated real parents. A symlink ancestor changing after the
+    // containment check can no longer redirect the final lstat/rename outside the workspace.
+    const effectiveSourcePath = path.join(realSourceParent, path.basename(source.absolutePath));
+    const effectiveDestinationPath = path.join(
+      realDestinationParent,
+      path.basename(destination.absolutePath),
+    );
+    const sourceStat = yield* Effect.tryPromise({
+      try: () => NodeFSP.lstat(effectiveSourcePath),
+      catch: (cause) =>
+        (cause as NodeJS.ErrnoException).code === "ENOENT"
+          ? new WorkspaceMoveEntrySourceNotFoundError({
+              ...errorContext,
+              resolvedPath: effectiveSourcePath,
+            })
+          : new WorkspaceMoveEntryOperationError({
+              ...errorContext,
+              resolvedPath: effectiveSourcePath,
+              operationPath: effectiveSourcePath,
+              operation: "lstat-source",
+              cause,
+            }),
+    });
+    if (!sourceStat.isFile() && !sourceStat.isSymbolicLink()) {
+      return yield* new WorkspaceMoveEntrySourceKindMismatchError({
+        ...errorContext,
+        resolvedPath: effectiveSourcePath,
+      });
+    }
     const destinationParentStat = yield* Effect.tryPromise({
       try: () => NodeFSP.lstat(realDestinationParent),
       catch: (cause) =>
@@ -584,7 +597,7 @@ export const make = Effect.gen(function* () {
     const destinationExists = yield* Effect.tryPromise({
       try: async () => {
         try {
-          await NodeFSP.lstat(destination.absolutePath);
+          await NodeFSP.lstat(effectiveDestinationPath);
           return true;
         } catch (cause) {
           if ((cause as NodeJS.ErrnoException).code === "ENOENT") return false;
@@ -594,8 +607,8 @@ export const make = Effect.gen(function* () {
       catch: (cause) =>
         new WorkspaceMoveEntryOperationError({
           ...errorContext,
-          resolvedPath: destination.absolutePath,
-          operationPath: destination.absolutePath,
+          resolvedPath: effectiveDestinationPath,
+          operationPath: effectiveDestinationPath,
           operation: "lstat-destination",
           cause,
         }),
@@ -603,17 +616,17 @@ export const make = Effect.gen(function* () {
     if (destinationExists) {
       return yield* new WorkspaceMoveEntryDestinationExistsError({
         ...errorContext,
-        resolvedPath: destination.absolutePath,
+        resolvedPath: effectiveDestinationPath,
       });
     }
 
     yield* Effect.tryPromise({
-      try: () => NodeFSP.rename(source.absolutePath, destination.absolutePath),
+      try: () => NodeFSP.rename(effectiveSourcePath, effectiveDestinationPath),
       catch: (cause) =>
         new WorkspaceMoveEntryOperationError({
           ...errorContext,
-          resolvedPath: destination.absolutePath,
-          operationPath: destination.absolutePath,
+          resolvedPath: effectiveDestinationPath,
+          operationPath: effectiveDestinationPath,
           operation: "rename",
           cause,
         }),

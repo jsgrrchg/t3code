@@ -8,7 +8,10 @@ export function remapComposerFileTokens(
   sourceRelativePath: string,
   destinationRelativePath: string,
 ): string {
-  const replacements = collectComposerInlineTokens(prompt)
+  // The tokenizer recognizes mentions at a boundary. A synthetic trailing
+  // boundary lets an exact token at the end of the draft participate too.
+  const replacements = collectComposerInlineTokens(`${prompt} `)
+    .filter((token) => token.end <= prompt.length)
     .filter((token) => token.type === "mention" && token.value === sourceRelativePath)
     .toReversed();
   if (replacements.length === 0) return prompt;

@@ -3,6 +3,7 @@ import type {
   ContextMenuOpenContext as TreeContextMenuOpenContext,
   FileTreeDropContext,
   FileTreeDropResult,
+  FileTreeDropTarget,
 } from "@pierre/trees";
 import type { EnvironmentId, ProjectEntry } from "@t3tools/contracts";
 import {
@@ -54,6 +55,7 @@ interface FileBrowserPanelProps {
     destinationRelativePath: string,
   ) => Promise<boolean>;
   onEntryMoved: (sourceRelativePath: string, destinationRelativePath: string) => void;
+  onMoveSettled: () => void;
 }
 
 const TREE_UNSAFE_CSS = `
@@ -70,6 +72,12 @@ const TREE_UNSAFE_CSS = `
 
 const INCLUDE_IGNORED_STORAGE_KEY = "t3code.fileBrowser.includeIgnored";
 const FILE_TREE_SEARCH_LIMIT = 200;
+const PROJECT_ROOT_DROP_TARGET: FileTreeDropTarget = {
+  kind: "root",
+  directoryPath: null,
+  flattenedSegmentPath: null,
+  hoveredPath: null,
+};
 
 function treePath(entry: ProjectEntry): string {
   return entry.kind === "directory" ? `${entry.path}/` : entry.path;
@@ -163,6 +171,7 @@ export default function FileBrowserPanel({
   pendingFileSurfaceIds,
   onBeforeMoveEntry,
   onEntryMoved,
+  onMoveSettled,
 }: FileBrowserPanelProps) {
   const { resolvedTheme } = useTheme();
   const composerRef = useComposerHandleContext();
@@ -176,6 +185,7 @@ export default function FileBrowserPanel({
   const deleteEntry = useAtomCommand(projectEnvironment.deleteEntry);
   const moveEntry = useAtomCommand(projectEnvironment.moveEntry);
   const [movePending, setMovePending] = useState(false);
+  const [treeDragActive, setTreeDragActive] = useState(false);
   const [searchValue, setSearchValue] = useState("");
   const normalizedSearchValue = searchValue.trim();
   const searchActive = normalizedSearchValue.length > 0;
@@ -215,8 +225,8 @@ export default function FileBrowserPanel({
     selectedPath,
     movePending,
   };
-  const moveCallbacksRef = useRef({ onBeforeMoveEntry, onEntryMoved });
-  moveCallbacksRef.current = { onBeforeMoveEntry, onEntryMoved };
+  const moveCallbacksRef = useRef({ onBeforeMoveEntry, onEntryMoved, onMoveSettled });
+  moveCallbacksRef.current = { onBeforeMoveEntry, onEntryMoved, onMoveSettled };
 
   // The tree renders rows in shadow DOM and its anchor rect is unreliable, so
   // capture the right-click position ourselves; contextmenu is a composed
@@ -422,6 +432,7 @@ export default function FileBrowserPanel({
           description: error instanceof Error ? error.message : "An unexpected error occurred.",
         });
       } finally {
+        moveCallbacksRef.current.onMoveSettled();
         movePolicyRef.current = { ...movePolicyRef.current, movePending: false };
         setMovePending(false);
         refreshTreeRef.current();
@@ -702,8 +713,14 @@ export default function FileBrowserPanel({
     if (panel === null) {
       return;
     }
-    const handleDragStart = (event: DragEvent) => dragMention.handleDragStart(event);
-    const handleDragEnd = () => dragMention.handleDragEnd();
+    const handleDragStart = (event: DragEvent) => {
+      dragMention.handleDragStart(event);
+      setTreeDragActive(dragMention.isDragInProgress());
+    };
+    const handleDragEnd = () => {
+      dragMention.handleDragEnd();
+      setTreeDragActive(false);
+    };
     panel.addEventListener("dragstart", handleDragStart, true);
     panel.addEventListener("dragend", handleDragEnd);
     return () => {
@@ -736,6 +753,35 @@ export default function FileBrowserPanel({
           onIncludeIgnoredChange={setIncludeIgnored}
         />
       </div>
+      {treeDragActive ? (
+        <div
+          className="mx-2 my-1 rounded-md border border-dashed border-primary/50 bg-primary/5 px-2 py-1.5 text-center text-[11px] text-muted-foreground"
+          data-file-tree-root-drop
+          onDragOver={(event) => {
+            const draggedPaths = model.getSelectedPaths();
+            if (
+              resolveMove({
+                draggedPaths,
+                target: PROJECT_ROOT_DROP_TARGET,
+              }) !== null
+            ) {
+              event.preventDefault();
+            }
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            const draggedPaths = model.getSelectedPaths();
+            completeMoveRef.current({
+              draggedPaths,
+              target: PROJECT_ROOT_DROP_TARGET,
+              operation: draggedPaths.length > 1 ? "batch" : "move",
+            });
+            setTreeDragActive(false);
+          }}
+        >
+          Move to project root
+        </div>
+      ) : null}
       {rootError || (searchActive && pathSearch.error) ? (
         <div className="p-4 text-xs leading-relaxed text-destructive">
           {rootError ?? pathSearch.error}

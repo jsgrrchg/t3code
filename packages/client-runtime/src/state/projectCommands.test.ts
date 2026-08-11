@@ -91,6 +91,8 @@ describe("project move cache targets", () => {
     ).toEqual([
       { cwd: "/repo" },
       { cwd: "/repo", includeIgnored: true },
+      { cwd: "/repo", directory: "." },
+      { cwd: "/repo", directory: ".", includeIgnored: true },
       { cwd: "/repo", directory: "src" },
       { cwd: "/repo", directory: "src", includeIgnored: true },
       { cwd: "/repo", directory: "components" },

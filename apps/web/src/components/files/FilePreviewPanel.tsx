@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import * as Schema from "effect/Schema";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 
 import { isBrowserPreviewFile, openFileInPreview } from "~/browser/openFileInPreview";
 import { useAssetUrlState } from "~/assets/assetUrls";
@@ -452,6 +453,7 @@ interface EditableFileSurfaceProps {
   onPostRender: FilePostRender;
   onPendingChange: (relativePath: string, pending: boolean) => void;
   onSaveCoordinatorChange: (coordinator: FileSaveCoordinator | null) => void;
+  editingDisabled: boolean;
 }
 
 interface FileSelectionOverride {
@@ -511,6 +513,7 @@ function EditableFileSurface({
   onPostRender,
   onPendingChange,
   onSaveCoordinatorChange,
+  editingDisabled,
 }: EditableFileSurfaceProps) {
   const addReviewComment = useComposerDraftStore((store) => store.addReviewComment);
   const removeReviewComment = useComposerDraftStore((store) => store.removeReviewComment);
@@ -746,7 +749,7 @@ function EditableFileSurface({
               </div>
             )}
             className="min-h-full"
-            contentEditable
+            contentEditable={!editingDisabled}
           />
         </Virtualizer>
       </div>
@@ -825,6 +828,7 @@ function RenderedMarkdownSurface({
   threadRef,
   onPendingChange,
   onSaveCoordinatorChange,
+  editingDisabled,
 }: Omit<
   EditableFileSurfaceProps,
   "resolvedTheme" | "revealLine" | "revealRequestId" | "scrollKey" | "wordWrap" | "onPostRender"
@@ -887,6 +891,7 @@ function RenderedMarkdownSurface({
             annotateSourceBlocks
             renderMermaid
             onTaskListChange={({ markerOffset, checked }) => {
+              if (editingDisabled) return;
               const currentContents =
                 getOptimisticProjectFileQueryData(environmentId, cwd, relativePath)?.contents ??
                 contents;
@@ -983,6 +988,7 @@ export default function FilePreviewPanel({
     sourceScrollKey,
   );
   const saveCoordinatorRef = useRef<FileSaveCoordinator | null>(null);
+  const [moveEntryPending, setMoveEntryPending] = useState(false);
   const handleSaveCoordinatorChange = useCallback((coordinator: FileSaveCoordinator | null) => {
     saveCoordinatorRef.current = coordinator;
   }, []);
@@ -1028,6 +1034,7 @@ export default function FilePreviewPanel({
       if (sourceRelativePath !== relativePath) {
         return !pendingFileSurfaceIds.has(`file:${sourceRelativePath}`);
       }
+      flushSync(() => setMoveEntryPending(true));
       const coordinator = saveCoordinatorRef.current;
       if (!coordinator) {
         return !pendingFileSurfaceIds.has(`file:${sourceRelativePath}`);
@@ -1037,6 +1044,7 @@ export default function FilePreviewPanel({
     },
     [pendingFileSurfaceIds, relativePath],
   );
+  const handleMoveSettled = useCallback(() => setMoveEntryPending(false), []);
   const handleEntryMoved = useCallback(
     (sourceRelativePath: string, destinationRelativePath: string) => {
       if (sourceRelativePath === relativePath) {
@@ -1180,7 +1188,7 @@ export default function FilePreviewPanel({
                     size="icon-sm"
                     variant="ghost"
                     aria-label={file.isPending ? "Refreshing file" : "Refresh file"}
-                    disabled={file.isPending || refreshBlocked}
+                    disabled={file.isPending || refreshBlocked || moveEntryPending}
                     onClick={file.refresh}
                   />
                 }
@@ -1281,6 +1289,7 @@ export default function FilePreviewPanel({
                 contents={file.data.contents}
                 onPendingChange={onPendingChange}
                 onSaveCoordinatorChange={handleSaveCoordinatorChange}
+                editingDisabled={moveEntryPending}
               />
             ) : file.data.truncated ? (
               <TruncatedFileSurface
@@ -1321,6 +1330,7 @@ export default function FilePreviewPanel({
                 onPostRender={onFilePostRender}
                 onPendingChange={onPendingChange}
                 onSaveCoordinatorChange={handleSaveCoordinatorChange}
+                editingDisabled={moveEntryPending}
               />
             )
           ) : null}
@@ -1348,6 +1358,7 @@ export default function FilePreviewPanel({
               pendingFileSurfaceIds={pendingFileSurfaceIds}
               onBeforeMoveEntry={handleBeforeMoveEntry}
               onEntryMoved={handleEntryMoved}
+              onMoveSettled={handleMoveSettled}
             />
           </aside>
         ) : null}

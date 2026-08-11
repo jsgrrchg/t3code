@@ -56,6 +56,7 @@ export function projectMoveListRefreshInputs(
 ): ReadonlyArray<ProjectListEntriesInput> {
   const directories = new Set<string | undefined>([
     undefined,
+    ".",
     projectEntryParentDirectory(input.sourceRelativePath),
     projectEntryParentDirectory(input.destinationRelativePath),
   ]);

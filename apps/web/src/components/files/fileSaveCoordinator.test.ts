@@ -134,9 +134,7 @@ describe("FileSaveCoordinator", () => {
     coordinator.change("latest");
     firstWrite.resolve(AsyncResult.success(undefined));
     await firstFlush;
-    expect(coordinator.hasPendingChanges()).toBe(true);
-
-    await coordinator.flush();
+    expect(persist).toHaveBeenCalledTimes(2);
     expect(persist).toHaveBeenLastCalledWith("latest");
     expect(coordinator.hasPendingChanges()).toBe(false);
   });

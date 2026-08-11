@@ -22,6 +22,12 @@ describe("file move composer reconciliation", () => {
     expect(remapComposerFileTokens(prompt, "docs/index.ts", "src/index.ts")).toBe(prompt);
   });
 
+  it("remaps a file token at the end of the draft", () => {
+    expect(remapComposerFileTokens("Review @src/index.ts", "src/index.ts", "lib/index.ts")).toBe(
+      "Review @lib/index.ts",
+    );
+  });
+
   it("remaps only exact file review comments", () => {
     const base = {
       id: "comment-1",
