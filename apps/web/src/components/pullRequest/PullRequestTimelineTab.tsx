@@ -9,7 +9,7 @@ import {
   GitPullRequestIcon,
   MessageSquareIcon,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
 import { readLocalApi } from "~/localApi";
@@ -28,6 +28,8 @@ import {
   PullRequestDiffStat,
   PullRequestMetaLine,
 } from "./pullRequestPresentation";
+import { pullRequestTabViewKey } from "./pullRequestViewState";
+import { useRememberedPullRequestScroll } from "./useRememberedPullRequestScroll";
 
 function TimelineBody({ body, markdown, cwd }: { body: string; markdown: boolean; cwd: string }) {
   return (
@@ -314,14 +316,23 @@ function LifecycleEvent({ event }: { event: PullRequestTimelineEvent }) {
 }
 
 export function PullRequestTimelineTab({
+  viewStateKey,
   detail,
   order,
   onOpenCommit,
 }: {
+  viewStateKey: string;
   detail: PullRequestDetailView;
   order: "newest" | "oldest";
   onOpenCommit: (oid: string) => void;
 }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useRememberedPullRequestScroll({
+    pullRequestKey: viewStateKey,
+    viewKey: pullRequestTabViewKey("timeline"),
+    rootRef: scrollRef,
+    mountKey: detail.url,
+  });
   const events = buildPullRequestTimeline(detail);
   const orderedEvents = order === "newest" ? events : events.toReversed();
   const rows = groupPullRequestTimelineConversations(orderedEvents);
@@ -330,7 +341,7 @@ export function PullRequestTimelineTab({
   };
 
   return (
-    <div className="h-full overflow-y-auto px-4 py-5">
+    <div ref={scrollRef} className="h-full overflow-y-auto px-4 py-5">
       <div className="mx-auto max-w-3xl">
         <div className="relative">
           <span aria-hidden className="absolute bottom-5 left-[15px] top-1 w-px bg-border/45" />

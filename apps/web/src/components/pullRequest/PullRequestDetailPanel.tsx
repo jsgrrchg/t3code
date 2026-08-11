@@ -97,14 +97,19 @@ import {
   type PullRequestFinding,
 } from "./pullRequestDetail.logic";
 import {
+  getPullRequestViewState,
+  pullRequestViewStateKey,
+  rememberPullRequestChromeState,
+  rememberPullRequestPanelState,
+  type PullRequestDetailTab,
+} from "./pullRequestViewState";
+import {
   PullRequestActorLabel,
   PullRequestDiffStat,
   PullRequestMetaLine,
   resolvePullRequestState,
   summarizePullRequestChecks,
 } from "./pullRequestPresentation";
-
-type DetailTab = "summary" | "timeline" | "code";
 
 const ACTION_SUCCESS_LABELS: Record<PullRequestAction, string> = {
   merge: "Pull request merged",
@@ -142,7 +147,7 @@ const OPEN_ON_HOST_LABELS: Partial<Record<string, string>> = {
   "azure-devops": "Open on Azure DevOps",
 };
 
-const TABS: ReadonlyArray<{ value: DetailTab; label: string }> = [
+const TABS: ReadonlyArray<{ value: PullRequestDetailTab; label: string }> = [
   { value: "summary", label: "Summary" },
   { value: "timeline", label: "Timeline" },
   { value: "code", label: "Code" },
@@ -207,13 +212,18 @@ export function PullRequestDetailPanel({
    */
   chromeVariant?: "full" | "collapse";
 }) {
-  const pullRequestKey = `${reference.projectId}:${reference.repository}#${reference.number}`;
-  const [tab, setTab] = useState<DetailTab>("summary");
-  const [timelineOrder, setTimelineOrder] = useState<"newest" | "oldest">("newest");
+  const pullRequestKey = pullRequestViewStateKey(environmentId, reference);
+  const rememberedView = useMemo(() => getPullRequestViewState(pullRequestKey), [pullRequestKey]);
+  const [tab, setTab] = useState<PullRequestDetailTab>(
+    () => rememberedView?.activeTab ?? "summary",
+  );
+  const [timelineOrder, setTimelineOrder] = useState<"newest" | "oldest">(
+    () => rememberedView?.timelineOrder ?? "newest",
+  );
   const [codeCommitScope, setCodeCommitScope] = useState<{
     readonly pullRequestKey: string;
     readonly oid: string | null;
-  }>(() => ({ pullRequestKey, oid: null }));
+  }>(() => ({ pullRequestKey, oid: rememberedView?.selectedCommitOid ?? null }));
   const selectedCodeCommitOid =
     codeCommitScope.pullRequestKey === pullRequestKey ? codeCommitScope.oid : null;
   const selectCodeCommit = (oid: string | null) => {
@@ -228,21 +238,32 @@ export function PullRequestDetailPanel({
   // summary needs it too — a large description re-parses its whole markdown on every return
   // to the tab. `visibility` keeps boxes, sizes and scroll offsets, and takes hidden content
   // out of the tab order and the accessibility tree.
-  const [mountedTabs, setMountedTabs] = useState<ReadonlySet<DetailTab>>(
-    () => new Set<DetailTab>(["summary"]),
+  const [mountedTabs, setMountedTabs] = useState<ReadonlySet<PullRequestDetailTab>>(
+    () => new Set<PullRequestDetailTab>([tab]),
   );
   useEffect(() => {
     setMountedTabs((previous) =>
-      previous.has(tab) ? previous : new Set<DetailTab>(previous).add(tab),
+      previous.has(tab) ? previous : new Set<PullRequestDetailTab>(previous).add(tab),
     );
   }, [tab]);
-  const [chromeCondensed, setChromeCondensed] = useState(false);
+  useEffect(() => {
+    rememberPullRequestPanelState(pullRequestKey, {
+      activeTab: tab,
+      timelineOrder,
+      selectedCommitOid: selectedCodeCommitOid,
+    });
+  }, [pullRequestKey, selectedCodeCommitOid, tab, timelineOrder]);
+  const [chromeCondensed, setChromeCondensed] = useState(
+    () => rememberedView?.chromeCondensedByTab[tab] ?? false,
+  );
   // Each tab remembers whether its chrome was condensed. Only the active tab can emit scroll
   // events, so the capture handler always writes the active tab's entry — and a tab switch
   // reads the destination's memory instead of inheriting the tab being left. A tab too short
   // to scroll remembers "expanded", which is what keeps it from being stranded under a chrome
   // it has no scrollbar to reopen.
-  const chromeStateByTab = useRef<Partial<Record<DetailTab, boolean>>>({});
+  const chromeStateByTab = useRef<Partial<Record<PullRequestDetailTab, boolean>>>(
+    rememberedView?.chromeCondensedByTab ?? {},
+  );
   useEffect(() => {
     setChromeCondensed(chromeStateByTab.current[tab] ?? false);
   }, [tab]);
@@ -1302,6 +1323,7 @@ export function PullRequestDetailPanel({
               next = true;
             }
             chromeStateByTab.current[tab] = next;
+            if (next !== previous) rememberPullRequestChromeState(pullRequestKey, tab, next);
             return next;
           });
         }}
@@ -1323,6 +1345,7 @@ export function PullRequestDetailPanel({
             {mountedTabs.has("summary") ? (
               <div className={cn("absolute inset-0", tab !== "summary" && "invisible")}>
                 <PullRequestSummaryTab
+                  viewStateKey={pullRequestKey}
                   environmentId={environmentId}
                   reference={reference}
                   detail={detail}
@@ -1345,6 +1368,7 @@ export function PullRequestDetailPanel({
                   />
                 ) : (
                   <PullRequestTimelineTab
+                    viewStateKey={pullRequestKey}
                     detail={detail}
                     order={timelineOrder}
                     onOpenCommit={openCommit}
@@ -1356,6 +1380,7 @@ export function PullRequestDetailPanel({
               <div className={cn("absolute inset-0", tab !== "code" && "invisible")}>
                 <Suspense fallback={<DiffPanelLoadingState label="Loading pull request diff..." />}>
                   <PullRequestCodeTab
+                    viewStateKey={pullRequestKey}
                     onAskAboutSelection={askAboutSelection}
                     environmentId={environmentId}
                     reference={reference}

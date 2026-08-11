@@ -41,6 +41,8 @@ T3 Code works with the platforms your team already uses:
 - Open several reviews from the **Pull requests** page as tabs in the right panel
 - While working in a thread, open linked reviews in the same compact right-panel tabs without
   leaving the conversation
+- Switch threads or right-panel tabs and return to the same place in a review, including its
+  active section, commit scope, expanded files, loaded diff pages, and scroll position
 - Open the review directly in your browser with one click
 - Check out a teammate's branch to review code locally
 

@@ -69,12 +69,20 @@ import {
 } from "./pullRequestDiff.logic";
 import { PullRequestDiffStat, PullRequestMetaLine } from "./pullRequestPresentation";
 import {
+  getPullRequestCodeViewState,
+  pullRequestCodeScopeKey,
+  pullRequestTabViewKey,
+  rememberPullRequestCodeViewState,
+  type PullRequestDiffSlice,
+} from "./pullRequestViewState";
+import {
   nextPendingReviewCommentId,
   pullRequestReviewKey,
   usePendingReviewComments,
   usePullRequestReviewStore,
   type PendingReviewComment,
 } from "./pullRequestReviewStore";
+import { useRememberedPullRequestScroll } from "./useRememberedPullRequestScroll";
 
 /** Everything pinned to one line of one file: what is already there, and what is being added. */
 interface ReviewAnnotationGroup {
@@ -88,17 +96,8 @@ type ReviewAnnotation = DiffLineAnnotation<ReviewAnnotationGroup>;
 /** Commits per press of "Show more" in the scope menu. */
 const COMMIT_PAGE_SIZE = 10;
 
-/** One answer from the host: a whole number of files, and where the next one carries on. */
-interface DiffSlice {
-  /** What was asked for, null being the first slice. Identifies the slice among the loaded ones. */
-  readonly cursor: string | null;
-  readonly patch: string;
-  readonly truncated: boolean;
-  readonly nextCursor: string | null;
-}
-
 /** Nothing loaded yet, as one identity, so the memos below do not see a new array every render. */
-const NO_SLICES: ReadonlyArray<DiffSlice> = [];
+const NO_SLICES: ReadonlyArray<PullRequestDiffSlice> = [];
 
 /** A group while it is still gathering what belongs on its line. */
 interface MutableAnnotationGroup {
@@ -149,6 +148,7 @@ function fromViewerSide(side: string | undefined): PullRequestDiffSide {
  * drafted rather than being posted as it is typed.
  */
 export function PullRequestCodeTab({
+  viewStateKey,
   environmentId,
   reference,
   detail,
@@ -160,6 +160,7 @@ export function PullRequestCodeTab({
   onRefresh,
   refreshToken = 0,
 }: {
+  viewStateKey: string;
   environmentId: EnvironmentId;
   reference: PullRequestRef;
   detail: PullRequestDetailView;
@@ -177,12 +178,39 @@ export function PullRequestCodeTab({
 }) {
   const { resolvedTheme } = useTheme();
   const settings = useClientSettings();
-  const [toggledFiles, setToggledFiles] = useState<ReadonlySet<string>>(() => new Set());
+  const referenceKey = pullRequestReviewKey(reference);
+  const commit = selectedCommitOid;
+  // One commit's own changes and the whole change are two different diffs, paged separately, so
+  // their view state is remembered independently under the pull request.
+  const codeScopeKey = pullRequestCodeScopeKey(commit);
+  // The live component can receive another reference without remounting in an embedding we do
+  // not own. Keep its render/cache identity fully scoped even though memory is already nested by
+  // pull request and only needs the shorter commit key.
+  const scopeKey = `${viewStateKey}:${codeScopeKey}`;
+  const rememberedCodeView = useMemo(
+    () => getPullRequestCodeViewState(viewStateKey, codeScopeKey),
+    [codeScopeKey, viewStateKey],
+  );
+  const [toggledFilesState, setToggledFilesState] = useState<{
+    readonly key: string;
+    readonly fileKeys: ReadonlySet<string>;
+  }>(() => ({ key: scopeKey, fileKeys: rememberedCodeView?.toggledFileKeys ?? new Set() }));
+  const toggledFiles =
+    toggledFilesState.key === scopeKey
+      ? toggledFilesState.fileKeys
+      : (rememberedCodeView?.toggledFileKeys ?? new Set<string>());
   // A change of any size can carry hundreds of commits, and a menu that long is a scroll rather
   // than a choice. The rest arrive ten at a time, on request.
   const [visibleCommitCount, setVisibleCommitCount] = useState(COMMIT_PAGE_SIZE);
   /** Set once the reader has asked for every file at once, until they pick a file apart again. */
-  const [foldOverride, setFoldOverride] = useState<DiffFoldOverride>(null);
+  const [foldOverrideState, setFoldOverrideState] = useState<{
+    readonly key: string;
+    readonly value: DiffFoldOverride;
+  }>(() => ({ key: scopeKey, value: rememberedCodeView?.foldOverride ?? null }));
+  const foldOverride =
+    foldOverrideState.key === scopeKey
+      ? foldOverrideState.value
+      : (rememberedCodeView?.foldOverride ?? null);
   const [diffRenderMode, setDiffRenderMode] = useState<"stacked" | "split">("stacked");
   const [wordWrap, setWordWrap] = useState(settings.wordWrap);
   const [selectedLines, setSelectedLines] = useState<{
@@ -200,29 +228,32 @@ export function PullRequestCodeTab({
   const [sliceState, setSliceState] = useState<{
     readonly key: string;
     readonly cursor: string | null;
-    readonly slices: ReadonlyArray<DiffSlice>;
-  }>({ key: "", cursor: null, slices: NO_SLICES });
+    readonly slices: ReadonlyArray<PullRequestDiffSlice>;
+  }>(() => ({ key: scopeKey, cursor: null, slices: rememberedCodeView?.slices ?? NO_SLICES }));
   const parseCache = useRef(new Map<string, RenderablePatch>());
-
-  const referenceKey = pullRequestReviewKey(reference);
-  const commit = selectedCommitOid;
-  // One commit's own changes and the whole change are two different diffs, paged separately, so
-  // everything below is keyed by both.
-  const scopeKey = commit === null ? referenceKey : `${referenceKey}@${commit}`;
+  const scrollRootRef = useRef<HTMLDivElement>(null);
   // The panel keeps this mounted across pull requests, so an open composer would otherwise
   // survive the switch and attach its comment to whichever one is on screen when it is sent.
   useEffect(() => {
     setDraft(null);
     setSelectedLines(null);
-    setToggledFiles(new Set());
-    setFoldOverride(null);
+    setToggledFilesState({
+      key: scopeKey,
+      fileKeys: rememberedCodeView?.toggledFileKeys ?? new Set(),
+    });
+    setFoldOverrideState({ key: scopeKey, value: rememberedCodeView?.foldOverride ?? null });
     setVisibleCommitCount(COMMIT_PAGE_SIZE);
     setOrphansOpen(false);
-    setSliceState({ key: scopeKey, cursor: null, slices: NO_SLICES });
+    setSliceState({
+      key: scopeKey,
+      cursor: null,
+      slices: rememberedCodeView?.slices ?? NO_SLICES,
+    });
     parseCache.current.clear();
-  }, [scopeKey]);
+  }, [rememberedCodeView, scopeKey]);
 
-  const loadedSlices = sliceState.key === scopeKey ? sliceState.slices : NO_SLICES;
+  const loadedSlices =
+    sliceState.key === scopeKey ? sliceState.slices : (rememberedCodeView?.slices ?? NO_SLICES);
   const cursor = sliceState.key === scopeKey ? sliceState.cursor : null;
   const diffQuery = useEnvironmentQuery(
     pullRequestEnvironment.diff({
@@ -265,6 +296,13 @@ export function PullRequestCodeTab({
       return { key: scopeKey, cursor, slices: [...slices.slice(0, index), next] };
     });
   }, [cursor, diffQuery.data, scopeKey]);
+  useEffect(() => {
+    rememberPullRequestCodeViewState(viewStateKey, codeScopeKey, {
+      foldOverride,
+      toggledFileKeys: toggledFiles,
+      slices: loadedSlices,
+    });
+  }, [codeScopeKey, foldOverride, loadedSlices, toggledFiles, viewStateKey]);
   // The refresh button rereads from the first page rather than the page the reader is on:
   // pages are positions in one snapshot of the diff, and a fresh snapshot starts over.
   const refreshFirstDiffPage = useAtomRefresh(
@@ -477,6 +515,14 @@ export function PullRequestCodeTab({
     [items],
   );
   const allFilesCollapsed = areAllDiffFilesCollapsed(fileKeys, collapsedFileKeys);
+  useRememberedPullRequestScroll({
+    pullRequestKey: viewStateKey,
+    viewKey: pullRequestTabViewKey("code", commit),
+    rootRef: scrollRootRef,
+    viewportSelector: ".diff-render-surface, .pull-request-code-scroll",
+    mountKey: `${scopeKey}:${loadedSlices.length}:${items.length}`,
+    enabled: items.length > 0 || loadedSlices.length > 0,
+  });
 
   // The sentinel is held as state rather than a ref because the viewer mounts its own footer:
   // an effect reading a ref could run before that node exists and would never arm the observer.
@@ -511,23 +557,27 @@ export function PullRequestCodeTab({
   // every tab re-render (a line-selection drag, a keystroke in the draft, a review-store update).
   const toggleFile = useCallback(
     (fileKey: string) =>
-      setToggledFiles((current) => {
+      setToggledFilesState((currentState) => {
         // The override becomes this file's new default the moment it is folded into the set below,
         // so nothing has to be re-derived when the reader goes back to choosing one at a time.
+        const current = currentState.key === scopeKey ? currentState.fileKeys : toggledFiles;
         const next = new Set(current);
         if (next.has(fileKey)) next.delete(fileKey);
         else next.add(fileKey);
-        return next;
+        return { key: scopeKey, fileKeys: next };
       }),
-    [],
+    [scopeKey, toggledFiles],
   );
 
   const toggleAllFiles = () => {
     // Held as an override of the default rather than as the file keys on screen: a diff that is
     // still paging would otherwise bring its next slice in folded, moments after the reader
     // asked for everything to be open.
-    setFoldOverride(areAllDiffFilesCollapsed(fileKeys, collapsedFileKeys) ? "expanded" : "folded");
-    setToggledFiles(new Set());
+    setFoldOverrideState({
+      key: scopeKey,
+      value: areAllDiffFilesCollapsed(fileKeys, collapsedFileKeys) ? "expanded" : "folded",
+    });
+    setToggledFilesState({ key: scopeKey, fileKeys: new Set() });
   };
 
   // Newest first: the last commit is the one a reader coming back to a change is looking for.
@@ -1031,13 +1081,13 @@ export function PullRequestCodeTab({
   // The toolbar rides above every branch below, not just the one with a patch in it: a commit
   // whose diff is empty or unreadable still needs the scope dropdown that got the reader there.
   const withReviewBar = (body: ReactNode) => (
-    <div className="flex h-full min-h-0 flex-col">
+    <div ref={scrollRootRef} className="flex h-full min-h-0 flex-col">
       {toolbar}
       {/* The overlay is anchored to this wrapper, not the scroller: absolute positioning
           inside an overflowing element tracks the content's bottom edge, which would carry
           the trigger away with the first scroll. */}
       <div className="relative min-h-0 flex-1">
-        <div className="h-full overflow-auto">{body}</div>
+        <div className="pull-request-code-scroll h-full overflow-auto">{body}</div>
         {reviewOverlay}
       </div>
     </div>
@@ -1115,7 +1165,7 @@ export function PullRequestCodeTab({
 
   return (
     <DiffWorkerPoolProvider>
-      <div className="flex h-full min-h-0 flex-col">
+      <div ref={scrollRootRef} className="flex h-full min-h-0 flex-col">
         {toolbar}
         {/* Above the code, closed, and counted: these belong to the change rather than to any
             line of it, and in the stream they read as cards dropped into the patch. */}

@@ -7,7 +7,7 @@ import {
   SendIcon,
   UsersIcon,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 
 import { useAtomCommand } from "~/state/use-atom-command";
 import { pullRequestEnvironment } from "~/state/pullRequests";
@@ -35,6 +35,8 @@ import {
 } from "./pullRequestDetail.logic";
 import { PullRequestMarkdown } from "./PullRequestMarkdown";
 import { PullRequestConversationGhost } from "./PullRequestGhosts";
+import { pullRequestTabViewKey } from "./pullRequestViewState";
+import { useRememberedPullRequestScroll } from "./useRememberedPullRequestScroll";
 
 function MetaRow({
   icon,
@@ -168,6 +170,7 @@ function CommentComposer({
 const COMMENT_PAGE = 30;
 
 export function PullRequestSummaryTab({
+  viewStateKey,
   environmentId,
   reference,
   detail,
@@ -177,6 +180,7 @@ export function PullRequestSummaryTab({
   onFixFinding,
   onRefresh,
 }: {
+  viewStateKey: string;
   environmentId: EnvironmentId;
   reference: PullRequestRef;
   detail: PullRequestDetailView;
@@ -187,6 +191,13 @@ export function PullRequestSummaryTab({
   onFixFinding?: (finding: PullRequestFinding) => void;
   onRefresh: () => void;
 }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useRememberedPullRequestScroll({
+    pullRequestKey: viewStateKey,
+    viewKey: pullRequestTabViewKey("summary"),
+    rootRef: scrollRef,
+    mountKey: detail.url,
+  });
   // Keyed by the pull request, so opening another one starts at the end of its conversation
   // rather than wherever the last one had been read back to.
   const [shown, setShown] = useState({ url: detail.url, count: COMMENT_PAGE });
@@ -212,7 +223,7 @@ export function PullRequestSummaryTab({
   };
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div ref={scrollRef} className="h-full overflow-y-auto">
       <section className="px-4 py-3">
         <div>
           <MetaRow icon={<UsersIcon className="size-3.5" />} label="Reviewers">

@@ -6672,7 +6672,7 @@ function ChatViewContent(props: ChatViewProps) {
       />
     ) : activeRightPanelSurface?.kind === "pull-request" ? (
       <PullRequestDetailPanel
-        key={`${activeRightPanelSurface.repository}#${activeRightPanelSurface.number}`}
+        key={activeRightPanelSurface.id}
         environmentId={activeThread.environmentId}
         reference={{
           projectId: activeRightPanelSurface.projectId as ProjectId,
