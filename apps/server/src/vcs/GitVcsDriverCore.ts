@@ -58,6 +58,8 @@ const RANGE_COMMIT_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_PATCH_MAX_OUTPUT_BYTES = 59_000;
 const REVIEW_DIFF_PATCH_MAX_OUTPUT_BYTES = 120_000;
+const REVIEW_DIFF_PAGE_FILE_LIMIT = 100;
+const REVIEW_DIFF_MANIFEST_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 const REVIEW_UNTRACKED_DIFF_MAX_OUTPUT_BYTES = 80_000;
 const REVIEW_DIFF_FILE_MAX_OUTPUT_BYTES = 1024 * 1024;
 const WORKSPACE_FILES_MAX_OUTPUT_BYTES = 120_000;
@@ -166,6 +168,16 @@ const decodeGitHistoryCommitSummary = Schema.decodeUnknownEffect(GitHistoryCommi
 const decodeGitHistoryRef = Schema.decodeUnknownEffect(GitHistoryRef);
 const decodeGitCommitDetail = Schema.decodeUnknownEffect(GitCommitDetail);
 const decodeGitObjectId = Schema.decodeUnknownEffect(GitObjectId);
+const ReviewBranchDiffCursor = Schema.Struct({
+  version: Schema.Literal(1),
+  snapshotId: Schema.String.check(Schema.isNonEmpty()),
+  mergeBaseSha: GitObjectId,
+  headSha: GitObjectId,
+  ignoreWhitespace: Schema.Boolean,
+  requestedBaseRef: Schema.NullOr(Schema.String.check(Schema.isNonEmpty())),
+  offset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+type ReviewBranchDiffCursor = typeof ReviewBranchDiffCursor.Type;
 const decodeGitHistoryTotalCount = Schema.decodeUnknownEffect(
   Schema.NumberFromString.check(Schema.isGreaterThanOrEqualTo(0)),
 );
@@ -249,6 +261,31 @@ function parseCommitChangedPaths(stdout: string) {
     if (filePath) files.push({ status, oldPath: filePath, newPath: filePath });
   }
   return files;
+}
+
+function quoteSyntheticDiffPath(path: string): string {
+  return JSON.stringify(path).slice(1, -1);
+}
+
+function buildWithheldFilePatch(
+  file: { readonly status: string; readonly oldPath: string; readonly newPath: string },
+  truncatedPatch: string,
+): string {
+  const lines = truncatedPatch.split("\n");
+  const firstHunk = lines.findIndex((line) => line.startsWith("@@ "));
+  if (firstHunk > 0) {
+    return `${lines.slice(0, firstHunk).join("\n")}\n`;
+  }
+  const oldPath = file.status === "A" ? "/dev/null" : `a/${file.oldPath}`;
+  const newPath = file.status === "D" ? "/dev/null" : `b/${file.newPath}`;
+  const quotedOld = quoteSyntheticDiffPath(oldPath);
+  const quotedNew = quoteSyntheticDiffPath(newPath);
+  return [
+    `diff --git "a/${quoteSyntheticDiffPath(file.oldPath)}" "b/${quoteSyntheticDiffPath(file.newPath)}"`,
+    `--- ${oldPath === "/dev/null" ? oldPath : `"${quotedOld}"`}`,
+    `+++ ${newPath === "/dev/null" ? newPath : `"${quotedNew}"`}`,
+    "",
+  ].join("\n");
 }
 
 /** Builds a list-history error that attributes malformed ref data to `git for-each-ref`. */
@@ -2450,6 +2487,258 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     };
   });
 
+  const reviewDiffPageError = (cwd: string, detail: string, cause?: unknown) =>
+    new GitCommandError({
+      operation: "GitVcsDriver.getReviewDiffPreview.page",
+      command: "git diff",
+      cwd,
+      detail,
+      ...(cause === undefined ? {} : { cause }),
+    });
+
+  const hashReviewDiffValue = Effect.fn("hashReviewDiffValue")(function* (
+    cwd: string,
+    value: string,
+  ) {
+    return yield* crypto.digest("SHA-256", new TextEncoder().encode(value)).pipe(
+      Effect.map(Encoding.encodeHex),
+      Effect.mapError((cause) =>
+        reviewDiffPageError(cwd, "Failed to hash paged review diff data.", cause),
+      ),
+    );
+  });
+
+  const snapshotIdForReviewBranch = (
+    cwd: string,
+    mergeBaseSha: string,
+    headSha: string,
+    ignoreWhitespace: boolean,
+  ) => hashReviewDiffValue(cwd, `${mergeBaseSha}\0${headSha}\0${ignoreWhitespace ? "1" : "0"}`);
+
+  const encodeReviewBranchCursor = (cursor: ReviewBranchDiffCursor): string =>
+    Encoding.encodeBase64Url(JSON.stringify(cursor));
+
+  const decodeReviewBranchCursor = Effect.fn("decodeReviewBranchCursor")(function* (
+    input: ReviewDiffPreviewInput,
+    encoded: string,
+  ) {
+    const decodedText = Encoding.decodeBase64UrlString(encoded);
+    if (Result.isFailure(decodedText)) {
+      return yield* reviewDiffPageError(input.cwd, "Review diff cursor is not valid base64url.");
+    }
+    const decoded = decodeJsonResult(ReviewBranchDiffCursor)(decodedText.success);
+    if (Result.isFailure(decoded)) {
+      return yield* reviewDiffPageError(
+        input.cwd,
+        "Review diff cursor has an invalid shape.",
+        decoded.failure,
+      );
+    }
+    const cursor = decoded.success;
+    if (
+      cursor.ignoreWhitespace !== (input.ignoreWhitespace ?? false) ||
+      cursor.requestedBaseRef !== (input.baseRef ?? null)
+    ) {
+      return yield* reviewDiffPageError(
+        input.cwd,
+        "Review diff cursor belongs to a different comparison scope.",
+      );
+    }
+    const expectedSnapshotId = yield* snapshotIdForReviewBranch(
+      input.cwd,
+      cursor.mergeBaseSha,
+      cursor.headSha,
+      cursor.ignoreWhitespace,
+    );
+    if (expectedSnapshotId !== cursor.snapshotId) {
+      return yield* reviewDiffPageError(input.cwd, "Review diff cursor snapshot is invalid.");
+    }
+    return cursor;
+  });
+
+  const resolveReviewBranchCursor = Effect.fn("resolveReviewBranchCursor")(function* (
+    input: ReviewDiffPreviewInput,
+    baseRef: string | null,
+  ) {
+    const encodedCursor = input.pagination?.cursor;
+    if (encodedCursor !== undefined) {
+      return yield* decodeReviewBranchCursor(input, encodedCursor);
+    }
+    if (baseRef === null) {
+      return yield* reviewDiffPageError(input.cwd, "Review diff has no base ref to paginate.");
+    }
+
+    const headResult = yield* executeGit(
+      "GitVcsDriver.getReviewDiffPreview.page.head",
+      input.cwd,
+      ["rev-parse", "--verify", "HEAD^{commit}"],
+      {
+        maxOutputBytes: 256,
+        fallbackErrorDetail: "Failed to resolve the review diff head commit.",
+      },
+    );
+    const headSha = yield* decodeGitObjectId(headResult.stdout.trim()).pipe(
+      Effect.mapError((cause) =>
+        reviewDiffPageError(input.cwd, "Git returned an invalid review head object ID.", cause),
+      ),
+    );
+    const mergeBaseResult = yield* executeGit(
+      "GitVcsDriver.getReviewDiffPreview.page.mergeBase",
+      input.cwd,
+      ["merge-base", baseRef, headSha],
+      {
+        maxOutputBytes: 256,
+        fallbackErrorDetail: "Failed to resolve the review diff merge base.",
+      },
+    );
+    const mergeBaseSha = yield* decodeGitObjectId(mergeBaseResult.stdout.trim()).pipe(
+      Effect.mapError((cause) =>
+        reviewDiffPageError(input.cwd, "Git returned an invalid merge-base object ID.", cause),
+      ),
+    );
+    const ignoreWhitespace = input.ignoreWhitespace ?? false;
+    return {
+      version: 1 as const,
+      snapshotId: yield* snapshotIdForReviewBranch(
+        input.cwd,
+        mergeBaseSha,
+        headSha,
+        ignoreWhitespace,
+      ),
+      mergeBaseSha,
+      headSha,
+      ignoreWhitespace,
+      requestedBaseRef: input.baseRef ?? null,
+      offset: 0,
+    } satisfies ReviewBranchDiffCursor;
+  });
+
+  const readReviewBranchPagePatch = Effect.fn("readReviewBranchPagePatch")(function* (
+    input: ReviewDiffPreviewInput,
+    cursor: ReviewBranchDiffCursor,
+    files: ReturnType<typeof parseCommitChangedPaths>,
+  ): Effect.fn.Return<
+    { readonly patch: string; readonly consumed: number; readonly truncated: boolean },
+    GitCommandError
+  > {
+    const paths = [
+      ...new Set(files.flatMap((file) => [file.oldPath, file.newPath]).filter(Boolean)),
+    ];
+    const result = yield* executeGit(
+      "GitVcsDriver.getReviewDiffPreview.page.patch",
+      input.cwd,
+      [
+        "diff",
+        "--patch",
+        "-M",
+        "-C",
+        "--no-color",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--minimal",
+        ...(cursor.ignoreWhitespace ? ["--ignore-all-space"] : []),
+        cursor.mergeBaseSha,
+        cursor.headSha,
+        "--",
+        ...paths,
+      ],
+      {
+        maxOutputBytes: REVIEW_DIFF_PATCH_MAX_OUTPUT_BYTES,
+        appendTruncationMarker: true,
+        fallbackErrorDetail: "Failed to read a review diff page.",
+      },
+    );
+    if (!result.stdoutTruncated) {
+      return { patch: result.stdout, consumed: files.length, truncated: false };
+    }
+    if (files.length === 1) {
+      return {
+        patch: buildWithheldFilePatch(files[0]!, result.stdout),
+        consumed: 1,
+        truncated: true,
+      };
+    }
+    return yield* readReviewBranchPagePatch(
+      input,
+      cursor,
+      files.slice(0, Math.ceil(files.length / 2)),
+    );
+  });
+
+  const getPagedReviewBranchDiff = Effect.fn("getPagedReviewBranchDiff")(function* (
+    input: ReviewDiffPreviewInput,
+    baseRef: string | null,
+  ) {
+    const cursor = yield* resolveReviewBranchCursor(input, baseRef);
+    const diffOptions = [
+      "diff",
+      "-M",
+      "-C",
+      ...(cursor.ignoreWhitespace ? ["--ignore-all-space"] : []),
+    ];
+    const [manifestResult, numstatResult] = yield* Effect.all(
+      [
+        executeGit(
+          "GitVcsDriver.getReviewDiffPreview.page.manifest",
+          input.cwd,
+          [...diffOptions, "--name-status", "-z", cursor.mergeBaseSha, cursor.headSha, "--"],
+          {
+            maxOutputBytes: REVIEW_DIFF_MANIFEST_MAX_OUTPUT_BYTES,
+            fallbackErrorDetail: "Review diff manifest exceeded the configured limit.",
+          },
+        ),
+        executeGit(
+          "GitVcsDriver.getReviewDiffPreview.page.numstat",
+          input.cwd,
+          [...diffOptions, "--numstat", "-z", cursor.mergeBaseSha, cursor.headSha, "--"],
+          {
+            maxOutputBytes: REVIEW_DIFF_MANIFEST_MAX_OUTPUT_BYTES,
+            fallbackErrorDetail: "Review diff statistics exceeded the configured limit.",
+          },
+        ),
+      ],
+      { concurrency: 2 },
+    );
+    const manifest = parseCommitChangedPaths(manifestResult.stdout);
+    if (cursor.offset > manifest.length) {
+      return yield* reviewDiffPageError(input.cwd, "Review diff cursor is past the manifest end.");
+    }
+    const candidates = manifest.slice(cursor.offset, cursor.offset + REVIEW_DIFF_PAGE_FILE_LIMIT);
+    const page =
+      candidates.length === 0
+        ? { patch: "", consumed: 0, truncated: false }
+        : yield* readReviewBranchPagePatch(input, cursor, candidates);
+    const nextOffset = cursor.offset + page.consumed;
+    const nextCursor =
+      nextOffset < manifest.length
+        ? encodeReviewBranchCursor({ ...cursor, offset: nextOffset })
+        : null;
+    const stats = parseCommitNumstat(numstatResult.stdout);
+    const diffHash = yield* hashReviewDiffValue(input.cwd, page.patch);
+    const source: ReviewDiffPreviewSource = {
+      id: "branch-range",
+      kind: "branch-range",
+      title: input.baseRef ? `Against ${input.baseRef}` : "Against base branch",
+      baseRef: cursor.mergeBaseSha,
+      headRef: cursor.headSha,
+      diff: page.patch,
+      diffHash,
+      truncated: page.truncated,
+      nextCursor,
+      snapshotId: cursor.snapshotId,
+      stats: {
+        fileCount: manifest.length,
+        additions: stats.insertions,
+        deletions: stats.deletions,
+      },
+    };
+    return {
+      cwd: input.cwd,
+      generatedAt: yield* DateTime.now,
+      sources: [source],
+    };
+  });
+
   const getReviewDiffPreview = Effect.fn("getReviewDiffPreview")(function* (
     input: ReviewDiffPreviewInput,
   ) {
@@ -2470,6 +2759,31 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
             Effect.orElseSucceed(() => null),
           )
         : null);
+
+    if (input.pagination?.sourceKind === "branch-range") {
+      if (baseRef === null && input.pagination.cursor === undefined) {
+        const emptyDiffHash = yield* hashReviewDiffValue(input.cwd, "");
+        const source: ReviewDiffPreviewSource = {
+          id: "branch-range",
+          kind: "branch-range",
+          title: "Against base branch",
+          baseRef: null,
+          headRef: branch ?? "HEAD",
+          diff: "",
+          diffHash: emptyDiffHash,
+          truncated: false,
+          nextCursor: null,
+          snapshotId: emptyDiffHash,
+          stats: { fileCount: 0, additions: 0, deletions: 0 },
+        };
+        return {
+          cwd: input.cwd,
+          generatedAt: yield* DateTime.now,
+          sources: [source],
+        };
+      }
+      return yield* getPagedReviewBranchDiff(input, baseRef);
+    }
 
     const dirtyTrackedResult = yield* executeGit(
       "GitVcsDriver.getReviewDiffPreview.dirtyTracked",

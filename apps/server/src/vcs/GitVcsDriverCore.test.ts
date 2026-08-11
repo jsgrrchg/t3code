@@ -1105,6 +1105,141 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("pages every branch file without cutting a patch", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* git(cwd, ["checkout", "-b", "feature/paged-review"]);
+        yield* Effect.forEach(
+          Array.from({ length: 105 }, (_, index) => index),
+          (index) =>
+            writeTextFile(cwd, `files/file-${String(index).padStart(3, "0")}.txt`, `${index}\n`),
+          { concurrency: 16 },
+        );
+        yield* git(cwd, ["add", "."]);
+        yield* git(cwd, ["commit", "-m", "add paged files"]);
+
+        const first = yield* driver.getReviewDiffPreview({
+          cwd,
+          baseRef: initialBranch,
+          pagination: { sourceKind: "branch-range" },
+        });
+        const firstSource = first.sources[0]!;
+        assert.equal(firstSource.stats?.fileCount, 105);
+        assert.equal(firstSource.diff.match(/^diff --git /gm)?.length, 100);
+        assert.isString(firstSource.nextCursor);
+        assert.isFalse(firstSource.truncated);
+
+        const second = yield* driver.getReviewDiffPreview({
+          cwd,
+          baseRef: initialBranch,
+          pagination: {
+            sourceKind: "branch-range",
+            cursor: firstSource.nextCursor!,
+          },
+        });
+        const secondSource = second.sources[0]!;
+        assert.equal(secondSource.snapshotId, firstSource.snapshotId);
+        assert.equal(secondSource.diff.match(/^diff --git /gm)?.length, 5);
+        assert.isNull(secondSource.nextCursor);
+        assert.isFalse(secondSource.diff.endsWith("[truncated]"));
+      }),
+    );
+
+    it.effect("keeps a branch cursor on its original commits after HEAD moves", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* git(cwd, ["checkout", "-b", "feature/stable-review"]);
+        yield* Effect.forEach(
+          Array.from({ length: 101 }, (_, index) => index),
+          (index) => writeTextFile(cwd, `stable/file-${index}.txt`, `${index}\n`),
+          { concurrency: 16 },
+        );
+        yield* git(cwd, ["add", "."]);
+        yield* git(cwd, ["commit", "-m", "stable snapshot"]);
+
+        const first = yield* driver.getReviewDiffPreview({
+          cwd,
+          baseRef: initialBranch,
+          pagination: { sourceKind: "branch-range" },
+        });
+        const firstSource = first.sources[0]!;
+        yield* writeTextFile(cwd, "stable/after-cursor.txt", "later\n");
+        yield* git(cwd, ["add", "."]);
+        yield* git(cwd, ["commit", "-m", "move head"]);
+
+        const continuation = yield* driver.getReviewDiffPreview({
+          cwd,
+          baseRef: initialBranch,
+          pagination: {
+            sourceKind: "branch-range",
+            cursor: firstSource.nextCursor!,
+          },
+        });
+        assert.equal(continuation.sources[0]?.stats?.fileCount, 101);
+        assert.notInclude(continuation.sources[0]?.diff ?? "", "after-cursor.txt");
+      }),
+    );
+
+    it.effect("rejects invalid branch diff cursors as typed git errors", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        const error = yield* driver
+          .getReviewDiffPreview({
+            cwd,
+            baseRef: initialBranch,
+            pagination: { sourceKind: "branch-range", cursor: "not-a-cursor" },
+          })
+          .pipe(Effect.flip);
+
+        assert.deepInclude(error, {
+          _tag: "GitCommandError",
+          operation: "GitVcsDriver.getReviewDiffPreview.page",
+          cwd,
+        });
+      }),
+    );
+
+    it.effect("lets an oversized file yield to files after it", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* git(cwd, ["checkout", "-b", "feature/oversized-review"]);
+        yield* writeTextFile(cwd, "a-large.txt", `${"changed line\n".repeat(20_000)}`);
+        yield* writeTextFile(cwd, "z-after.txt", "still reachable\n");
+        yield* git(cwd, ["add", "."]);
+        yield* git(cwd, ["commit", "-m", "large and later"]);
+
+        const first = yield* driver.getReviewDiffPreview({
+          cwd,
+          baseRef: initialBranch,
+          pagination: { sourceKind: "branch-range" },
+        });
+        const firstSource = first.sources[0]!;
+        assert.isTrue(firstSource.truncated);
+        assert.include(firstSource.diff, "a-large.txt");
+        assert.isString(firstSource.nextCursor);
+
+        const second = yield* driver.getReviewDiffPreview({
+          cwd,
+          baseRef: initialBranch,
+          pagination: {
+            sourceKind: "branch-range",
+            cursor: firstSource.nextCursor!,
+          },
+        });
+        assert.include(second.sources[0]?.diff ?? "", "z-after.txt");
+        assert.isNull(second.sources[0]?.nextCursor);
+      }),
+    );
+
     it.effect("loads full file contents for working-tree diff expansion", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();

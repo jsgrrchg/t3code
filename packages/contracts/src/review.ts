@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { GitCommandError } from "./git.ts";
 import { VcsError } from "./vcs.ts";
 
@@ -7,6 +7,13 @@ export const ReviewDiffPreviewInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   baseRef: Schema.optional(TrimmedNonEmptyString),
   ignoreWhitespace: Schema.optionalKey(Schema.Boolean),
+  /** Opts a compatible server into returning one immutable source slice instead of the legacy preview. */
+  pagination: Schema.optional(
+    Schema.Struct({
+      sourceKind: Schema.Literal("branch-range"),
+      cursor: Schema.optional(TrimmedNonEmptyString),
+    }),
+  ),
 });
 export type ReviewDiffPreviewInput = typeof ReviewDiffPreviewInput.Type;
 
@@ -22,6 +29,18 @@ export const ReviewDiffPreviewSource = Schema.Struct({
   diff: Schema.String,
   diffHash: TrimmedNonEmptyString,
   truncated: Schema.Boolean,
+  /** Present for paged sources; absent identifies the legacy single-preview response. */
+  nextCursor: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  /** Stable identity of the immutable merge-base/head comparison backing every page. */
+  snapshotId: Schema.optional(TrimmedNonEmptyString),
+  /** Whole-diff totals, repeated on every page so headers never show partial counts. */
+  stats: Schema.optional(
+    Schema.Struct({
+      fileCount: NonNegativeInt,
+      additions: NonNegativeInt,
+      deletions: NonNegativeInt,
+    }),
+  ),
 });
 export type ReviewDiffPreviewSource = typeof ReviewDiffPreviewSource.Type;
 
