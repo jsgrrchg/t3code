@@ -86,7 +86,9 @@ describe("createFileTreeDragMentionController", () => {
     expect(transfer.getData(COMPOSER_MENTION_DRAG_TYPE)).toBe(
       "[index.md](docs/index.md) [api.md](docs/api.md) [app.ts](src/app.ts)",
     );
+    expect(controller.getDraggedPaths()).toEqual(["docs/index.md", "docs/api.md", "src/app.ts"]);
     controller.handleDragEnd();
+    expect(controller.getDraggedPaths()).toEqual([]);
     expect(deselected).toEqual(["docs/index.md", "docs/api.md", "src/app.ts"]);
   });
 

@@ -729,6 +729,11 @@ export default function FileBrowserPanel({
     };
   }, [dragMention]);
 
+  const rootDraggedPaths = dragMention.getDraggedPaths();
+  const rootDropAvailable =
+    treeDragActive &&
+    resolveMove({ draggedPaths: rootDraggedPaths, target: PROJECT_ROOT_DROP_TARGET }) !== null;
+
   return (
     <div
       ref={panelRef}
@@ -753,15 +758,14 @@ export default function FileBrowserPanel({
           onIncludeIgnoredChange={setIncludeIgnored}
         />
       </div>
-      {treeDragActive ? (
+      {rootDropAvailable ? (
         <div
           className="mx-2 my-1 rounded-md border border-dashed border-primary/50 bg-primary/5 px-2 py-1.5 text-center text-[11px] text-muted-foreground"
           data-file-tree-root-drop
           onDragOver={(event) => {
-            const draggedPaths = model.getSelectedPaths();
             if (
               resolveMove({
-                draggedPaths,
+                draggedPaths: dragMention.getDraggedPaths(),
                 target: PROJECT_ROOT_DROP_TARGET,
               }) !== null
             ) {
@@ -770,7 +774,7 @@ export default function FileBrowserPanel({
           }}
           onDrop={(event) => {
             event.preventDefault();
-            const draggedPaths = model.getSelectedPaths();
+            const draggedPaths = dragMention.getDraggedPaths();
             completeMoveRef.current({
               draggedPaths,
               target: PROJECT_ROOT_DROP_TARGET,

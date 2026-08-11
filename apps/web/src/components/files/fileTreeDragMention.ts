@@ -24,6 +24,8 @@ export interface FileTreeDragMentionController {
    * this is set are gesture side effects, not requests to open a file.
    */
   isDragInProgress(): boolean;
+  /** Exact tree paths participating in the current native Pierre drag. */
+  getDraggedPaths(): ReadonlyArray<string>;
   /** Mirror of the tree's current selection, needed for multi-row drags. */
   handleSelectionChange(selectedPaths: ReadonlyArray<string>): void;
   handleDragStart(event: FileTreeDragStartEvent): void;
@@ -51,6 +53,7 @@ export function createFileTreeDragMentionController(
   let draggedPaths: ReadonlyArray<string> = [];
   return {
     isDragInProgress: () => draggedPaths.length > 0,
+    getDraggedPaths: () => draggedPaths,
     handleSelectionChange(selectedPaths) {
       selection = selectedPaths;
     },

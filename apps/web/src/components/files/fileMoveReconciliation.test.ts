@@ -24,7 +24,7 @@ describe("file move composer reconciliation", () => {
 
   it("remaps a file token at the end of the draft", () => {
     expect(remapComposerFileTokens("Review @src/index.ts", "src/index.ts", "lib/index.ts")).toBe(
-      "Review @lib/index.ts",
+      "Review [index.ts](lib/index.ts)",
     );
   });
 
