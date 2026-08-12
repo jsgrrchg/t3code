@@ -72,6 +72,16 @@ The **Source Control settings** page shows you exactly what's connected:
 
 Run a quick **Rescan** after setting up a new machine or changing credentials.
 
+### Choose Generated Worktree Branch Names
+
+T3 Code gives a new worktree branch a descriptive name after its first message. Use **Settings →
+Source Control → Worktree branch prefix** to choose the namespace for those generated names. For
+example, `feature` produces `feature/fix-sidebar-resize`. Leave the field empty to produce
+`fix-sidebar-resize` without a prefix, or reset it to restore the default `t3code` namespace.
+
+The setting belongs to the connected environment, so it applies consistently when starting work
+from web, desktop, or mobile. Existing branches are not renamed.
+
 ### Browse Commit History
 
 Open **History** from the empty Right Panel or its **+** menu to browse the repository's commit

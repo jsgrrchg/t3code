@@ -17,6 +17,7 @@ import {
 } from "../../modelSelection";
 import { primaryServerProvidersAtom } from "../../state/server";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
+import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
@@ -164,6 +165,40 @@ export function SourceControlWritingSettingsSection() {
               })
             }
             aria-label="Follow change request templates"
+          />
+        }
+      />
+
+      <SettingsRow
+        title="Worktree branch prefix"
+        description="Prefix for generated worktree branch names. Leave empty for unprefixed names. Temporary branches remain compatible with existing clients."
+        resetAction={
+          settings.generatedWorktreeBranchPrefix !==
+          DEFAULT_UNIFIED_SETTINGS.generatedWorktreeBranchPrefix ? (
+            <SettingResetButton
+              label="worktree branch prefix"
+              onClick={() =>
+                updateSettings({
+                  generatedWorktreeBranchPrefix:
+                    DEFAULT_UNIFIED_SETTINGS.generatedWorktreeBranchPrefix,
+                })
+              }
+            />
+          ) : null
+        }
+        control={
+          <Input
+            key={settings.generatedWorktreeBranchPrefix}
+            className="w-full sm:w-56"
+            defaultValue={settings.generatedWorktreeBranchPrefix}
+            placeholder="No prefix"
+            aria-label="Worktree branch prefix"
+            onBlur={(event) => {
+              const generatedWorktreeBranchPrefix = event.target.value.trim();
+              if (generatedWorktreeBranchPrefix !== settings.generatedWorktreeBranchPrefix) {
+                updateSettings({ generatedWorktreeBranchPrefix });
+              }
+            }}
           />
         }
       />

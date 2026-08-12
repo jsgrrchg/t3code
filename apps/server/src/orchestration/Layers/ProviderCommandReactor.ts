@@ -288,15 +288,31 @@ function stalePendingRequestDetail(
   return `Stale pending ${requestKind} request: ${requestId}. Provider callback state does not survive app restarts or recovered sessions. Restart the turn to continue.`;
 }
 
-function buildGeneratedWorktreeBranchName(raw: string): string {
+function sanitizeWorktreeBranchPrefix(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/^refs\/heads\//, "")
+    .replace(/['"`]/g, "")
+    .replace(/[^a-z0-9/_-]+/g, "-")
+    .replace(/\/+/g, "/")
+    .replace(/-+/g, "-")
+    .replace(/^[./_-]+|[./_-]+$/g, "")
+    .slice(0, 64)
+    .replace(/[./_-]+$/g, "");
+}
+
+function buildGeneratedWorktreeBranchName(raw: string, prefix: string): string {
+  const safePrefix = sanitizeWorktreeBranchPrefix(prefix);
   const normalized = raw
     .trim()
     .toLowerCase()
     .replace(/^refs\/heads\//, "")
     .replace(/['"`]/g, "");
 
-  const withoutPrefix = normalized.startsWith(`${WORKTREE_BRANCH_PREFIX}/`)
-    ? normalized.slice(`${WORKTREE_BRANCH_PREFIX}/`.length)
+  const generatedPrefix = safePrefix.length > 0 ? safePrefix : WORKTREE_BRANCH_PREFIX;
+  const withoutPrefix = normalized.startsWith(`${generatedPrefix}/`)
+    ? normalized.slice(`${generatedPrefix}/`.length)
     : normalized;
 
   const branchFragment = withoutPrefix
@@ -308,7 +324,7 @@ function buildGeneratedWorktreeBranchName(raw: string): string {
     .replace(/[./_-]+$/g, "");
 
   const safeFragment = branchFragment.length > 0 ? branchFragment : "update";
-  return `${WORKTREE_BRANCH_PREFIX}/${safeFragment}`;
+  return safePrefix.length > 0 ? `${safePrefix}/${safeFragment}` : safeFragment;
 }
 
 const make = Effect.gen(function* () {
@@ -831,7 +847,10 @@ const make = Effect.gen(function* () {
       });
       if (!generated) return;
 
-      const targetBranch = buildGeneratedWorktreeBranchName(generated.branch);
+      const targetBranch = buildGeneratedWorktreeBranchName(
+        generated.branch,
+        settings.generatedWorktreeBranchPrefix,
+      );
       if (targetBranch === oldBranch) return;
 
       const renamed = yield* gitWorkflow.renameBranch({ cwd, oldBranch, newBranch: targetBranch });

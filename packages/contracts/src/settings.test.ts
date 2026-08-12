@@ -215,13 +215,26 @@ describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
 
 describe("ServerSettings worktree defaults", () => {
   it("defaults start-from-origin on for legacy configs", () => {
-    expect(decodeServerSettings({}).newWorktreesStartFromOrigin).toBe(true);
+    const settings = decodeServerSettings({});
+    expect(settings.newWorktreesStartFromOrigin).toBe(true);
+    expect(settings.generatedWorktreeBranchPrefix).toBe("t3code");
   });
 
   it("accepts start-from-origin updates", () => {
     expect(
       decodeServerSettingsPatch({ newWorktreesStartFromOrigin: false }).newWorktreesStartFromOrigin,
     ).toBe(false);
+  });
+
+  it("accepts trimmed and empty worktree branch prefixes", () => {
+    expect(
+      decodeServerSettingsPatch({ generatedWorktreeBranchPrefix: "  feature  " })
+        .generatedWorktreeBranchPrefix,
+    ).toBe("feature");
+    expect(
+      decodeServerSettingsPatch({ generatedWorktreeBranchPrefix: "" })
+        .generatedWorktreeBranchPrefix,
+    ).toBe("");
   });
 });
 
