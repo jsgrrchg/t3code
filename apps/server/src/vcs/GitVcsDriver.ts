@@ -304,6 +304,7 @@ export class GitVcsDriver extends Context.Service<
       input: GitGetCommitDiffFileContentsRepositoryInput,
     ) => Effect.Effect<GitGetCommitDiffFileContentsResult, GitCommandError>;
     readonly pullCurrentBranch: (cwd: string) => Effect.Effect<VcsPullResult, GitCommandError>;
+    readonly discardWorkingTree: (cwd: string) => Effect.Effect<void, GitCommandError>;
     readonly createWorktree: (
       input: VcsCreateWorktreeInput,
     ) => Effect.Effect<VcsCreateWorktreeResult, GitCommandError>;

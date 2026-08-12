@@ -290,6 +290,13 @@ export function createVcsEnvironmentAtoms<R, E>(
       concurrency: vcsCommandConcurrency,
       onSettled: invalidateRefs,
     }),
+    discardWorkingTree: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:vcs:discard-working-tree",
+      tag: WS_METHODS.vcsDiscardWorkingTree,
+      scheduler: vcsCommandScheduler,
+      concurrency: vcsCommandConcurrency,
+      onSettled: invalidateRefs,
+    }),
     refreshStatus: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:vcs:refresh-status",
       tag: WS_METHODS.vcsRefreshStatus,

@@ -39,6 +39,7 @@ import {
   VcsCreateWorktreeResult,
   VcsInitInput,
   VcsListRefsInput,
+  VcsDiscardWorkingTreeInput,
   VcsListRefsResult,
   GitManagerServiceError,
   GitPreparePullRequestThreadInput,
@@ -224,6 +225,7 @@ export const WS_METHODS = {
 
   // VCS methods
   vcsPull: "vcs.pull",
+  vcsDiscardWorkingTree: "vcs.discardWorkingTree",
   vcsRefreshStatus: "vcs.refreshStatus",
   vcsListRefs: "vcs.listRefs",
   vcsCreateWorktree: "vcs.createWorktree",
@@ -678,6 +680,12 @@ export const WsVcsPullRpc = Rpc.make(WS_METHODS.vcsPull, {
   error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
 });
 
+export const WsVcsDiscardWorkingTreeRpc = Rpc.make(WS_METHODS.vcsDiscardWorkingTree, {
+  payload: VcsDiscardWorkingTreeInput,
+  success: VcsStatusResult,
+  error: Schema.Union([GitCommandError, GitManagerServiceError, EnvironmentAuthorizationError]),
+});
+
 export const WsVcsRefreshStatusRpc = Rpc.make(WS_METHODS.vcsRefreshStatus, {
   payload: VcsStatusInput,
   success: VcsStatusResult,
@@ -1061,6 +1069,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsAssetsCreateUrlRpc,
   WsSubscribeVcsStatusRpc,
   WsVcsPullRpc,
+  WsVcsDiscardWorkingTreeRpc,
   WsVcsRefreshStatusRpc,
   WsGitRunStackedActionRpc,
   WsGitResolvePullRequestRpc,

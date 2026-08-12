@@ -206,6 +206,12 @@ export const VcsPullInput = Schema.Struct({
 });
 export type VcsPullInput = typeof VcsPullInput.Type;
 
+/** Restores tracked files to HEAD and removes untracked, non-ignored files. */
+export const VcsDiscardWorkingTreeInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+});
+export type VcsDiscardWorkingTreeInput = typeof VcsDiscardWorkingTreeInput.Type;
+
 export const GitRunStackedActionInput = Schema.Struct({
   actionId: TrimmedNonEmptyStringSchema,
   cwd: TrimmedNonEmptyStringSchema,

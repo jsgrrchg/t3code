@@ -4427,6 +4427,41 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       fallbackErrorDetail: "git init failed",
     }).pipe(Effect.asVoid);
 
+  const discardWorkingTree: GitVcsDriver.GitVcsDriver["Service"]["discardWorkingTree"] = Effect.fn(
+    "GitVcsDriver.discardWorkingTree",
+  )(function* (cwd) {
+    const head = yield* executeGit(
+      "GitVcsDriver.discardWorkingTree.resolveHead",
+      cwd,
+      ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
+      { allowNonZeroExit: true, timeoutMs: 5_000, maxOutputBytes: 4_096 },
+    );
+
+    if (head.exitCode === 0) {
+      yield* executeGit("GitVcsDriver.discardWorkingTree.reset", cwd, ["reset", "--hard", "HEAD"], {
+        timeoutMs: 30_000,
+        fallbackErrorDetail: "Failed to restore tracked files to HEAD.",
+      });
+    } else {
+      // An unborn repository has no HEAD to reset to. Emptying its index leaves every
+      // staged path untracked so the following clean removes it as well.
+      yield* executeGit(
+        "GitVcsDriver.discardWorkingTree.emptyIndex",
+        cwd,
+        ["read-tree", "--empty"],
+        {
+          timeoutMs: 30_000,
+          fallbackErrorDetail: "Failed to clear the repository index.",
+        },
+      );
+    }
+
+    yield* executeGit("GitVcsDriver.discardWorkingTree.clean", cwd, ["clean", "-fd"], {
+      timeoutMs: 30_000,
+      fallbackErrorDetail: "Failed to remove untracked files.",
+    });
+  });
+
   const listLocalBranchNames: GitVcsDriver.GitVcsDriver["Service"]["listLocalBranchNames"] = (
     cwd,
   ) =>
@@ -4486,6 +4521,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     pushCurrentBranch: (cwd, fallbackBranch, options) =>
       withListRefsInvalidation(cwd, pushCurrentBranch(cwd, fallbackBranch, options)),
     pullCurrentBranch: (cwd) => withListRefsInvalidation(cwd, pullCurrentBranch(cwd)),
+    discardWorkingTree,
     readRangeContext,
     getReviewDiffPreview,
     getReviewDiffFileContents,

@@ -33,6 +33,7 @@ import {
   Rows3Icon,
   SearchIcon,
   TextWrapIcon,
+  Trash2Icon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOpenInPreferredEditor } from "../editorPreferences";
@@ -104,6 +105,8 @@ import {
   rememberDiffPanelRevealRequest,
 } from "../diffPanelViewState";
 import { useRememberedDiffPanelScroll } from "./diffs/useRememberedDiffPanelScroll";
+import { ensureLocalApi } from "~/localApi";
+import { toastManager } from "~/components/ui/toast";
 
 type DiffThemeType = "light" | "dark";
 const AUTOMATIC_BASE_REF = "__automatic_base_ref__";
@@ -175,6 +178,10 @@ export default function DiffPanel({
         })
       : null,
   );
+  const discardWorkingTree = useAtomCommand(vcsEnvironment.discardWorkingTree, {
+    reportFailure: false,
+  });
+  const [isDiscardingWorkingTree, setIsDiscardingWorkingTree] = useState(false);
   const diffSelection = useDiffPanelStore((state) =>
     selectThreadDiffPanelSelection(
       state.byThreadKey,
@@ -210,6 +217,7 @@ export default function DiffPanel({
 
   const selectedTurnId = diffSelection.kind === "turn" ? diffSelection.turnId : null;
   const selectedGitScope = diffSelection.kind === "unstaged" ? "unstaged" : "branch";
+  const hasWorkingTreeChanges = gitStatusQuery.data?.hasWorkingTreeChanges === true;
   const selectedGitSourceKind: ReviewDiffPreviewSourceKind =
     selectedGitScope === "unstaged" ? "working-tree" : "branch-range";
   const selectedBaseRef = diffSelection.kind === "branch" ? diffSelection.baseRef : null;
@@ -426,6 +434,49 @@ export default function DiffPanel({
     firstFallbackBranchDiffPreview,
     firstPrimaryBranchDiffPreview,
     shouldRetryBranchDiffAtEnvironmentCwd,
+  ]);
+  const discardSelectedWorkingTree = useCallback(async () => {
+    if (!activeThread || !activeCwd || isDiscardingWorkingTree || !hasWorkingTreeChanges) return;
+
+    const confirmed = await ensureLocalApi().dialogs.confirm(
+      [
+        "Discard uncommitted changes?",
+        "This restores tracked files to their last commit and removes untracked files.",
+        "Commits and branch history are unchanged. This cannot be undone.",
+      ].join("\n"),
+      { variant: "destructive" },
+    );
+    if (!confirmed) return;
+
+    setIsDiscardingWorkingTree(true);
+    try {
+      const result = await discardWorkingTree({
+        environmentId: activeThread.environmentId,
+        input: { cwd: activeCwd },
+      });
+      if (result._tag === "Success") {
+        gitStatusQuery.refresh();
+        refreshBranchDiffPreview();
+        toastManager.add({ type: "success", title: "Uncommitted changes discarded" });
+      } else if (!isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        toastManager.add({
+          type: "error",
+          title: "Failed to discard uncommitted changes",
+          description: error instanceof Error ? error.message : "An unexpected error occurred.",
+        });
+      }
+    } finally {
+      setIsDiscardingWorkingTree(false);
+    }
+  }, [
+    activeCwd,
+    activeThread,
+    discardWorkingTree,
+    gitStatusQuery,
+    hasWorkingTreeChanges,
+    isDiscardingWorkingTree,
+    refreshBranchDiffPreview,
   ]);
   const canRefreshGitDiff =
     isGitRepo && selectedTurnId === null && activeThread != null && activeCwd != null;
@@ -1058,6 +1109,31 @@ export default function DiffPanel({
             </TooltipTrigger>
             <TooltipPopup side="top">
               {branchDiffPreview.isPending ? "Refreshing diff…" : "Refresh diff"}
+            </TooltipPopup>
+          </Tooltip>
+        )}
+        {selectedGitScope === "unstaged" && hasWorkingTreeChanges && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  disabled={isDiscardingWorkingTree}
+                  aria-label={
+                    isDiscardingWorkingTree
+                      ? "Discarding uncommitted changes"
+                      : "Discard uncommitted changes"
+                  }
+                  onClick={() => void discardSelectedWorkingTree()}
+                />
+              }
+            >
+              <Trash2Icon className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipPopup side="top">
+              {isDiscardingWorkingTree ? "Discarding changes…" : "Discard uncommitted changes"}
             </TooltipPopup>
           </Tooltip>
         )}

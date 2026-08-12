@@ -5397,6 +5397,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               Effect.succeed({
                 worktree: { path: "/tmp/wt", refName: "feature/demo" },
               }),
+            discardWorkingTree: () => Effect.void,
             removeWorktree: () => Effect.void,
             createRef: (input) => Effect.succeed({ refName: input.refName }),
             switchRef: (input) => Effect.succeed({ refName: input.refName }),
@@ -5459,6 +5460,13 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         withWsRpcClient(wsUrl, (client) => client[WS_METHODS.vcsPull]({ cwd: "/tmp/repo" })),
       );
       assert.equal(pull.status, "pulled");
+
+      const discardedStatus = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.vcsDiscardWorkingTree]({ cwd: "/tmp/repo" }),
+        ),
+      );
+      assert.equal(discardedStatus.hasWorkingTreeChanges, false);
 
       const refreshedStatus = yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) =>

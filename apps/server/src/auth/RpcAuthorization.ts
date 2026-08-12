@@ -86,6 +86,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.subscribeResourceTelemetry]: AuthOrchestrationReadScope,
   [WS_METHODS.vcsRefreshStatus]: AuthOrchestrationReadScope,
   [WS_METHODS.vcsPull]: AuthOrchestrationOperateScope,
+  [WS_METHODS.vcsDiscardWorkingTree]: AuthOrchestrationOperateScope,
   [WS_METHODS.gitRunStackedAction]: AuthOrchestrationOperateScope,
   [WS_METHODS.gitFetchAll]: AuthOrchestrationOperateScope,
   [WS_METHODS.gitListHistory]: AuthOrchestrationReadScope,

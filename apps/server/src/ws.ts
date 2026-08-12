@@ -2147,6 +2147,17 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "git" },
           ),
+        [WS_METHODS.vcsDiscardWorkingTree]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsDiscardWorkingTree,
+            gitWorkflow.discardWorkingTree(input.cwd).pipe(
+              Effect.matchCauseEffect({
+                onFailure: (cause) => Effect.failCause(cause),
+                onSuccess: () => vcsStatusBroadcaster.refreshStatus(input.cwd),
+              }),
+            ),
+            { "rpc.aggregate": "git" },
+          ),
         [WS_METHODS.gitFetchAll]: (input) =>
           observeRpcEffect(
             WS_METHODS.gitFetchAll,

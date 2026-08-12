@@ -242,6 +242,52 @@ describe("GitVcsDriver.listHistory", () => {
   );
 });
 
+describe("GitVcsDriver.discardWorkingTree", () => {
+  it.effect("restores tracked files and removes only untracked, non-ignored files", () =>
+    Effect.gen(function* () {
+      const driver = yield* GitVcsDriver.GitVcsDriver;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const cwd = yield* makeTmpDir("git-discard-working-tree-");
+      yield* initRepoWithCommit(cwd);
+      yield* writeTextFile(cwd, ".gitignore", "ignored/\n");
+      yield* git(cwd, ["add", ".gitignore"]);
+      yield* git(cwd, ["commit", "-m", "ignore generated files"]);
+
+      yield* writeTextFile(cwd, "README.md", "# staged change\n");
+      yield* git(cwd, ["add", "README.md"]);
+      yield* writeTextFile(cwd, "untracked.txt", "delete me\n");
+      yield* writeTextFile(cwd, "ignored/cache.txt", "keep me\n");
+
+      yield* driver.discardWorkingTree(cwd);
+
+      assert.equal(yield* fileSystem.readFileString(path.join(cwd, "README.md")), "# test\n");
+      assert.equal(yield* fileSystem.exists(path.join(cwd, "untracked.txt")), false);
+      assert.equal(yield* fileSystem.exists(path.join(cwd, "ignored/cache.txt")), true);
+      assert.equal(yield* git(cwd, ["status", "--porcelain"]), "");
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect("cleans staged files in an unborn repository", () =>
+    Effect.gen(function* () {
+      const driver = yield* GitVcsDriver.GitVcsDriver;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const cwd = yield* makeTmpDir("git-discard-unborn-working-tree-");
+      yield* driver.initRepo({ cwd });
+      yield* writeTextFile(cwd, "staged.txt", "staged\n");
+      yield* git(cwd, ["add", "staged.txt"]);
+      yield* writeTextFile(cwd, "untracked.txt", "untracked\n");
+
+      yield* driver.discardWorkingTree(cwd);
+
+      assert.equal(yield* fileSystem.exists(path.join(cwd, "staged.txt")), false);
+      assert.equal(yield* fileSystem.exists(path.join(cwd, "untracked.txt")), false);
+      assert.equal(yield* git(cwd, ["status", "--porcelain"]), "");
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
 describe("GitVcsDriver historical commit resources", () => {
   it.effect("reads commit metadata, patch, and validated file contents", () =>
     Effect.gen(function* () {

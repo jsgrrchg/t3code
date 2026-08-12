@@ -54,6 +54,10 @@ of the diff, so a large change remains quick to open while every changed file st
 additions and deletions in the header always describe the complete comparison, including files that
 have not loaded yet.
 
+When **Working tree** is selected, use the trash button to discard all uncommitted changes after
+confirming. It restores tracked files to their last commit and removes untracked, non-ignored files;
+commits and branch history stay unchanged.
+
 Switching right-panel tabs preserves the pages and scroll position already reached. **Collapse all**
 and **Expand all** also apply to files that load on later pages.
 

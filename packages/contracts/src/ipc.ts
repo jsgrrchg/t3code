@@ -5,6 +5,7 @@ import type {
   VcsCreateWorktreeResult,
   VcsInitInput,
   VcsListRefsInput,
+  VcsDiscardWorkingTreeInput,
   VcsListRefsResult,
   VcsPullInput,
   VcsPullResult,
@@ -1244,6 +1245,7 @@ export interface EnvironmentApi {
     switchRef: (input: VcsSwitchRefInput) => Promise<VcsSwitchRefResult>;
     init: (input: VcsInitInput) => Promise<void>;
     pull: (input: VcsPullInput) => Promise<VcsPullResult>;
+    discardWorkingTree: (input: VcsDiscardWorkingTreeInput) => Promise<VcsStatusResult>;
     refreshStatus: (input: VcsStatusInput) => Promise<VcsStatusResult>;
     onStatus: (
       input: VcsStatusInput,
