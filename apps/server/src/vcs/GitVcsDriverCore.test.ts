@@ -18,6 +18,8 @@ import { GitCommandError, GitObjectId, type ReviewDiffFileContentsInput } from "
 import { ServerConfig } from "../config.ts";
 import {
   makeGitVcsDriverCore,
+  parseGitNumstat,
+  parseGitStatusPorcelainV2,
   parseGitHistoryLogOutput,
   parseGitHistoryRefsOutput,
   splitNullSeparatedGitStdoutPaths,
@@ -493,11 +495,52 @@ it.effect("uses stable diagnostics for every parsed non-repository command", () 
     yield* driver.listRefs({ cwd });
 
     assert.deepStrictEqual(commands, [
-      { args: ["status", "--porcelain=2", "--branch"], lcAll: "C" },
+      { args: ["status", "--porcelain=2", "--branch", "-z"], lcAll: "C" },
       { args: ["rev-parse", "--abbrev-ref", "HEAD"], lcAll: "C" },
       { args: ["rev-parse", "--git-common-dir"], lcAll: "C" },
     ]);
   }).pipe(Effect.provide(layer));
+});
+
+it("parses porcelain v2 NUL records without losing spaces, Unicode, or rename destinations", () => {
+  const hash = "1".repeat(40);
+  const parsed = parseGitStatusPorcelainV2(
+    [
+      "# branch.head feature/status",
+      "# branch.upstream origin/feature/status",
+      "# branch.ab +2 -1",
+      `1 .M N... 100644 100644 100644 ${hash} ${hash} modified name.ts`,
+      `2 R. N... 100644 100644 100644 ${hash} ${hash} R100 renamed ünicode.ts`,
+      "rename source.ts",
+      "? untracked name.ts",
+      "",
+    ].join("\0"),
+  );
+
+  assert.equal(parsed.refName, "feature/status");
+  assert.equal(parsed.upstreamRef, "origin/feature/status");
+  assert.equal(parsed.aheadCount, 2);
+  assert.equal(parsed.behindCount, 1);
+  assert.deepStrictEqual(
+    [...parsed.statusByPath],
+    [
+      ["modified name.ts", "modified"],
+      ["renamed ünicode.ts", "renamed"],
+      ["untracked name.ts", "untracked"],
+    ],
+  );
+});
+
+it("parses NUL-delimited numstat records and keeps the rename destination", () => {
+  assert.deepStrictEqual(
+    parseGitNumstat(
+      ["2\t1\tmodified name.ts", "1\t0\t", "old name.ts", "new ünicode.ts", ""].join("\0"),
+    ),
+    [
+      { path: "modified name.ts", insertions: 2, deletions: 1 },
+      { path: "new ünicode.ts", insertions: 1, deletions: 0 },
+    ],
+  );
 });
 
 it.effect("invalidates origin remote cache when a driver mutation adds origin", () =>
@@ -1499,6 +1542,38 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
           status.workingTree.files.map((file) => file.path),
           "feature.ts",
         );
+        assert.equal(
+          status.workingTree.files.find((file) => file.path === "feature.ts")?.status,
+          "untracked",
+        );
+      }),
+    );
+
+    it.effect("classifies staged, modified, renamed, and untracked paths losslessly", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        yield* writeTextFile(cwd, "modified name.ts", "before\n");
+        yield* writeTextFile(cwd, "rename source.ts", "rename\n");
+        yield* git(cwd, ["add", "."]);
+        yield* git(cwd, ["commit", "-m", "add status fixtures"]);
+
+        yield* writeTextFile(cwd, "modified name.ts", "after\n");
+        yield* writeTextFile(cwd, "staged new.ts", "staged\n");
+        yield* writeTextFile(cwd, "untracked ünicode.ts", "untracked\n");
+        yield* git(cwd, ["add", "staged new.ts"]);
+        yield* git(cwd, ["mv", "rename source.ts", "renamed target.ts"]);
+
+        const status = yield* (yield* GitVcsDriver.GitVcsDriver).statusDetails(cwd);
+        const statusByPath = new Map(
+          status.workingTree.files.map((file) => [file.path, file.status]),
+        );
+
+        assert.equal(statusByPath.get("modified name.ts"), "modified");
+        assert.equal(statusByPath.get("staged new.ts"), "added");
+        assert.equal(statusByPath.get("renamed target.ts"), "renamed");
+        assert.equal(statusByPath.get("untracked ünicode.ts"), "untracked");
+        assert.isFalse(statusByPath.has("rename source.ts"));
       }),
     );
 

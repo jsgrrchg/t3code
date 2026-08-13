@@ -1,7 +1,14 @@
-import type { ProjectEntry } from "@t3tools/contracts";
+import type { ProjectEntry, VcsStatusResult, VcsWorkingTreeFileStatus } from "@t3tools/contracts";
 import { SymbolView } from "../../components/AppSymbol";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, View } from "react-native";
+import {
+  ActivityIndicator,
+  FlatList,
+  Pressable,
+  RefreshControl,
+  useColorScheme,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText as Text } from "../../components/AppText";
@@ -16,11 +23,33 @@ import {
   type FileTreeNode,
   type VisibleFileTreeNode,
 } from "./fileTree";
+import { buildFileTreeGitPresentation } from "./fileTreeGitStatus";
 
 const fileTreeCache = new WeakMap<ReadonlyArray<ProjectEntry>, ReadonlyArray<FileTreeNode>>();
 const FILE_TREE_INITIAL_RENDER_COUNT = 20;
 const FILE_TREE_RENDER_BATCH_SIZE = 12;
 const OPTIMISTIC_SELECTION_TIMEOUT_MS = 1_000;
+const GIT_STATUS_LABEL: Record<VcsWorkingTreeFileStatus, string> = {
+  added: "A",
+  deleted: "D",
+  modified: "M",
+  renamed: "R",
+  untracked: "U",
+};
+
+function gitStatusColor(status: VcsWorkingTreeFileStatus, dark: boolean): string {
+  switch (status) {
+    case "added":
+    case "untracked":
+      return dark ? "#00cab1" : "#16a994";
+    case "deleted":
+      return dark ? "#ff6762" : "#ff2e3f";
+    case "modified":
+      return dark ? "#08c0ef" : "#1ca1c7";
+    case "renamed":
+      return dark ? "#ffd452" : "#d5a910";
+  }
+}
 
 function cachedFileTree(entries: ReadonlyArray<ProjectEntry>): ReadonlyArray<FileTreeNode> {
   const cached = fileTreeCache.get(entries);
@@ -46,6 +75,9 @@ const FileTreeRow = memo(function FileTreeRow(props: {
   readonly selected: boolean;
   readonly expanded: boolean;
   readonly iconColor: string;
+  readonly gitStatus: VcsWorkingTreeFileStatus | null;
+  readonly containsGitChange: boolean;
+  readonly gitStatusColor: string | null;
   readonly onPressDirectory: (path: string) => void;
   readonly onPreviewFile?: (path: string) => void;
   readonly onPressFile: (path: string) => void;
@@ -55,7 +87,13 @@ const FileTreeRow = memo(function FileTreeRow(props: {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={node.path}
+      accessibilityLabel={
+        props.gitStatus !== null
+          ? `${node.path}, Git status: ${props.gitStatus}`
+          : props.containsGitChange
+            ? `${node.path}, contains Git changes`
+            : node.path
+      }
       onPressIn={() => {
         if (node.kind === "file") {
           props.onPreviewFile?.(node.path);
@@ -92,11 +130,31 @@ const FileTreeRow = memo(function FileTreeRow(props: {
             ? "font-t3-bold text-foreground"
             : "font-t3-medium text-foreground-secondary",
         )}
+        style={
+          !props.selected && props.gitStatus !== null && props.gitStatusColor !== null
+            ? { color: props.gitStatusColor }
+            : undefined
+        }
         numberOfLines={1}
       >
         {node.name}
       </Text>
-      {node.kind === "directory" ? (
+      {props.gitStatus !== null ? (
+        <Text
+          className="text-xs font-t3-bold"
+          style={{ color: props.gitStatusColor ?? props.iconColor }}
+        >
+          {GIT_STATUS_LABEL[props.gitStatus]}
+        </Text>
+      ) : props.containsGitChange ? (
+        <Text
+          accessibilityLabel="Contains Git changes"
+          className="text-base font-t3-bold"
+          style={{ color: props.gitStatusColor ?? props.iconColor, opacity: 0.65 }}
+        >
+          •
+        </Text>
+      ) : node.kind === "directory" ? (
         <Text className="text-2xs font-t3-medium text-foreground-tertiary">
           {node.children.length}
         </Text>
@@ -107,6 +165,7 @@ const FileTreeRow = memo(function FileTreeRow(props: {
 
 export function FileTreeBrowser(props: {
   readonly entries: ReadonlyArray<ProjectEntry>;
+  readonly gitStatus: VcsStatusResult | null;
   readonly error: string | null;
   readonly isPending: boolean;
   readonly searchQuery: string;
@@ -125,6 +184,7 @@ export function FileTreeBrowser(props: {
   // observed adjustedContentInset bottom (~102) seen in the native trace.
   const headerInset = NATIVE_LIQUID_GLASS_SUPPORTED ? insets.top + 44 : 0;
   const iconColor = String(useThemeColor("--color-icon-muted"));
+  const dark = useColorScheme() === "dark";
   const { onPreviewFile, onSelectFile, selectedPath: controlledSelectedPath } = props;
   const controlledSelectedPathRef = useRef(controlledSelectedPath);
   const pendingSelectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -135,6 +195,10 @@ export function FileTreeBrowser(props: {
       ? pendingSelection.path
       : controlledSelectedPath;
   const tree = useMemo(() => cachedFileTree(props.entries), [props.entries]);
+  const gitPresentation = useMemo(
+    () => buildFileTreeGitPresentation(props.gitStatus?.workingTree.files ?? []),
+    [props.gitStatus?.workingTree.files],
+  );
   const defaultExpanded = useMemo(() => defaultExpandedTreePaths(tree), [tree]);
   const visibleNodes = useMemo(
     () =>
@@ -210,18 +274,39 @@ export function FileTreeBrowser(props: {
     [onSelectFile],
   );
   const renderItem = useCallback(
-    ({ item }: { readonly item: VisibleFileTreeNode }) => (
-      <FileTreeRow
-        item={item}
-        selected={item.node.kind === "file" && item.node.path === selectedPath}
-        expanded={expandedPaths.has(item.node.path)}
-        iconColor={iconColor}
-        onPressDirectory={toggleDirectory}
-        onPreviewFile={onPreviewFile}
-        onPressFile={handleSelectFile}
-      />
-    ),
-    [expandedPaths, handleSelectFile, iconColor, onPreviewFile, selectedPath, toggleDirectory],
+    ({ item }: { readonly item: VisibleFileTreeNode }) => {
+      const status = gitPresentation.statusByPath.get(item.node.path) ?? null;
+      return (
+        <FileTreeRow
+          item={item}
+          selected={item.node.kind === "file" && item.node.path === selectedPath}
+          expanded={expandedPaths.has(item.node.path)}
+          iconColor={iconColor}
+          gitStatus={status}
+          containsGitChange={gitPresentation.directoriesWithChanges.has(item.node.path)}
+          gitStatusColor={
+            status === null
+              ? gitPresentation.directoriesWithChanges.has(item.node.path)
+                ? gitStatusColor("modified", dark)
+                : null
+              : gitStatusColor(status, dark)
+          }
+          onPressDirectory={toggleDirectory}
+          onPreviewFile={onPreviewFile}
+          onPressFile={handleSelectFile}
+        />
+      );
+    },
+    [
+      dark,
+      expandedPaths,
+      gitPresentation,
+      handleSelectFile,
+      iconColor,
+      onPreviewFile,
+      selectedPath,
+      toggleDirectory,
+    ],
   );
 
   if (props.error && props.entries.length === 0) {

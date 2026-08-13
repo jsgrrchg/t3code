@@ -30,10 +30,13 @@ import { cn } from "~/lib/utils";
 import { readLocalApi } from "~/localApi";
 import { T3_PIERRE_ICONS } from "~/pierre-icons";
 import { projectEnvironment } from "~/state/projects";
+import { useEnvironmentQuery } from "~/state/query";
 import { useProjectPathSearch } from "~/state/queries";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { vcsEnvironment } from "~/state/vcs";
 
 import { createFileTreeDragMentionController } from "./fileTreeDragMention";
+import { toPierreGitStatus } from "./fileTreeGitStatus";
 import { fileTreeDirectoryDropTarget, resolveFileTreeMove } from "./fileTreeMove";
 import { loadProjectDirectoryEntries } from "./projectFilesQueryState";
 
@@ -45,6 +48,8 @@ interface FileBrowserPanelProps {
   selectedPath: string | null;
   /** Bumped when the same path should be revealed again (e.g. re-opened from search). */
   selectedPathRevealId: number;
+  /** Changes when a completed turn may have added or removed workspace entries. */
+  refreshToken: string | null;
   onOpenFile: (relativePath: string) => void;
   onBeforeDeleteEntry: (relativePath: string, kind: ProjectEntry["kind"]) => Promise<void>;
   onEntryDeleted: (relativePath: string, kind: ProjectEntry["kind"]) => void;
@@ -164,6 +169,7 @@ export default function FileBrowserPanel({
   projectName,
   selectedPath,
   selectedPathRevealId,
+  refreshToken,
   onOpenFile,
   onBeforeDeleteEntry,
   onEntryDeleted,
@@ -184,6 +190,14 @@ export default function FileBrowserPanel({
   );
   const deleteEntry = useAtomCommand(projectEnvironment.deleteEntry);
   const moveEntry = useAtomCommand(projectEnvironment.moveEntry);
+  const refreshGitStatus = useAtomCommand(vcsEnvironment.refreshStatus, {
+    reportFailure: false,
+  });
+  const gitStatus = useEnvironmentQuery(vcsEnvironment.status({ environmentId, input: { cwd } }));
+  const pierreGitStatus = useMemo(
+    () => toPierreGitStatus(gitStatus.data?.workingTree.files ?? []),
+    [gitStatus.data?.workingTree.files],
+  );
   const [movePending, setMovePending] = useState(false);
   const [treeDragActive, setTreeDragActive] = useState(false);
   const [searchValue, setSearchValue] = useState("");
@@ -213,6 +227,7 @@ export default function FileBrowserPanel({
   const syncingSelectionRef = useRef(false);
   const treeSelectionPathRef = useRef<string | null>(null);
   const handledRevealRef = useRef<{ path: string; revealId: number } | null>(null);
+  const lastAutoRefreshTokenRef = useRef(refreshToken);
   const movePolicyRef = useRef({
     workspaceEntryMoveEnabled,
     pendingFileSurfaceIds,
@@ -483,6 +498,9 @@ export default function FileBrowserPanel({
     search: false,
     unsafeCSS: TREE_UNSAFE_CSS,
   });
+  useEffect(() => {
+    model.setGitStatus(pierreGitStatus);
+  }, [model, pierreGitStatus]);
   const loadDirectory = useCallback(
     (directory: string, refresh = false): Promise<void> => {
       if (!refresh && loadedDirectoriesRef.current.has(directory)) return Promise.resolve();
@@ -548,11 +566,23 @@ export default function FileBrowserPanel({
     setTreeRevision((revision) => revision + 1);
     void loadDirectory("", true);
   }, [loadDirectory, model]);
-  const refreshFiles = useCallback(() => {
+  const refreshListedFiles = useCallback(() => {
     refreshTree();
     if (searchActive) pathSearch.refresh();
   }, [pathSearch.refresh, refreshTree, searchActive]);
+  const refreshFiles = useCallback(() => {
+    refreshListedFiles();
+    void refreshGitStatus({ environmentId, input: { cwd } });
+  }, [cwd, environmentId, refreshGitStatus, refreshListedFiles]);
   refreshTreeRef.current = refreshFiles;
+
+  useEffect(() => {
+    if (refreshToken === null || lastAutoRefreshTokenRef.current === refreshToken) {
+      return;
+    }
+    lastAutoRefreshTokenRef.current = refreshToken;
+    refreshListedFiles();
+  }, [refreshListedFiles, refreshToken]);
 
   useEffect(() => {
     refreshTree();

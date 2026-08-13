@@ -1,6 +1,6 @@
 import type { EnvironmentId, ProjectListEntriesResult } from "@t3tools/contracts";
 import { SymbolView } from "../../components/AppSymbol";
-import { useCallback, useMemo, useState, type ComponentProps } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { Platform, Pressable, useColorScheme, View, type NativeSyntheticEvent } from "react-native";
 import {
   Screen,
@@ -15,6 +15,8 @@ import { nativeHeaderScrollEdgeEffects } from "../../native/StackHeader";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { projectEnvironment } from "../../state/projects";
 import { useEnvironmentQuery } from "../../state/query";
+import { useAtomCommand } from "../../state/use-atom-command";
+import { vcsEnvironment } from "../../state/vcs";
 import { FileTreeBrowser } from "./FileTreeBrowser";
 import { preloadWorkspaceFileContents } from "./preload-workspace-file";
 
@@ -40,6 +42,29 @@ export function ThreadFileNavigatorPane(props: {
     }),
   );
   const entriesData = entriesQuery.data as ProjectListEntriesResult | null;
+  const gitStatusQuery = useEnvironmentQuery(
+    vcsEnvironment.status({
+      environmentId: props.environmentId,
+      input: { cwd: props.cwd },
+    }),
+  );
+  const gitStatusFiles = gitStatusQuery.data?.workingTree.files ?? null;
+  const lastGitStatusFilesRef = useRef(gitStatusFiles);
+  useEffect(() => {
+    if (gitStatusFiles === null || lastGitStatusFilesRef.current === gitStatusFiles) return;
+    lastGitStatusFilesRef.current = gitStatusFiles;
+    entriesQuery.refresh();
+  }, [entriesQuery.refresh, gitStatusFiles]);
+  const refreshGitStatus = useAtomCommand(vcsEnvironment.refreshStatus, {
+    reportFailure: false,
+  });
+  const handleRefreshFiles = useCallback(() => {
+    entriesQuery.refresh();
+    void refreshGitStatus({
+      environmentId: props.environmentId,
+      input: { cwd: props.cwd },
+    });
+  }, [entriesQuery.refresh, props.cwd, props.environmentId, refreshGitStatus]);
   const handlePreviewFile = useCallback(
     (relativePath: string) => {
       preloadWorkspaceFileContents({
@@ -58,25 +83,26 @@ export function ThreadFileNavigatorPane(props: {
           accessibilityLabel: "Refresh files",
           icon: { name: "arrow.clockwise", type: "sfSymbol" as const },
           identifier: "thread-file-navigator-refresh",
-          onPress: entriesQuery.refresh,
+          onPress: handleRefreshFiles,
           sharesBackground: false,
           tintColor: foregroundColor,
           type: "button" as const,
           width: 44,
         },
       ] as ComponentProps<typeof ScreenStackHeaderConfig>["headerRightBarButtonItems"],
-    [entriesQuery.refresh, foregroundColor],
+    [foregroundColor, handleRefreshFiles],
   );
 
   const fileTree = (
     <FileTreeBrowser
       entries={entriesData?.entries ?? []}
+      gitStatus={gitStatusQuery.data}
       error={entriesQuery.error}
       isPending={entriesQuery.isPending}
       searchQuery={searchQuery}
       selectedPath={props.selectedPath}
       onPreviewFile={handlePreviewFile}
-      onRefresh={entriesQuery.refresh}
+      onRefresh={handleRefreshFiles}
       onSelectFile={props.onSelectFile}
     />
   );
@@ -150,7 +176,7 @@ export function ThreadFileNavigatorPane(props: {
             accessibilityLabel="Refresh files"
             hitSlop={8}
             className="h-8 w-8 items-center justify-center rounded-full active:bg-subtle"
-            onPress={entriesQuery.refresh}
+            onPress={handleRefreshFiles}
           >
             <SymbolView name="arrow.clockwise" size={14} tintColor={iconColor} type="monochrome" />
           </Pressable>

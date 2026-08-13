@@ -329,6 +329,15 @@ const VcsStatusChangeRequest = Schema.Struct({
   state: VcsStatusChangeRequestState,
 });
 
+export const VcsWorkingTreeFileStatus = Schema.Literals([
+  "added",
+  "deleted",
+  "modified",
+  "renamed",
+  "untracked",
+]);
+export type VcsWorkingTreeFileStatus = typeof VcsWorkingTreeFileStatus.Type;
+
 const VcsStatusLocalShape = {
   isRepo: Schema.Boolean,
   sourceControlProvider: Schema.optional(SourceControlProviderInfo),
@@ -340,6 +349,7 @@ const VcsStatusLocalShape = {
     files: Schema.Array(
       Schema.Struct({
         path: TrimmedNonEmptyStringSchema,
+        status: Schema.optional(VcsWorkingTreeFileStatus),
         insertions: NonNegativeInt,
         deletions: NonNegativeInt,
       }),

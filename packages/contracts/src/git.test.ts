@@ -21,6 +21,7 @@ import {
   GitRunStackedActionResult,
   GitRunStackedActionInput,
   GitResolvePullRequestResult,
+  VcsStatusLocalResult,
 } from "./git.ts";
 
 const SHA_1 = "0123456789abcdef0123456789abcdef01234567";
@@ -47,6 +48,7 @@ const decodePreparePullRequestThreadInput = Schema.decodeUnknownSync(
 const decodeRunStackedActionInput = Schema.decodeUnknownSync(GitRunStackedActionInput);
 const decodeRunStackedActionResult = Schema.decodeUnknownSync(GitRunStackedActionResult);
 const decodeResolvePullRequestResult = Schema.decodeUnknownSync(GitResolvePullRequestResult);
+const decodeVcsStatusLocalResult = Schema.decodeUnknownSync(VcsStatusLocalResult);
 
 describe("GitObjectId", () => {
   it("accepts complete SHA-1 and SHA-256 object IDs", () => {
@@ -61,6 +63,49 @@ describe("GitObjectId", () => {
       expect(() => decodeObjectId(value)).toThrow();
     },
   );
+});
+
+describe("VcsStatusLocalResult", () => {
+  const baseStatus = {
+    isRepo: true,
+    hasPrimaryRemote: false,
+    isDefaultRef: true,
+    refName: "main",
+    hasWorkingTreeChanges: true,
+    workingTree: { insertions: 1, deletions: 0 },
+  };
+
+  it("carries working-tree presentation status while accepting legacy files", () => {
+    const current = decodeVcsStatusLocalResult({
+      ...baseStatus,
+      workingTree: {
+        ...baseStatus.workingTree,
+        files: [{ path: "new.ts", status: "untracked", insertions: 1, deletions: 0 }],
+      },
+    });
+    const legacy = decodeVcsStatusLocalResult({
+      ...baseStatus,
+      workingTree: {
+        ...baseStatus.workingTree,
+        files: [{ path: "old.ts", insertions: 1, deletions: 0 }],
+      },
+    });
+
+    expect(current.workingTree.files[0]?.status).toBe("untracked");
+    expect(legacy.workingTree.files[0]?.status).toBeUndefined();
+  });
+
+  it("rejects unsupported working-tree presentation status", () => {
+    expect(() =>
+      decodeVcsStatusLocalResult({
+        ...baseStatus,
+        workingTree: {
+          ...baseStatus.workingTree,
+          files: [{ path: "copied.ts", status: "copied", insertions: 1, deletions: 0 }],
+        },
+      }),
+    ).toThrow();
+  });
 });
 
 describe("GitListHistoryInput", () => {

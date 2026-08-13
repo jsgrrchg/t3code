@@ -1351,6 +1351,7 @@ export default function FilePreviewPanel({
               projectName={projectName}
               selectedPath={relativePath}
               selectedPathRevealId={revealRequestId}
+              refreshToken={refreshToken}
               onOpenFile={onOpenFile}
               onBeforeDeleteEntry={handleBeforeDeleteEntry}
               onEntryDeleted={handleEntryDeleted}

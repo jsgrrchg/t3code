@@ -24,6 +24,8 @@ import { useThreadSelection } from "../../state/use-thread-selection";
 import { useSelectedThreadWorktree } from "../../state/use-selected-thread-worktree";
 import { useEnvironmentQuery } from "../../state/query";
 import { projectEnvironment } from "../../state/projects";
+import { useAtomCommand } from "../../state/use-atom-command";
+import { vcsEnvironment } from "../../state/vcs";
 import {
   useAdaptiveWorkspaceLayout,
   useAdaptiveWorkspacePaneRole,
@@ -259,6 +261,27 @@ export function ThreadFilesTreeScreen(props: ThreadFilesRouteScreenProps) {
       : null,
   );
   const entriesData = entriesQuery.data as ProjectListEntriesResult | null;
+  const gitStatusQuery = useEnvironmentQuery(
+    environmentId !== null && cwd !== null
+      ? vcsEnvironment.status({ environmentId, input: { cwd } })
+      : null,
+  );
+  const gitStatusFiles = gitStatusQuery.data?.workingTree.files ?? null;
+  const lastGitStatusFilesRef = useRef(gitStatusFiles);
+  useEffect(() => {
+    if (gitStatusFiles === null || lastGitStatusFilesRef.current === gitStatusFiles) return;
+    lastGitStatusFilesRef.current = gitStatusFiles;
+    entriesQuery.refresh();
+  }, [entriesQuery.refresh, gitStatusFiles]);
+  const refreshGitStatus = useAtomCommand(vcsEnvironment.refreshStatus, {
+    reportFailure: false,
+  });
+  const handleRefreshFiles = useCallback(() => {
+    entriesQuery.refresh();
+    if (environmentId !== null && cwd !== null) {
+      void refreshGitStatus({ environmentId, input: { cwd } });
+    }
+  }, [cwd, entriesQuery.refresh, environmentId, refreshGitStatus]);
   const handleReturnToThread = useCallback(() => {
     if (navigation.canGoBack()) {
       navigation.goBack();
@@ -405,7 +428,7 @@ export function ThreadFilesTreeScreen(props: ThreadFilesRouteScreenProps) {
               {
                 accessibilityLabel: "Refresh files",
                 icon: "arrow.clockwise",
-                onPress: entriesQuery.refresh,
+                onPress: handleRefreshFiles,
               },
             ]}
           />
@@ -447,12 +470,13 @@ export function ThreadFilesTreeScreen(props: ThreadFilesRouteScreenProps) {
       )}
       <FileTreeBrowser
         entries={entriesData?.entries ?? []}
+        gitStatus={gitStatusQuery.data}
         error={entriesQuery.error}
         isPending={entriesQuery.isPending}
         searchQuery={searchQuery}
         selectedPath={null}
         onPreviewFile={handlePreviewFile}
-        onRefresh={entriesQuery.refresh}
+        onRefresh={handleRefreshFiles}
         onSelectFile={handleSelectFile}
       />
       <FilesToolbarBottomFade />

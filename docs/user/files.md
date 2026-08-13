@@ -3,6 +3,11 @@
 The Files pane shows the files and folders in the current project. Files excluded by Git are hidden
 by default so generated dependencies, build output, and local caches do not overwhelm the tree.
 
+In a Git repository, the tree colors uncommitted files and labels them as added (`A`), modified
+(`M`), renamed (`R`), or untracked (`U`). A marker on a folder means it contains one or more
+changed files. The status updates when an agent turn finishes and when you refresh the Files pane.
+Web, desktop, and mobile use the same working-tree status reported by the connected environment.
+
 Use **Show ignored files** in the Files toolbar to include paths matched by `.gitignore`,
 `.git/info/exclude`, or Git's configured global excludes. Ignored text files can be opened and read
 like any other project file. Folders load as you open them, so even very large ignored dependency
