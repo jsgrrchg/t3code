@@ -387,6 +387,7 @@ import { useAssetUrls } from "../assets/assetUrls";
 import { useDispatchDesktopQueuedFollowUp } from "../desktopFollowUpQueue";
 import {
   type DesktopQueuedMessageFollowUp,
+  lastQueuedMessageFollowUp,
   queuedFollowUpsForThread,
   shouldQueueDesktopFollowUp,
   useDesktopFollowUpQueueStore,
@@ -1603,6 +1604,10 @@ function ChatViewContent(props: ChatViewProps) {
         : [],
     [activeThread, desktopQueueEntries],
   );
+  const lastActiveQueuedMessage = useMemo(
+    () => lastQueuedMessageFollowUp(activeQueuedFollowUps),
+    [activeQueuedFollowUps],
+  );
   const activeQueuePaused =
     activeThread?.latestTurn?.state === "interrupted" && activeQueuedFollowUps.length > 0;
   const dispatchDesktopQueuedFollowUp = useDispatchDesktopQueuedFollowUp();
@@ -2346,6 +2351,11 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
   const phase = derivePhase(activeThread?.session ?? null);
+  const canSteerLastQueuedFollowUp =
+    phase === "running" &&
+    lastActiveQueuedMessage !== null &&
+    desktopQueueDispatchingEntryId === null &&
+    desktopQueueEditingEntryId === null;
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const workLogEntries = useMemo(() => deriveWorkLogEntries(threadActivities), [threadActivities]);
   const turnPlans = useMemo(() => deriveTurnPlans(threadActivities), [threadActivities]);
@@ -5988,6 +5998,10 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [activeServerThread, dispatchDesktopQueuedFollowUp],
   );
+  const onSteerLastQueuedFollowUp = useCallback(() => {
+    if (!canSteerLastQueuedFollowUp || !lastActiveQueuedMessage) return;
+    void onSteerQueuedFollowUp(lastActiveQueuedMessage);
+  }, [canSteerLastQueuedFollowUp, lastActiveQueuedMessage, onSteerQueuedFollowUp]);
 
   const onRespondToApproval = useCallback(
     async (requestId: ApprovalRequestId, decision: ProviderApprovalDecision) => {
@@ -7056,9 +7070,15 @@ function ChatViewContent(props: ChatViewProps) {
                         <DesktopFollowUpQueuePanel
                           key={activeThreadKey}
                           entries={activeQueuedFollowUps}
+                          composerDraftTarget={composerDraftTarget}
                           paused={activeQueuePaused}
                           dispatchingEntryId={desktopQueueDispatchingEntryId}
                           editingEntryId={desktopQueueEditingEntryId}
+                          steerShortcutEntryId={
+                            canSteerLastQueuedFollowUp
+                              ? (lastActiveQueuedMessage?.id ?? null)
+                              : null
+                          }
                           onBeginEdit={onBeginQueuedFollowUpEdit}
                           onCancelEdit={onCancelQueuedFollowUpEdit}
                           onRemove={onRemoveQueuedFollowUp}
@@ -7126,6 +7146,8 @@ function ChatViewContent(props: ChatViewProps) {
                             composerTerminalContextsRef={composerTerminalContextsRef}
                             composerElementContextsRef={composerElementContextsRef}
                             onSend={onSend}
+                            canSteerLastQueuedFollowUp={canSteerLastQueuedFollowUp}
+                            onSteerLastQueuedFollowUp={onSteerLastQueuedFollowUp}
                             onInterrupt={onInterrupt}
                             onImplementPlanInNewThread={onImplementPlanInNewThread}
                             onRespondToApproval={onRespondToApproval}

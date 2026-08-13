@@ -15,6 +15,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import type { ScopedThreadRef } from "@t3tools/contracts";
 import {
   CheckIcon,
   CornerDownRightIcon,
@@ -31,8 +32,18 @@ import type {
   DesktopQueuedFollowUp,
   DesktopQueuedMessageFollowUp,
 } from "../../desktopFollowUpQueueStore";
-import { cn } from "../../lib/utils";
+import {
+  type DraftId,
+  composerDraftHasUserContent,
+  useComposerDraftStore,
+} from "../../composerDraftStore";
+import { cn, isMacPlatform } from "../../lib/utils";
+import {
+  isPrimaryShortcutModifierOnly,
+  useShortcutModifierState,
+} from "../../shortcutModifierState";
 import { Button } from "../ui/button";
+import { Kbd, KbdGroup } from "../ui/kbd";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 function promptPreview(text: string): string {
@@ -77,10 +88,39 @@ function SortableQueueRow(props: {
   return props.children(useSortable({ id: props.id, disabled: props.disabled }));
 }
 
+function SteerShortcutBadge(props: { composerDraftTarget: ScopedThreadRef | DraftId }) {
+  const modifiers = useShortcutModifierState();
+  const composerHasUserContent = useComposerDraftStore((store) =>
+    composerDraftHasUserContent(store.getComposerDraft(props.composerDraftTarget)),
+  );
+  const platform = navigator.platform;
+  if (composerHasUserContent || !isPrimaryShortcutModifierOnly(modifiers, platform)) return null;
+
+  const keys = isMacPlatform(platform) ? ["⌘", "↵"] : ["Ctrl", "Enter"];
+  return (
+    <span
+      aria-hidden
+      className="pointer-events-none absolute right-1.5 top-1/2 z-10 inline-flex h-6 -translate-y-1/2 items-center gap-1.5 rounded-full border border-border/80 bg-background/95 px-1.5 text-[10px] font-medium text-foreground shadow-sm"
+    >
+      <CornerDownRightIcon className="size-3 text-muted-foreground" />
+      Steer
+      <KbdGroup className="gap-0.5">
+        {keys.map((key) => (
+          <Kbd key={key} className="h-4 min-w-4 rounded-sm px-1 text-[9px]">
+            {key}
+          </Kbd>
+        ))}
+      </KbdGroup>
+    </span>
+  );
+}
+
 export const DesktopFollowUpQueuePanel = memo(function DesktopFollowUpQueuePanel({
   entries,
+  composerDraftTarget,
   dispatchingEntryId,
   editingEntryId,
+  steerShortcutEntryId,
   paused,
   onBeginEdit,
   onCancelEdit,
@@ -90,8 +130,10 @@ export const DesktopFollowUpQueuePanel = memo(function DesktopFollowUpQueuePanel
   onSteer,
 }: {
   readonly entries: ReadonlyArray<DesktopQueuedFollowUp>;
+  readonly composerDraftTarget: ScopedThreadRef | DraftId;
   readonly dispatchingEntryId: string | null;
   readonly editingEntryId: string | null;
+  readonly steerShortcutEntryId: string | null;
   readonly paused: boolean;
   readonly onBeginEdit: (entry: DesktopQueuedMessageFollowUp) => boolean;
   readonly onCancelEdit: (entry: DesktopQueuedMessageFollowUp) => void;
@@ -195,7 +237,7 @@ export const DesktopFollowUpQueuePanel = memo(function DesktopFollowUpQueuePanel
                         transition: sortable.transition,
                       }}
                       className={cn(
-                        "flex min-h-8 min-w-0 items-center gap-1.5 rounded-lg px-2 text-xs",
+                        "relative flex min-h-8 min-w-0 items-center gap-1.5 rounded-lg px-2 text-xs",
                         "bg-muted/30 text-muted-foreground",
                         sortable.isDragging && "z-10 opacity-80",
                         dispatching && "opacity-65",
@@ -347,6 +389,9 @@ export const DesktopFollowUpQueuePanel = memo(function DesktopFollowUpQueuePanel
                           Runs next
                         </span>
                       )}
+                      {entry.id === steerShortcutEntryId ? (
+                        <SteerShortcutBadge composerDraftTarget={composerDraftTarget} />
+                      ) : null}
                     </div>
                   )}
                 </SortableQueueRow>

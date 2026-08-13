@@ -331,6 +331,16 @@ export function queuedFollowUpsForThread(
   );
 }
 
+export function lastQueuedMessageFollowUp(
+  entries: ReadonlyArray<DesktopQueuedFollowUp>,
+): DesktopQueuedMessageFollowUp | null {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry?.kind === "message") return entry;
+  }
+  return null;
+}
+
 /** After an interruption, the next manual message starts a new turn instead of joining the queue. */
 export function shouldQueueDesktopFollowUp(input: {
   readonly desktop: boolean;

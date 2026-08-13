@@ -1,10 +1,22 @@
 import { useEffect, useState } from "react";
 
+import { isMacPlatform } from "./lib/utils";
+
 export interface ShortcutModifierState {
   metaKey: boolean;
   ctrlKey: boolean;
   altKey: boolean;
   shiftKey: boolean;
+}
+
+export function isPrimaryShortcutModifierOnly(
+  state: ShortcutModifierState,
+  platform: string,
+): boolean {
+  if (state.altKey || state.shiftKey) return false;
+  return isMacPlatform(platform)
+    ? state.metaKey && !state.ctrlKey
+    : state.ctrlKey && !state.metaKey;
 }
 
 const EMPTY_SHORTCUT_MODIFIER_STATE: ShortcutModifierState = {

@@ -43,6 +43,7 @@ import {
 } from "../../composer-logic";
 import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
 import { isElectron } from "../../env";
+import { isPrimaryShortcutModifierOnly } from "../../shortcutModifierState";
 import {
   dataTransferHasComposerMention,
   makeComposerMentionDragHandlers,
@@ -51,6 +52,7 @@ import {
   type ComposerImageAttachment,
   type DraftId,
   type PersistedComposerImageAttachment,
+  composerDraftHasUserContent,
   hydrateImagesFromPersisted,
   useComposerDraftStore,
   useComposerThreadDraft,
@@ -570,6 +572,8 @@ export interface ChatComposerProps {
 
   // Callbacks
   onSend: (e?: { preventDefault: () => void }) => void;
+  canSteerLastQueuedFollowUp: boolean;
+  onSteerLastQueuedFollowUp: () => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
   onRespondToApproval: (
@@ -652,6 +656,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerTerminalContextsRef,
     composerElementContextsRef,
     onSend,
+    canSteerLastQueuedFollowUp,
+    onSteerLastQueuedFollowUp,
     onInterrupt,
     onImplementPlanInNewThread,
     onRespondToApproval,
@@ -1940,6 +1946,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         onSelectComposerItem(selectedItem);
         return true;
       }
+    }
+    if (
+      key === "Enter" &&
+      canSteerLastQueuedFollowUp &&
+      activePendingProgress === null &&
+      !isComposerApprovalState &&
+      !composerDraftHasUserContent(composerDraft) &&
+      isPrimaryShortcutModifierOnly(event, navigator.platform)
+    ) {
+      onSteerLastQueuedFollowUp();
+      return true;
     }
     if (
       key === "Enter" &&

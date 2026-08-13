@@ -16,6 +16,7 @@ import {
   type DesktopQueuedMessageFollowUp,
   type DesktopQueuedProviderAction,
   queuedFollowUpsForThread,
+  lastQueuedMessageFollowUp,
   reloadDesktopFollowUpQueueForTest,
   shouldQueueDesktopFollowUp,
   useDesktopFollowUpQueueStore,
@@ -56,6 +57,13 @@ function queuedProviderAction(index: number, threadId = "thread-1"): DesktopQueu
 }
 
 describe("desktop follow-up queue", () => {
+  it("selects the last queued message without targeting provider actions", () => {
+    const first = queuedFollowUp(1);
+    const last = queuedFollowUp(2);
+    expect(lastQueuedMessageFollowUp([first, last, queuedProviderAction(1)])).toBe(last);
+    expect(lastQueuedMessageFollowUp([queuedProviderAction(1)])).toBeNull();
+  });
+
   beforeEach(() => {
     writeDesktopFollowUpQueueStorageForTest("");
   });

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   areShortcutModifierStatesEqual,
+  isPrimaryShortcutModifierOnly,
   shortcutModifierStateAfterKeyboardEvent,
   type ShortcutModifierState,
 } from "./shortcutModifierState";
@@ -26,6 +27,33 @@ function keyboardEventLike(type: "keydown" | "keyup", init: Partial<KeyboardEven
 }
 
 describe("shortcutModifierState", () => {
+  it("recognizes only the platform primary modifier", () => {
+    expect(
+      isPrimaryShortcutModifierOnly(
+        { metaKey: true, ctrlKey: false, altKey: false, shiftKey: false },
+        "MacIntel",
+      ),
+    ).toBe(true);
+    expect(
+      isPrimaryShortcutModifierOnly(
+        { metaKey: false, ctrlKey: true, altKey: false, shiftKey: false },
+        "Win32",
+      ),
+    ).toBe(true);
+    expect(
+      isPrimaryShortcutModifierOnly(
+        { metaKey: true, ctrlKey: false, altKey: false, shiftKey: true },
+        "MacIntel",
+      ),
+    ).toBe(false);
+    expect(
+      isPrimaryShortcutModifierOnly(
+        { metaKey: false, ctrlKey: true, altKey: true, shiftKey: false },
+        "Linux x86_64",
+      ),
+    ).toBe(false);
+  });
+
   it("compares modifier states by value", () => {
     expect(
       areShortcutModifierStatesEqual(
