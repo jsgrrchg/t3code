@@ -4,6 +4,7 @@ import type {
   EnvironmentId,
   PullRequestDetailView,
   PullRequestDiffSide,
+  PullRequestOmittedFileStat,
   PullRequestRef,
   PullRequestReviewThread,
 } from "@t3tools/contracts";
@@ -35,6 +36,8 @@ import { useClientSettings } from "~/hooks/useSettings";
 import { useTheme } from "~/hooks/useTheme";
 import { areAllDiffFilesCollapsed } from "~/lib/diffCollapse";
 import { pullRequestFindingKey, type PullRequestFinding } from "./pullRequestDetail.logic";
+import { canEditPullRequestComment } from "./pullRequestEditing.logic";
+import { orderDiffFiles } from "./pullRequestFileOrder.logic";
 import {
   buildFileDiffRenderKey,
   fnv1a32,
@@ -103,8 +106,37 @@ type ReviewAnnotation = DiffLineAnnotation<ReviewAnnotationGroup>;
 /** Commits per press of "Show more" in the scope menu. */
 const COMMIT_PAGE_SIZE = 10;
 
+/**
+ * The viewer's own per-file counts are hidden and drawn from this side of its shadow root
+ * instead: its counts are hunk sums, and a file whose hunks the host withheld would read as
+ * an empty change rather than as the counts the host did report.
+ */
+const REPLACE_FILE_COUNTS_CSS = `
+[data-diffs-header] [data-additions-count],
+[data-diffs-header] [data-deletions-count] {
+  display: none !important;
+}`;
+
 /** Nothing loaded yet, as one identity, so the memos below do not see a new array every render. */
 const NO_SLICES: ReadonlyArray<PullRequestDiffSlice> = [];
+
+function sameOmittedFileStats(
+  existing: ReadonlyArray<PullRequestOmittedFileStat>,
+  next: ReadonlyArray<PullRequestOmittedFileStat>,
+): boolean {
+  return (
+    existing.length === next.length &&
+    existing.every((file, index) => {
+      const refreshed = next[index];
+      return (
+        refreshed !== undefined &&
+        refreshed.path === file.path &&
+        refreshed.additions === file.additions &&
+        refreshed.deletions === file.deletions
+      );
+    })
+  );
+}
 
 /** A group while it is still gathering what belongs on its line. */
 interface MutableAnnotationGroup {
@@ -162,6 +194,7 @@ export function PullRequestCodeTab({
   selectedCommitOid,
   onSelectedCommitChange,
   pendingFinding,
+  fixFindingLabel = "Fix in a thread",
   onFixFinding,
   onAskAboutSelection,
   onRefresh,
@@ -176,6 +209,7 @@ export function PullRequestCodeTab({
   onSelectedCommitChange: (oid: string | null) => void;
   /** The hand-off currently preparing, if any, so only the finding it belongs to says so. */
   pendingFinding?: string | null;
+  fixFindingLabel?: string;
   onFixFinding?: (finding: PullRequestFinding) => void;
   /** Absent where a selection has no agent to go to, which takes the Ask button off the box. */
   onAskAboutSelection?: (input: PullRequestAskSelectionInput) => void;
@@ -233,7 +267,10 @@ export function PullRequestCodeTab({
   // Which pull request the slices belong to travels with them, so a render taken before the
   // reset below cannot read the previous one's slices — or send its cursor to the host.
   const [sliceState, setSliceState] = useState(() =>
-    createPagedDiffState(scopeKey, rememberedCodeView?.slices ?? NO_SLICES),
+    createPagedDiffState<Omit<PullRequestDiffSlice, "cursor">>(
+      scopeKey,
+      rememberedCodeView?.slices ?? NO_SLICES,
+    ),
   );
   const parseCache = useRef(new Map<string, RenderablePatch>());
   const scrollRootRef = useRef<HTMLDivElement>(null);
@@ -249,7 +286,12 @@ export function PullRequestCodeTab({
     setFoldOverrideState({ key: scopeKey, value: rememberedCodeView?.foldOverride ?? null });
     setVisibleCommitCount(COMMIT_PAGE_SIZE);
     setOrphansOpen(false);
-    setSliceState(createPagedDiffState(scopeKey, rememberedCodeView?.slices ?? NO_SLICES));
+    setSliceState(
+      createPagedDiffState<Omit<PullRequestDiffSlice, "cursor">>(
+        scopeKey,
+        rememberedCodeView?.slices ?? NO_SLICES,
+      ),
+    );
     parseCache.current.clear();
   }, [rememberedCodeView, scopeKey]);
 
@@ -274,7 +316,18 @@ export function PullRequestCodeTab({
   useEffect(() => {
     const data = diffQuery.data;
     if (data === null) return;
-    setSliceState((previous) => receiveDiffSlice(previous, { scopeKey, cursor, result: data }));
+    setSliceState((previous) =>
+      receiveDiffSlice(previous, {
+        scopeKey,
+        cursor,
+        result: { ...data, omittedFileStats: data.omittedFileStats ?? [] },
+        areResultsEqual: (existing, next) =>
+          existing.patch === next.patch &&
+          existing.truncated === next.truncated &&
+          existing.nextCursor === next.nextCursor &&
+          sameOmittedFileStats(existing.omittedFileStats ?? [], next.omittedFileStats ?? []),
+      }),
+    );
   }, [cursor, diffQuery.data, scopeKey]);
   useEffect(() => {
     rememberPullRequestCodeViewState(viewStateKey, codeScopeKey, {
@@ -295,7 +348,7 @@ export function PullRequestCodeTab({
   useEffect(() => {
     if (appliedRefreshToken.current === refreshToken) return;
     appliedRefreshToken.current = refreshToken;
-    setSliceState(createPagedDiffState(scopeKey));
+    setSliceState(createPagedDiffState<Omit<PullRequestDiffSlice, "cursor">>(scopeKey, NO_SLICES));
     refreshFirstDiffPage();
   }, [refreshToken, scopeKey, refreshFirstDiffPage]);
   const reviewKey = referenceKey;
@@ -306,6 +359,9 @@ export function PullRequestCodeTab({
     reportFailure: false,
   });
   const setThreadResolution = useAtomCommand(pullRequestEnvironment.setThreadResolution, {
+    reportFailure: false,
+  });
+  const updateComment = useAtomCommand(pullRequestEnvironment.updateComment, {
     reportFailure: false,
   });
   const getDiffFileContents = useAtomCommand(pullRequestEnvironment.diffFileContents);
@@ -355,16 +411,12 @@ export function PullRequestCodeTab({
       }),
     [loadedSlices, resolvedTheme, scopeKey],
   );
-  // Sorted within a slice rather than across them: sorting the accumulated set would let a late
+  // Ordered within a slice rather than across them: ordering the accumulated set would let a late
   // slice push a file the reader is part way through further down the page.
   const files = useMemo(
     () =>
       parsedSlices.flatMap((parsed) =>
-        parsed?.kind === "files"
-          ? parsed.files.toSorted((left, right) =>
-              resolveFileDiffPath(left).localeCompare(resolveFileDiffPath(right)),
-            )
-          : [],
+        parsed?.kind === "files" ? orderDiffFiles(parsed.files) : [],
       ),
     [parsedSlices],
   );
@@ -467,7 +519,13 @@ export function PullRequestCodeTab({
                         }:${thread.comments
                           .map(
                             (comment) =>
-                              `${comment.id}:${comment.author?.login ?? ""}:${comment.createdAt}:${comment.body}`,
+                              `${comment.id}:${comment.author?.login ?? ""}:${comment.createdAt}:${comment.body}:${(
+                                comment.reactions ?? []
+                              )
+                                .map(
+                                  (r) => `${r.content}:${r.count}:${r.viewerHasReacted ? "v" : ""}`,
+                                )
+                                .join(",")}`,
                           )
                           .join(";")}`,
                     )
@@ -489,6 +547,15 @@ export function PullRequestCodeTab({
     ],
   );
   const lineStat = useMemo(() => getDiffLineStat(files), [files]);
+  const omittedFileStats = useMemo(
+    () =>
+      new Map(
+        loadedSlices.flatMap((slice) =>
+          (slice.omittedFileStats ?? []).map((file) => [file.path, file] as const),
+        ),
+      ),
+    [loadedSlices],
+  );
   const fileKeys = useMemo(() => items.map((item) => item.id), [items]);
   const collapsedFileKeys = useMemo(
     () => new Set(items.filter((item) => item.collapsed === true).map((item) => item.id)),
@@ -679,6 +746,30 @@ export function PullRequestCodeTab({
     [toggleFile],
   );
 
+  const renderHeaderMetadata = useCallback(
+    (item: CodeViewItem<ReviewAnnotationGroup>) => {
+      if (item.type !== "diff") return null;
+      let additions = 0;
+      let deletions = 0;
+      for (const hunk of item.fileDiff.hunks) {
+        additions += hunk.additionLines;
+        deletions += hunk.deletionLines;
+      }
+      if (additions === 0 && deletions === 0) {
+        const withheld = omittedFileStats.get(resolveFileDiffPath(item.fileDiff));
+        if (withheld) ({ additions, deletions } = withheld);
+      }
+      return (
+        <PullRequestDiffStat
+          additions={additions}
+          deletions={deletions}
+          className="font-mono text-[11px]"
+        />
+      );
+    },
+    [omittedFileStats],
+  );
+
   const diffViewOptions = useMemo(
     () => ({
       diffStyle: diffRenderMode === "split" ? ("split" as const) : ("unified" as const),
@@ -729,19 +820,38 @@ export function PullRequestCodeTab({
   const renderThreadCard = useCallback(
     (thread: PullRequestReviewThread) => (
       <ReviewThreadCard
-        key={thread.id}
+        // Named with the pull request too: a thread's id is the host's own, and two pull requests
+        // can hand out the same one — which would leave one card's open editor standing over the
+        // other's conversation.
+        key={`${reference.projectId}#${reference.number}:${thread.id}`}
         thread={thread}
         workspaceRoot={detail.workspaceRoot}
         canReply={review.reply}
         canResolve={review.resolve}
+        canReact={detail.capabilities.reactions === true}
+        environmentId={environmentId}
+        reference={reference}
         pending={threadPending}
         fixPending={pendingFinding === pullRequestFindingKey({ kind: "thread", thread })}
+        fixLabel={fixFindingLabel}
         {...(onFixFinding ? { onFix: () => onFixFinding({ kind: "thread", thread }) } : {})}
         onReply={(body) =>
           runThreadCommand("Reply could not be posted", () =>
             replyToThread({
               environmentId,
               input: { ...reference, threadId: thread.id, body },
+            }),
+          )
+        }
+        // A conversation on a line is made of review comments, whatever the host filed them as.
+        canEditComment={(comment) =>
+          canEditPullRequestComment(detail, { author: comment.author, kind: "review-comment" })
+        }
+        onEditComment={(commentId, body) =>
+          runThreadCommand("The comment could not be saved", () =>
+            updateComment({
+              environmentId,
+              input: { ...reference, commentId, kind: "review-comment", body },
             }),
           )
         }
@@ -753,11 +863,14 @@ export function PullRequestCodeTab({
             }),
           )
         }
+        onReacted={onRefresh}
       />
     ),
     [
-      detail.workspaceRoot,
+      detail,
       environmentId,
+      fixFindingLabel,
+      onRefresh,
       onFixFinding,
       pendingFinding,
       reference,
@@ -767,12 +880,13 @@ export function PullRequestCodeTab({
       runThreadCommand,
       setThreadResolution,
       threadPending,
+      updateComment,
     ],
   );
 
   const renderAnnotation = useCallback(
     (annotation: ReviewAnnotation) => (
-      <div className="py-1">
+      <div className="py-1 font-sans text-foreground">
         {annotation.metadata.threads.map(renderThreadCard)}
         {annotation.metadata.pending.map((comment) => (
           <PendingReviewCommentCard
@@ -1252,7 +1366,9 @@ export function PullRequestCodeTab({
             // is running out of diff.
             renderCodeViewFooter={renderCodeViewFooter}
             renderHeaderPrefix={renderHeaderPrefix}
+            renderHeaderMetadata={renderHeaderMetadata}
             renderAnnotation={renderAnnotation}
+            unsafeCSSExtra={REPLACE_FILE_COUNTS_CSS}
           />
           {reviewOverlay}
         </div>

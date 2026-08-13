@@ -1,13 +1,8 @@
 import type { DiffSliceResult } from "@t3tools/contracts";
 
-export interface LoadedDiffSlice<
-  Result extends DiffSliceResult = DiffSliceResult,
-> extends DiffSliceResult {
+export type LoadedDiffSlice<Result extends DiffSliceResult = DiffSliceResult> = Result & {
   readonly cursor: string | null;
-  readonly patch: Result["patch"];
-  readonly truncated: Result["truncated"];
-  readonly nextCursor: Result["nextCursor"];
-}
+};
 
 export interface PagedDiffState<Result extends DiffSliceResult = DiffSliceResult> {
   readonly scopeKey: string;
@@ -17,16 +12,16 @@ export interface PagedDiffState<Result extends DiffSliceResult = DiffSliceResult
 
 export function createPagedDiffState<Result extends DiffSliceResult = DiffSliceResult>(
   scopeKey: string,
-  slices: ReadonlyArray<LoadedDiffSlice<Result>> = [],
+  slices: ReadonlyArray<LoadedDiffSlice<NoInfer<Result>>> = [],
 ): PagedDiffState<Result> {
   return { scopeKey, requestCursor: null, slices };
 }
 
 export function resetPagedDiffState<Result extends DiffSliceResult = DiffSliceResult>(
   scopeKey: string,
-  slices: ReadonlyArray<LoadedDiffSlice<Result>> = [],
+  slices: ReadonlyArray<LoadedDiffSlice<NoInfer<Result>>> = [],
 ): PagedDiffState<Result> {
-  return createPagedDiffState(scopeKey, slices);
+  return createPagedDiffState<Result>(scopeKey, slices);
 }
 
 export function selectPagedDiffSlices<Result extends DiffSliceResult>(
@@ -65,6 +60,7 @@ export function receiveDiffSlice<Result extends DiffSliceResult>(
     readonly scopeKey: string;
     readonly cursor: string | null;
     readonly result: Result;
+    readonly areResultsEqual?: (existing: Result, next: Result) => boolean;
   },
 ): PagedDiffState<Result> {
   if (state.scopeKey !== input.scopeKey) return state;
@@ -78,12 +74,13 @@ export function receiveDiffSlice<Result extends DiffSliceResult>(
   }
 
   const existing = state.slices[index];
-  if (
+  const unchanged =
     existing !== undefined &&
-    existing.patch === next.patch &&
-    existing.truncated === next.truncated &&
-    existing.nextCursor === next.nextCursor
-  ) {
+    (input.areResultsEqual?.(existing, next) ??
+      (existing.patch === next.patch &&
+        existing.truncated === next.truncated &&
+        existing.nextCursor === next.nextCursor));
+  if (unchanged) {
     return state;
   }
 

@@ -1,4 +1,4 @@
-import type { EnvironmentId, PullRequestRef } from "@t3tools/contracts";
+import type { EnvironmentId, PullRequestDiffResult, PullRequestRef } from "@t3tools/contracts";
 import type { LoadedDiffSlice } from "@t3tools/client-runtime/state/paged-diff";
 
 import type { DiffFoldOverride } from "./pullRequestDiff.logic";
@@ -10,7 +10,7 @@ export interface PullRequestScrollPosition {
   readonly left: number;
 }
 
-export type PullRequestDiffSlice = LoadedDiffSlice;
+export type PullRequestDiffSlice = LoadedDiffSlice<PullRequestDiffResult>;
 
 export interface PullRequestCodeViewState {
   readonly foldOverride: DiffFoldOverride;

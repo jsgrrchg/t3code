@@ -40,6 +40,20 @@ describe("paged diff state", () => {
     expect(replaced.slices).toEqual([{ cursor: null, ...first, patch: "refreshed" }]);
   });
 
+  it("uses a result-specific comparison for extended slice data", () => {
+    const result = { ...first, stats: [{ path: "a.ts", additions: 1 }] };
+    const state = createPagedDiffState<typeof result>("scope", [{ cursor: null, ...result }]);
+    const refreshed = receiveDiffSlice(state, {
+      scopeKey: "scope",
+      cursor: null,
+      result: { ...result, stats: [{ path: "a.ts", additions: 2 }] },
+      areResultsEqual: (existing, next) =>
+        existing.patch === next.patch && existing.stats[0]?.additions === next.stats[0]?.additions,
+    });
+
+    expect(refreshed.slices[0]?.stats[0]?.additions).toBe(2);
+  });
+
   it("ignores a response from an old scope", () => {
     const state = createPagedDiffState("current", [{ cursor: null, ...first }]);
     expect(
