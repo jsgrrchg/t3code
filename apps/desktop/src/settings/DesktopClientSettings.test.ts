@@ -23,6 +23,7 @@ const clientSettings: ClientSettings = {
   composerSendBehavior: "mod-enter",
   dismissedProviderUpdateNotificationKeys: [],
   diffIgnoreWhitespace: true,
+  showChangedFilesInChat: false,
   environmentIdentificationMode: "artwork",
   favorites: [],
   fontFamilyCode: "",

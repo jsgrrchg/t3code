@@ -33,6 +33,15 @@ describe("ClientSettings word wrap", () => {
   });
 });
 
+describe("ClientSettings changed files in chat", () => {
+  it("defaults the desktop-only presentation off and accepts an explicit opt-in", () => {
+    expect(decodeClientSettings({}).showChangedFilesInChat).toBe(false);
+    expect(decodeClientSettingsPatch({ showChangedFilesInChat: true }).showChangedFilesInChat).toBe(
+      true,
+    );
+  });
+});
+
 describe("ClientSettings glass opacity", () => {
   it("defaults to a readable translucent surface", () => {
     expect(decodeClientSettings({}).glassOpacity).toBe(80);

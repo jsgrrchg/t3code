@@ -75,6 +75,11 @@ an individual file cannot be shown inline, such as an unusually large or binary 
 continue loading normally. When connected to an older T3 Code server, the app retains the former
 bounded preview and says explicitly if that legacy preview was truncated.
 
+In the Desktop app, changed-file summaries below assistant messages are hidden by default. Turn
+diffs continue to be captured and remain available in the Diff panel. To show those summaries in
+chat, enable **Settings → Source Control → Show changed files in chat**. This is a local Desktop
+preference; it does not change what web or mobile clients display.
+
 ### Know Your Setup at a Glance
 
 The **Source Control settings** page shows you exactly what's connected:

@@ -11,13 +11,20 @@ import type {
   VcsDriverKind,
   VcsDiscoveryItem,
 } from "@t3tools/contracts";
+import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import {
   getBackgroundActivityBaseProfile,
   getBackgroundActivityPresetSettings,
   resolveServerBackgroundActivitySettings,
 } from "@t3tools/shared/backgroundActivitySettings";
 
-import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
+import {
+  useClientSettings,
+  usePrimarySettings,
+  useUpdateClientSettings,
+  useUpdatePrimarySettings,
+} from "../../hooks/useSettings";
+import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
 import { useEnvironments, usePrimaryEnvironment } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
@@ -54,7 +61,12 @@ import {
 } from "../Icons";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SourceControlWritingSettingsSection } from "./SourceControlWritingSettings";
-import { SettingResetButton, SettingsPageContainer, SettingsSection } from "./settingsLayout";
+import {
+  SettingResetButton,
+  SettingsPageContainer,
+  SettingsRow,
+  SettingsSection,
+} from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 
 const EMPTY_DISCOVERY_RESULT: SourceControlDiscoveryResult = {
@@ -507,6 +519,43 @@ function EmptySourceControlDiscovery({
   );
 }
 
+function DesktopChatDiffSettings() {
+  const showChangedFilesInChat = useClientSettings((settings) => settings.showChangedFilesInChat);
+  const updateClientSettings = useUpdateClientSettings();
+
+  if (!isElectron) return null;
+
+  return (
+    <SettingsSection title="Desktop">
+      <SettingsRow
+        {...searchableSetting("changed-files-in-chat")}
+        description="Show a changed-files summary below assistant messages in this desktop app. Turn diffs remain available in the Diff panel."
+        resetAction={
+          showChangedFilesInChat !== DEFAULT_CLIENT_SETTINGS.showChangedFilesInChat ? (
+            <SettingResetButton
+              label="changed files in chat"
+              onClick={() =>
+                updateClientSettings({
+                  showChangedFilesInChat: DEFAULT_CLIENT_SETTINGS.showChangedFilesInChat,
+                })
+              }
+            />
+          ) : null
+        }
+        control={
+          <Switch
+            checked={showChangedFilesInChat}
+            onCheckedChange={(checked) =>
+              updateClientSettings({ showChangedFilesInChat: Boolean(checked) })
+            }
+            aria-label="Show changed files in chat"
+          />
+        }
+      />
+    </SettingsSection>
+  );
+}
+
 export function SourceControlSettingsPanel() {
   const { environments } = useEnvironments();
   const primaryEnvironment = usePrimaryEnvironment();
@@ -554,6 +603,7 @@ export function SourceControlSettingsPanel() {
 
   return (
     <SettingsPageContainer>
+      <DesktopChatDiffSettings />
       {isInitialScanPending ? (
         <>
           <SourceControlSectionSkeleton title="Version Control" headerAction={scanButton} />

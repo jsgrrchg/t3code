@@ -12,6 +12,7 @@ export interface SettingsSearchItem {
   readonly title: string;
   readonly to: SettingsPath;
   readonly targetId?: string;
+  readonly desktopOnly?: boolean;
 }
 
 /**
@@ -200,6 +201,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/source-control",
   },
   {
+    id: "changed-files-in-chat",
+    title: "Show changed files in chat",
+    to: "/settings/source-control",
+    desktopOnly: true,
+  },
+  {
     id: "remote-environments",
     title: "Remote environments",
     to: "/settings/connections",
@@ -247,4 +254,11 @@ export function searchSettings(
   if (normalizedQuery.length === 0) return [];
 
   return items.filter((item) => normalizeSearchText(item.title).includes(normalizedQuery));
+}
+
+export function settingsSearchItemsForPlatform(
+  desktop: boolean,
+  items: ReadonlyArray<SettingsSearchItem> = SETTINGS_SEARCH_ITEMS,
+): ReadonlyArray<SettingsSearchItem> {
+  return desktop ? items : items.filter((item) => item.desktopOnly !== true);
 }

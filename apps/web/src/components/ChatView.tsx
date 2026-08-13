@@ -204,6 +204,7 @@ import { newCommandId, newDraftId, newMessageId, newThreadId } from "~/lib/utils
 import { useBrowserHistoryStore } from "~/browserHistoryStore";
 import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
 import { NO_PROVIDER_MODEL_SELECTION } from "../providerInstances";
+import { resolveShowChangedFilesInChat } from "../chatChangedFilesVisibility";
 import {
   useClientSettings,
   useClientSettingsHydrated,
@@ -1367,6 +1368,10 @@ function ChatViewContent(props: ChatViewProps) {
   }, [routeKind, routeThreadRef, routeThreadState]);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
   const settings = useEnvironmentSettings(environmentId);
+  const showChangedFilesInChat = resolveShowChangedFilesInChat({
+    desktop: isElectron,
+    setting: settings.showChangedFilesInChat,
+  });
   // New-thread defaults live in the primary environment's settings.json (the
   // settings UI never writes to remote environments), so read them from the
   // primary server rather than the thread's environment.
@@ -6967,6 +6972,7 @@ function ChatViewContent(props: ChatViewProps) {
                     : null
                 }
                 turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
+                showChangedFilesInChat={showChangedFilesInChat}
                 activeThreadEnvironmentId={activeThread.environmentId}
                 routeThreadKey={routeThreadKey}
                 markdownThreadRef={panelOwnerThreadRef}

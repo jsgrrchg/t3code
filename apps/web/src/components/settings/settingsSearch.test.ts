@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   searchableSetting,
   searchSettings,
+  settingsSearchItemsForPlatform,
   SETTINGS_SEARCH_ITEMS,
   type SettingsSearchItem,
 } from "./settingsSearch";
@@ -102,5 +103,14 @@ describe("searchSettings", () => {
       id: "composer-send-behavior",
       to: "/settings/general",
     });
+  });
+
+  it("only exposes desktop-only settings on Desktop", () => {
+    expect(searchSettings("changed files", settingsSearchItemsForPlatform(true))[0]).toMatchObject({
+      id: "changed-files-in-chat",
+      to: "/settings/source-control",
+      desktopOnly: true,
+    });
+    expect(searchSettings("changed files", settingsSearchItemsForPlatform(false))).toEqual([]);
   });
 });
