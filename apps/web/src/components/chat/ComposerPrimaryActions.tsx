@@ -163,7 +163,10 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     );
   }
 
-  if (isRunning && !(preferSendWhenRunningWithContent && hasSendableContent)) {
+  const canSendWhileRunning =
+    hasSendableContent && (preferSendWhenRunningWithContent || showSendWhileRunning);
+
+  if (isRunning && !canSendWhileRunning) {
     return renderStopGenerationButton(false);
   }
 
@@ -276,7 +279,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     </button>
   );
 
-  if (!isRunning) {
+  if (!isRunning || (preferSendWhenRunningWithContent && hasSendableContent)) {
     return sendButton;
   }
 
