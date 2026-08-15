@@ -199,8 +199,8 @@ export const DesktopFollowUpQueuePanel = memo(function DesktopFollowUpQueuePanel
     (dispatchingEntryId !== null && entries.some((entry) => entry.id === dispatchingEntryId));
 
   return (
-    <div className="chat-composer-glass relative mt-6 rounded-xl border border-border/45 px-2 pt-2 pb-1.5 shadow-sm">
-      <div className="chat-composer-glass absolute bottom-full left-3 flex h-6 items-center gap-1.5 rounded-t-lg border border-b-0 border-border/45 px-2.5 text-[11px] font-medium text-muted-foreground">
+    <div className="surface-glass relative mt-6 rounded-xl border border-border/45 px-2 pt-2 pb-1.5 shadow-sm">
+      <div className="surface-glass absolute bottom-full left-3 flex h-6 items-center gap-1.5 rounded-t-lg border border-b-0 border-border/45 px-2.5 text-[11px] font-medium text-muted-foreground">
         <ListOrderedIcon className="size-3" />
         Queue
         <span className="tabular-nums text-foreground/75">{entries.length}</span>
