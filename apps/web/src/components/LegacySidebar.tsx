@@ -3605,7 +3605,7 @@ export default function LegacySidebar() {
       let confirmed = false;
       try {
         confirmed = await ensureLocalApi().dialogs.confirm(
-          getDesktopUpdateInstallConfirmationMessage(desktopUpdateState, navigator.platform),
+          getDesktopUpdateInstallConfirmationMessage(desktopUpdateState),
         );
       } catch (error) {
         setDesktopUpdateActionPending(false);
