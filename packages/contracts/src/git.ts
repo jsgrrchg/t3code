@@ -99,6 +99,13 @@ export const GitHistoryRef = Schema.Struct({
 });
 export type GitHistoryRef = typeof GitHistoryRef.Type;
 
+export const GitHistoryComparison = Schema.Struct({
+  base: TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(GIT_HISTORY_REF_LABEL_MAX_LENGTH)),
+  ahead: NonNegativeInt,
+  behind: NonNegativeInt,
+});
+export type GitHistoryComparison = typeof GitHistoryComparison.Type;
+
 export const GitHistoryCommitSummary = Schema.Struct({
   sha: GitObjectId,
   parentShas: Schema.Array(GitObjectId),
@@ -298,6 +305,7 @@ export const GitListHistoryResult = Schema.Struct({
   headSha: Schema.NullOr(GitObjectId),
   nextCursor: Schema.NullOr(NonNegativeInt),
   totalCount: Schema.NullOr(NonNegativeInt),
+  comparison: Schema.optionalKey(GitHistoryComparison),
 });
 export type GitListHistoryResult = typeof GitListHistoryResult.Type;
 

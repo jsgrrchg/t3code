@@ -100,6 +100,40 @@ describe("GitVcsDriver.listHistory", () => {
     }).pipe(Effect.provide(TestLayer)),
   );
 
+  it.effect("reports divergence from the preferred local integration branch", () =>
+    Effect.gen(function* () {
+      const driver = yield* GitVcsDriver.GitVcsDriver;
+      const cwd = yield* makeTmpDir("git-history-comparison-");
+      const { initialBranch } = yield* initRepoWithCommit(cwd);
+
+      yield* git(cwd, ["checkout", "-b", "feature"]);
+      yield* git(cwd, ["commit", "--allow-empty", "-m", "feature commit"]);
+      yield* git(cwd, ["checkout", initialBranch]);
+      yield* git(cwd, ["commit", "--allow-empty", "-m", "integration commit"]);
+      yield* git(cwd, ["update-ref", "refs/remotes/upstream/main", "HEAD"]);
+      yield* git(cwd, ["symbolic-ref", "refs/remotes/upstream/HEAD", "refs/remotes/upstream/main"]);
+      yield* git(cwd, ["checkout", "feature"]);
+
+      const firstPage = yield* driver.listHistory({ cwd, limit: 1 });
+      assert.deepStrictEqual(firstPage.comparison, {
+        base: "upstream/main",
+        ahead: 1,
+        behind: 1,
+      });
+
+      const olderPage = yield* driver.listHistory({
+        cwd,
+        cursor: firstPage.nextCursor ?? 1,
+        limit: 1,
+      });
+      assert.isUndefined(olderPage.comparison);
+
+      yield* git(cwd, ["checkout", "--detach"]);
+      const detached = yield* driver.listHistory({ cwd });
+      assert.isUndefined(detached.comparison);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
   it.effect("keeps topological parent data across paginated octopus history", () =>
     Effect.gen(function* () {
       const driver = yield* GitVcsDriver.GitVcsDriver;

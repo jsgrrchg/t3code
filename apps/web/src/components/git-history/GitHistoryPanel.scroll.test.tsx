@@ -48,6 +48,7 @@ const baseProps: GitHistoryPanelViewProps = {
   headSha: COMMIT.sha,
   nextCursor: null,
   totalCount: 1,
+  comparison: undefined,
   isInitialLoading: false,
   initialError: null,
   isRefreshing: false,

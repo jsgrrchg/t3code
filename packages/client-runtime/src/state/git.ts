@@ -35,6 +35,7 @@ export interface GitHistoryAccumulation extends GitHistoryTarget {
   readonly headSha: GitListHistoryResult["headSha"];
   readonly nextCursor: GitListHistoryResult["nextCursor"];
   readonly totalCount: GitListHistoryResult["totalCount"];
+  readonly comparison: GitListHistoryResult["comparison"];
 }
 
 function sameGitHistoryTarget(
@@ -69,6 +70,7 @@ export function createEmptyGitHistoryAccumulation(
     headSha: null,
     nextCursor: null,
     totalCount: null,
+    comparison: undefined,
   };
 }
 
@@ -91,6 +93,7 @@ export function replaceGitHistoryPage(
     headSha: page.headSha,
     nextCursor: page.nextCursor,
     totalCount: page.totalCount,
+    comparison: page.comparison,
   };
 }
 

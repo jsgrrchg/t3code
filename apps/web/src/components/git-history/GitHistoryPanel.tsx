@@ -92,6 +92,7 @@ export interface GitHistoryPanelViewProps {
   readonly headSha: GitListHistoryResult["headSha"];
   readonly nextCursor: GitListHistoryResult["nextCursor"];
   readonly totalCount: GitListHistoryResult["totalCount"];
+  readonly comparison: GitListHistoryResult["comparison"];
   readonly isInitialLoading: boolean;
   readonly initialError: string | null;
   readonly isRefreshing: boolean;
@@ -116,6 +117,41 @@ interface GitHistoryCommitRowProps {
   readonly graphLaneCount: number;
   readonly gridTemplateColumns: string;
   readonly onOpenCommit?: (sha: GitHistoryCommitSummary["sha"]) => void;
+}
+
+function GitHistoryComparisonPill({
+  comparison,
+}: {
+  readonly comparison: GitListHistoryResult["comparison"];
+}) {
+  if (comparison === undefined || (comparison.ahead === 0 && comparison.behind === 0)) return null;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            aria-label={`Compared with ${comparison.base}: ${comparison.ahead} ahead, ${comparison.behind} behind`}
+            className="git-history-comparison hidden shrink-0 items-center gap-1 whitespace-nowrap text-[10.5px]"
+            data-history-comparison="true"
+          />
+        }
+      >
+        {comparison.ahead > 0 ? (
+          <span className="text-primary/90">{comparison.ahead} ahead</span>
+        ) : null}
+        {comparison.ahead > 0 && comparison.behind > 0 ? (
+          <span className="text-muted-foreground/55">·</span>
+        ) : null}
+        {comparison.behind > 0 ? (
+          <span className="text-warning-foreground/85">{comparison.behind} behind</span>
+        ) : null}
+      </TooltipTrigger>
+      <TooltipPopup side="top" className="max-w-80 whitespace-normal leading-tight wrap-anywhere">
+        Compared with {comparison.base}: {comparison.ahead} ahead, {comparison.behind} behind
+      </TooltipPopup>
+    </Tooltip>
+  );
 }
 
 export function GitHistoryShaButtonView({
@@ -389,6 +425,7 @@ export function GitHistoryPanelView({
   headSha,
   nextCursor,
   totalCount,
+  comparison,
   isInitialLoading,
   initialError,
   isRefreshing,
@@ -554,7 +591,10 @@ export function GitHistoryPanelView({
   return (
     <section aria-label="Git commit history" className="flex h-full min-h-0 min-w-0 flex-col">
       <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border/60 px-2">
-        <span className="min-w-0 flex-1 truncate text-xs font-medium">{displayedCommitLabel}</span>
+        <div className="git-history-metadata flex min-w-0 flex-1 items-center gap-2">
+          <span className="min-w-0 truncate text-xs font-medium">{displayedCommitLabel}</span>
+          <GitHistoryComparisonPill comparison={comparison} />
+        </div>
         {isRefreshing ? (
           <span className="text-[11px] text-muted-foreground" role="status">
             Reloading…
@@ -797,6 +837,7 @@ export function GitHistoryPanel({
     <GitHistoryPanelView
       commits={visibleHistory.commits}
       headSha={visibleHistory.headSha}
+      comparison={visibleHistory.comparison}
       initialError={hasVisibleCommits ? null : firstPage.error}
       isInitialLoading={!hasVisibleCommits && firstPage.data === null && firstPage.error === null}
       isLoadingMore={scopedState.isLoadingMore}

@@ -118,6 +118,11 @@ behind a compact **+N** indicator and remain available in its tooltip.
 The header shows the total number of commits in that public history. Commit rows load in pages as
 you request older entries, so showing the total does not load every row at once.
 
+When the current branch has diverged from the repository's integration branch, the header also
+shows its **ahead** and **behind** commit counts. T3 Code prefers the default branch from `upstream`,
+then `origin`, and falls back to the current branch's tracking ref. These counts use the local
+remote-tracking refs; use **Fetch all** when you want to compare against the latest remote state.
+
 Select a commit ID to copy its full SHA. The commit ID briefly changes to **Copied** after a
 successful copy.
 

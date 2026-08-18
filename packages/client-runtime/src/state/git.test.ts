@@ -39,12 +39,14 @@ function page(
   commits: ReadonlyArray<GitHistoryCommitSummary>,
   nextCursor: number | null,
   totalCount: number | null = commits.length,
+  comparison?: GitListHistoryResult["comparison"],
 ): GitListHistoryResult {
   return {
     commits,
     headSha: commits[0]?.sha ?? null,
     nextCursor,
     totalCount,
+    ...(comparison === undefined ? {} : { comparison }),
   };
 }
 
@@ -101,7 +103,11 @@ describe("Git history accumulation", () => {
   it("appends older commits in order and keeps the first duplicate", () => {
     const current = replaceGitHistoryPage(
       target(),
-      page([commit(SHA.first, "first"), commit(SHA.second, "second")], 2, 3),
+      page([commit(SHA.first, "first"), commit(SHA.second, "second")], 2, 3, {
+        base: "upstream/main",
+        ahead: 1,
+        behind: 2,
+      }),
     );
 
     const appended = appendGitHistoryPage(
@@ -115,6 +121,7 @@ describe("Git history accumulation", () => {
     expect(appended.nextCursor).toBeNull();
     expect(appended.headSha).toBe(SHA.first);
     expect(appended.totalCount).toBe(3);
+    expect(appended.comparison).toEqual({ base: "upstream/main", ahead: 1, behind: 2 });
   });
 
   it("replaces the complete generation with a refreshed first page", () => {
@@ -188,6 +195,7 @@ describe("Git history accumulation", () => {
       headSha: null,
       nextCursor: null,
       totalCount: null,
+      comparison: undefined,
     });
   });
 });

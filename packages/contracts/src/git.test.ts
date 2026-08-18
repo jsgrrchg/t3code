@@ -240,6 +240,18 @@ describe("GitListHistoryResult", () => {
 
     expect(encodeListHistoryResult(decoded)).toEqual(input);
   });
+
+  it("round-trips integration branch divergence when present", () => {
+    const input = {
+      commits: [],
+      headSha: SHA_1,
+      nextCursor: null,
+      totalCount: 1,
+      comparison: { base: "upstream/main", ahead: 2, behind: 3 },
+    };
+
+    expect(encodeListHistoryResult(decodeListHistoryResult(input))).toEqual(input);
+  });
 });
 
 describe("historical commit resources", () => {

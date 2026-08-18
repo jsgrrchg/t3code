@@ -1679,6 +1679,69 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       }),
     );
 
+  /**
+   * Compares the checked-out branch with the best locally available integration ref.
+   * Fetching remains explicit; this only reads the remote-tracking refs already on disk.
+   */
+  const resolveHistoryComparison = Effect.fn("resolveHistoryComparison")(function* (
+    cwd: string,
+  ): Effect.fn.Return<GitListHistoryResult["comparison"], GitCommandError> {
+    const branchResult = yield* executeGit(
+      "GitVcsDriver.resolveHistoryComparison.branch",
+      cwd,
+      ["symbolic-ref", "--quiet", "--short", "HEAD"],
+      { allowNonZeroExit: true, timeoutMs: 5_000, maxOutputBytes: 1_024 },
+    );
+    if (branchResult.exitCode !== 0 || branchResult.stdout.trim().length === 0) {
+      return undefined;
+    }
+
+    const [upstreamDefault, originDefault, tracking] = yield* Effect.all(
+      [
+        resolveDefaultBranchName(cwd, "upstream").pipe(Effect.orElseSucceed(() => null)),
+        resolveDefaultBranchName(cwd, "origin").pipe(Effect.orElseSucceed(() => null)),
+        resolveCurrentUpstream(cwd).pipe(Effect.orElseSucceed(() => null)),
+      ],
+      { concurrency: 3 },
+    );
+    const candidates = [
+      upstreamDefault === null ? null : `upstream/${upstreamDefault}`,
+      originDefault === null ? null : `origin/${originDefault}`,
+      "upstream/main",
+      "origin/main",
+      "upstream/master",
+      "origin/master",
+      tracking?.upstreamRef ?? null,
+    ];
+    const seen = new Set<string>();
+
+    for (const base of candidates) {
+      if (base === null || seen.has(base)) continue;
+      seen.add(base);
+      const result = yield* executeGit(
+        "GitVcsDriver.resolveHistoryComparison.divergence",
+        cwd,
+        ["rev-list", "--left-right", "--count", `HEAD...${base}`],
+        { allowNonZeroExit: true, timeoutMs: 5_000, maxOutputBytes: 128 },
+      );
+      if (result.exitCode !== 0 || result.stdoutTruncated) continue;
+      const [aheadRaw, behindRaw] = result.stdout.trim().split(/\s+/);
+      const ahead = Number.parseInt(aheadRaw ?? "", 10);
+      const behind = Number.parseInt(behindRaw ?? "", 10);
+      if (
+        !Number.isSafeInteger(ahead) ||
+        ahead < 0 ||
+        !Number.isSafeInteger(behind) ||
+        behind < 0
+      ) {
+        continue;
+      }
+      return { base, ahead, behind };
+    }
+
+    return undefined;
+  });
+
   const remoteBranchExists = (
     cwd: string,
     remoteName: string,
@@ -3483,10 +3546,14 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
               ),
             )
           : Effect.succeed(null);
-      const [result, refsResult, totalCount] = yield* Effect.all(
-        [historyEffect, refsEffect, totalCountEffect],
+      const comparisonEffect =
+        cursor === 0 && headSha !== null
+          ? resolveHistoryComparison(input.cwd).pipe(Effect.orElseSucceed(() => undefined))
+          : Effect.void;
+      const [result, refsResult, totalCount, comparison] = yield* Effect.all(
+        [historyEffect, refsEffect, totalCountEffect, comparisonEffect],
         {
-          concurrency: 3,
+          concurrency: 4,
         },
       );
       const parsedRefs = yield* parseGitHistoryRefsOutput({
@@ -3511,6 +3578,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         headSha,
         nextCursor: hasNextPage ? cursor + commits.length : null,
         totalCount,
+        ...(comparison === undefined ? {} : { comparison }),
       } satisfies GitListHistoryResult;
     },
   );

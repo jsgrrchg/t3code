@@ -59,6 +59,7 @@ const baseProps: GitHistoryPanelViewProps = {
   headSha: HEAD_SHA,
   nextCursor: null,
   totalCount: 1,
+  comparison: undefined,
   isInitialLoading: false,
   initialError: null,
   isRefreshing: false,
@@ -247,6 +248,25 @@ describe("GitHistoryShaButtonView", () => {
 });
 
 describe("GitHistoryPanelView states", () => {
+  it("shows non-zero integration branch divergence with its comparison base", () => {
+    const markup = renderView({
+      comparison: { base: "upstream/main", ahead: 2, behind: 3 },
+    });
+
+    expect(markup).toContain('data-history-comparison="true"');
+    expect(markup).toContain("2 ahead");
+    expect(markup).toContain("3 behind");
+    expect(markup).toContain("Compared with upstream/main: 2 ahead, 3 behind");
+  });
+
+  it("hides integration branch comparison when both counts are zero", () => {
+    const markup = renderView({
+      comparison: { base: "upstream/main", ahead: 0, behind: 0 },
+    });
+
+    expect(markup).not.toContain('data-history-comparison="true"');
+  });
+
   it("shows a static initial loading state and disables refresh", () => {
     const markup = renderView({ commits: [], headSha: null, isInitialLoading: true });
 
