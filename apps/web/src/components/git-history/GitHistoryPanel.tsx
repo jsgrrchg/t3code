@@ -16,7 +16,14 @@ import {
   type GitHistoryTarget,
 } from "@t3tools/client-runtime/state/git";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import { CloudIcon, FileDiffIcon, GitBranchIcon, RefreshCwIcon, TagIcon } from "lucide-react";
+import {
+  CloudIcon,
+  FileDiffIcon,
+  FoldVerticalIcon,
+  GitBranchIcon,
+  RefreshCwIcon,
+  TagIcon,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import { Button } from "~/components/ui/button";
@@ -35,6 +42,7 @@ import {
   gitHistorySessionKey,
   rememberGitHistoryScroll,
   rememberGitHistorySession,
+  rememberGitHistoryShowOnlyTips,
 } from "./gitHistorySessionState";
 import { layoutGitHistoryGraph, type GitHistoryGraphRow } from "./gitHistoryGraphLayout";
 
@@ -67,6 +75,7 @@ interface HistoryPanelLocalState {
   readonly isLoadingMore: boolean;
   readonly fetchError: string | null;
   readonly isFetching: boolean;
+  readonly showOnlyTips: boolean;
 }
 
 function createLocalState(target: GitHistoryTarget): HistoryPanelLocalState {
@@ -80,6 +89,7 @@ function createLocalState(target: GitHistoryTarget): HistoryPanelLocalState {
     isLoadingMore: false,
     fetchError: null,
     isFetching: false,
+    showOnlyTips: remembered?.showOnlyTips ?? false,
   };
 }
 
@@ -89,6 +99,7 @@ function errorMessage(error: unknown, fallback = "The Git history request failed
 
 export interface GitHistoryPanelViewProps {
   readonly commits: ReadonlyArray<GitHistoryCommitSummary>;
+  readonly branchTips: GitListHistoryResult["branchTips"];
   readonly headSha: GitListHistoryResult["headSha"];
   readonly nextCursor: GitListHistoryResult["nextCursor"];
   readonly totalCount: GitListHistoryResult["totalCount"];
@@ -102,10 +113,12 @@ export interface GitHistoryPanelViewProps {
   readonly canFetchAll: boolean;
   readonly isFetching: boolean;
   readonly fetchError: string | null;
+  readonly showOnlyTips: boolean;
   readonly scrollKey: string;
   readonly initialScrollOffset: number | null;
   readonly onRefresh: () => void;
   readonly onFetchAll: () => void;
+  readonly onShowOnlyTipsChange: (showOnlyTips: boolean) => void;
   readonly onLoadOlder: () => void;
   readonly onScrollOffsetChange: (offset: number) => void;
   readonly onOpenCommit: (sha: GitHistoryCommitSummary["sha"]) => void;
@@ -422,6 +435,7 @@ function HistoryStateMessage({
 
 export function GitHistoryPanelView({
   commits,
+  branchTips,
   headSha,
   nextCursor,
   totalCount,
@@ -435,10 +449,12 @@ export function GitHistoryPanelView({
   canFetchAll,
   isFetching,
   fetchError,
+  showOnlyTips,
   scrollKey,
   initialScrollOffset,
   onRefresh,
   onFetchAll,
+  onShowOnlyTipsChange,
   onLoadOlder,
   onScrollOffsetChange,
   onOpenCommit,
@@ -446,12 +462,25 @@ export function GitHistoryPanelView({
   const listRef = useRef<LegendListRef>(null);
   const restoredScrollKeyRef = useRef<string | null>(null);
   const latestScrollOffsetRef = useRef(initialScrollOffset ?? 0);
-  const layout = useMemo(() => layoutGitHistoryGraph(commits, { headSha }), [commits, headSha]);
-  const rows = useMemo(
-    () => commits.map((commit, index) => ({ commit, graphRow: layout.rows[index]! })),
-    [commits, layout.rows],
+  const displayedCommits = useMemo(
+    () =>
+      showOnlyTips ? (branchTips ?? []).map((commit) => ({ ...commit, parentShas: [] })) : commits,
+    [branchTips, commits, showOnlyTips],
   );
-  const graphWidth = getGitHistoryGraphWidth(layout.maxLaneCount);
+  const loadedLayout = useMemo(
+    () => layoutGitHistoryGraph(commits, { headSha }),
+    [commits, headSha],
+  );
+  const layout = useMemo(
+    () => (showOnlyTips ? layoutGitHistoryGraph(displayedCommits, { headSha }) : loadedLayout),
+    [displayedCommits, headSha, loadedLayout, showOnlyTips],
+  );
+  const rows = useMemo(
+    () => displayedCommits.map((commit, index) => ({ commit, graphRow: layout.rows[index]! })),
+    [displayedCommits, layout.rows],
+  );
+  const graphLaneCount = Math.max(layout.maxLaneCount, loadedLayout.maxLaneCount);
+  const graphWidth = getGitHistoryGraphWidth(graphLaneCount);
   const gridTemplateColumns = `${graphWidth}px minmax(${SUBJECT_MIN_WIDTH}px, 1fr) minmax(${AUTHOR_MIN_WIDTH}px, 0.34fr) ${DATE_COLUMN_WIDTH}px ${SHA_COLUMN_WIDTH}px ${OPEN_COMMIT_COLUMN_WIDTH}px`;
   const contentStyle = {
     minWidth:
@@ -485,7 +514,7 @@ export function GitHistoryPanelView({
   }, [initialScrollOffset, rememberCurrentScroll, scrollKey]);
 
   useEffect(() => {
-    if (commits.length === 0 || restoredScrollKeyRef.current === scrollKey) return;
+    if (displayedCommits.length === 0 || restoredScrollKeyRef.current === scrollKey) return;
     if (initialScrollOffset === null) {
       restoredScrollKeyRef.current = scrollKey;
       return;
@@ -496,12 +525,12 @@ export function GitHistoryPanelView({
       void listRef.current?.scrollToOffset({ offset: initialScrollOffset, animated: false });
     });
     return () => cancelAnimationFrame(frame);
-  }, [commits.length, initialScrollOffset, scrollKey]);
+  }, [displayedCommits.length, initialScrollOffset, scrollKey]);
 
   let content;
   if (isInitialLoading) {
     content = <StaticHistorySkeleton />;
-  } else if (initialError !== null && commits.length === 0) {
+  } else if (initialError !== null && displayedCommits.length === 0) {
     content = (
       <HistoryStateMessage
         action={{ label: "Retry", onClick: onRefresh }}
@@ -509,8 +538,10 @@ export function GitHistoryPanelView({
         title="Could not load commit history."
       />
     );
-  } else if (commits.length === 0) {
-    content = <HistoryStateMessage title="No commits found." />;
+  } else if (displayedCommits.length === 0) {
+    content = (
+      <HistoryStateMessage title={showOnlyTips ? "No branch tips found." : "No commits found."} />
+    );
   } else {
     content = (
       <div className="min-h-0 flex-1 overflow-x-auto">
@@ -550,7 +581,7 @@ export function GitHistoryPanelView({
               renderItem={({ item }) => (
                 <GitHistoryCommitRow
                   commit={item.commit}
-                  graphLaneCount={layout.maxLaneCount}
+                  graphLaneCount={graphLaneCount}
                   graphRow={item.graphRow}
                   gridTemplateColumns={gridTemplateColumns}
                   onOpenCommit={onOpenCommit}
@@ -559,7 +590,7 @@ export function GitHistoryPanelView({
               role="list"
               style={{ height: "100%" }}
               ListFooterComponent={
-                nextCursor !== null || loadMoreError !== null ? (
+                !showOnlyTips && (nextCursor !== null || loadMoreError !== null) ? (
                   <div className="flex min-h-12 items-center justify-center gap-2 px-2 py-2">
                     {loadMoreError !== null ? (
                       <span className="min-w-0 truncate text-xs text-destructive-foreground">
@@ -611,6 +642,27 @@ export function GitHistoryPanelView({
           >
             {isFetching ? "Fetching…" : "Fetch all"}
           </Button>
+        ) : null}
+        {branchTips !== undefined ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  aria-label={showOnlyTips ? "Show all commits" : "Show branch tips"}
+                  aria-pressed={showOnlyTips}
+                  className={cn(showOnlyTips && "bg-accent [--control-icon-color:var(--primary)]")}
+                  size="icon-xs"
+                  variant="ghost"
+                  onClick={() => onShowOnlyTipsChange(!showOnlyTips)}
+                />
+              }
+            >
+              <FoldVerticalIcon aria-hidden="true" className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipPopup side="top">
+              {showOnlyTips ? "Show all commits" : "Show branch tips"}
+            </TooltipPopup>
+          </Tooltip>
         ) : null}
         <Button
           aria-label={isRefreshing ? "Reloading history" : "Reload history"}
@@ -832,10 +884,22 @@ export function GitHistoryPanel({
     visibleHistory,
   ]);
 
+  const setShowOnlyTips = useCallback(
+    (showOnlyTips: boolean) => {
+      rememberGitHistoryShowOnlyTips(currentTargetKey, showOnlyTips);
+      setLocalState((current) => {
+        const scoped = current.targetKey === currentTargetKey ? current : createLocalState(target);
+        return { ...scoped, showOnlyTips };
+      });
+    },
+    [currentTargetKey, target],
+  );
+
   const hasVisibleCommits = visibleHistory.commits.length > 0;
   return (
     <GitHistoryPanelView
       commits={visibleHistory.commits}
+      branchTips={visibleHistory.branchTips}
       headSha={visibleHistory.headSha}
       comparison={visibleHistory.comparison}
       initialError={hasVisibleCommits ? null : firstPage.error}
@@ -846,6 +910,7 @@ export function GitHistoryPanel({
       canFetchAll={canFetchAll}
       isFetching={scopedState.isFetching}
       fetchError={scopedState.fetchError}
+      showOnlyTips={scopedState.showOnlyTips && visibleHistory.branchTips !== undefined}
       nextCursor={visibleHistory.nextCursor}
       scrollKey={currentTargetKey}
       initialScrollOffset={initialScrollOffset}
@@ -854,6 +919,7 @@ export function GitHistoryPanel({
       onLoadOlder={loadOlder}
       onRefresh={refresh}
       onFetchAll={fetchAll}
+      onShowOnlyTipsChange={setShowOnlyTips}
       onScrollOffsetChange={rememberScrollOffset}
       onOpenCommit={onOpenCommit}
     />

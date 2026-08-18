@@ -41,6 +41,7 @@ describe("GitVcsDriver.listHistory", () => {
 
       assert.deepStrictEqual(result, {
         commits: [],
+        branchTips: [],
         headSha: null,
         nextCursor: null,
         totalCount: 0,
@@ -90,6 +91,12 @@ describe("GitVcsDriver.listHistory", () => {
       assert.isFalse(
         attached.commits.some((commit) => commit.refs.some((ref) => ref.label === "origin/HEAD")),
       );
+      assert.sameMembers(attached.branchTips?.map((commit) => commit.sha) ?? [], [
+        headSha,
+        branchSha,
+        remoteSha,
+      ]);
+      assert.isFalse(attached.branchTips?.some((commit) => commit.sha === tagSha) ?? true);
 
       yield* git(cwd, ["checkout", "--detach", branchSha]);
       const detached = yield* driver.listHistory({ cwd });
@@ -126,6 +133,7 @@ describe("GitVcsDriver.listHistory", () => {
         cursor: firstPage.nextCursor ?? 1,
         limit: 1,
       });
+      assert.isUndefined(olderPage.branchTips);
       assert.isUndefined(olderPage.comparison);
 
       yield* git(cwd, ["checkout", "--detach"]);

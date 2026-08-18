@@ -5,6 +5,7 @@ export interface GitHistorySessionEntry {
   readonly history: GitHistoryAccumulation | null;
   readonly appliedFirstPage: GitListHistoryResult | null;
   readonly scrollOffset: number | null;
+  readonly showOnlyTips: boolean;
 }
 
 const MAX_REMEMBERED_GIT_HISTORY_TARGETS = 20;
@@ -46,6 +47,7 @@ export function createGitHistorySessionMemory(maxEntries = MAX_REMEMBERED_GIT_HI
         history,
         appliedFirstPage,
         scrollOffset: current?.scrollOffset ?? null,
+        showOnlyTips: current?.showOnlyTips ?? false,
       });
     },
     rememberScroll(key: string, scrollOffset: number): void {
@@ -54,6 +56,16 @@ export function createGitHistorySessionMemory(maxEntries = MAX_REMEMBERED_GIT_HI
         history: current?.history ?? null,
         appliedFirstPage: current?.appliedFirstPage ?? null,
         scrollOffset: normalizeScrollOffset(scrollOffset),
+        showOnlyTips: current?.showOnlyTips ?? false,
+      });
+    },
+    rememberShowOnlyTips(key: string, showOnlyTips: boolean): void {
+      const current = entries.get(key);
+      write(key, {
+        history: current?.history ?? null,
+        appliedFirstPage: current?.appliedFirstPage ?? null,
+        scrollOffset: current?.scrollOffset ?? null,
+        showOnlyTips,
       });
     },
     get size(): number {
@@ -78,4 +90,8 @@ export function rememberGitHistorySession(
 
 export function rememberGitHistoryScroll(key: string, scrollOffset: number): void {
   gitHistorySessionMemory.rememberScroll(key, scrollOffset);
+}
+
+export function rememberGitHistoryShowOnlyTips(key: string, showOnlyTips: boolean): void {
+  gitHistorySessionMemory.rememberShowOnlyTips(key, showOnlyTips);
 }

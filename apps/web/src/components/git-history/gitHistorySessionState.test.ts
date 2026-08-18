@@ -65,11 +65,14 @@ describe("Git history session state", () => {
       history,
       appliedFirstPage: page,
       scrollOffset: 420,
+      showOnlyTips: false,
     });
 
+    memory.rememberShowOnlyTips(key, true);
     memory.rememberScroll(key, Number.POSITIVE_INFINITY);
     expect(memory.get(key)?.history).toBe(history);
     expect(memory.get(key)?.scrollOffset).toBe(0);
+    expect(memory.get(key)?.showOnlyTips).toBe(true);
   });
 
   it("evicts the least recently used target", () => {

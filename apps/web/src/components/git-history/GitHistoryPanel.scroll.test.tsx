@@ -45,6 +45,7 @@ const COMMIT: GitHistoryCommitSummary = {
 
 const baseProps: GitHistoryPanelViewProps = {
   commits: [COMMIT],
+  branchTips: undefined,
   headSha: COMMIT.sha,
   nextCursor: null,
   totalCount: 1,
@@ -58,10 +59,12 @@ const baseProps: GitHistoryPanelViewProps = {
   canFetchAll: true,
   isFetching: false,
   fetchError: null,
+  showOnlyTips: false,
   scrollKey: "target-a",
   initialScrollOffset: null,
   onRefresh: () => {},
   onFetchAll: () => {},
+  onShowOnlyTipsChange: () => {},
   onLoadOlder: () => {},
   onScrollOffsetChange: () => {},
   onOpenCommit: () => {},

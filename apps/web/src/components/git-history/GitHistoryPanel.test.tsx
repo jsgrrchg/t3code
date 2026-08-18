@@ -56,6 +56,7 @@ function commit(
 
 const baseProps: GitHistoryPanelViewProps = {
   commits: [commit()],
+  branchTips: undefined,
   headSha: HEAD_SHA,
   nextCursor: null,
   totalCount: 1,
@@ -69,10 +70,12 @@ const baseProps: GitHistoryPanelViewProps = {
   canFetchAll: true,
   isFetching: false,
   fetchError: null,
+  showOnlyTips: false,
   scrollKey: "history-target",
   initialScrollOffset: null,
   onRefresh: () => {},
   onFetchAll: () => {},
+  onShowOnlyTipsChange: () => {},
   onLoadOlder: () => {},
   onScrollOffsetChange: () => {},
   onOpenCommit: () => {},
@@ -248,6 +251,31 @@ describe("GitHistoryShaButtonView", () => {
 });
 
 describe("GitHistoryPanelView states", () => {
+  it("switches to deduplicated branch tips without offering history pagination", () => {
+    const tip = {
+      ...commit("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "Feature branch tip", "Grace Hopper", [
+        { kind: "branch", label: "feature/tips" },
+      ]),
+      parentShas: [HEAD_SHA],
+    };
+    const markup = renderView({ branchTips: [tip], nextCursor: 100, showOnlyTips: true });
+
+    expect(markup).toContain("Feature branch tip");
+    expect(markup).not.toContain("Render history rows");
+    expect(markup).not.toContain("Load older commits");
+    expect(markup).toContain('aria-label="Show all commits"');
+    expect(markup).toContain('aria-pressed="true"');
+  });
+
+  it("offers the branch-tip overview only when the server supplies it", () => {
+    const supported = renderView({ branchTips: [commit()] });
+    const legacy = renderView({ branchTips: undefined });
+
+    expect(supported).toContain('aria-label="Show branch tips"');
+    expect(supported).toContain('aria-pressed="false"');
+    expect(legacy).not.toContain('aria-label="Show branch tips"');
+  });
+
   it("shows non-zero integration branch divergence with its comparison base", () => {
     const markup = renderView({
       comparison: { base: "upstream/main", ahead: 2, behind: 3 },

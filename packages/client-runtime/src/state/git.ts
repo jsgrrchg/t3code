@@ -32,6 +32,7 @@ export interface GitHistoryTarget {
 
 export interface GitHistoryAccumulation extends GitHistoryTarget {
   readonly commits: ReadonlyArray<GitHistoryCommitSummary>;
+  readonly branchTips: GitListHistoryResult["branchTips"];
   readonly headSha: GitListHistoryResult["headSha"];
   readonly nextCursor: GitListHistoryResult["nextCursor"];
   readonly totalCount: GitListHistoryResult["totalCount"];
@@ -67,6 +68,7 @@ export function createEmptyGitHistoryAccumulation(
   return {
     ...target,
     commits: [],
+    branchTips: undefined,
     headSha: null,
     nextCursor: null,
     totalCount: null,
@@ -90,6 +92,8 @@ export function replaceGitHistoryPage(
   return {
     ...target,
     commits: dedupeGitHistoryCommits(page.commits),
+    branchTips:
+      page.branchTips === undefined ? undefined : dedupeGitHistoryCommits(page.branchTips),
     headSha: page.headSha,
     nextCursor: page.nextCursor,
     totalCount: page.totalCount,

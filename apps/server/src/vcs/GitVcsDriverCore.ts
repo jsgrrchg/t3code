@@ -3516,6 +3516,30 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           fallbackErrorDetail: "Git history ref enumeration failed.",
         },
       );
+      const branchTipsEffect =
+        cursor === 0
+          ? executeGit(
+              "GitVcsDriver.listHistory.branchTips",
+              input.cwd,
+              [
+                "log",
+                "--no-walk=sorted",
+                "--no-color",
+                "--no-decorate",
+                "--no-show-signature",
+                "--no-patch",
+                "--format=%H%x00%P%x00%s%x00%an%x00%ae%x00%aI%x00",
+                ...(headSha === null ? [] : ["HEAD"]),
+                "--branches",
+                "--remotes",
+              ],
+              {
+                timeoutMs: 30_000,
+                maxOutputBytes: GIT_HISTORY_MAX_OUTPUT_BYTES,
+                fallbackErrorDetail: "Git history branch-tip enumeration failed.",
+              },
+            )
+          : Effect.succeed(null);
       const totalCountEffect =
         cursor === 0
           ? executeGit(
@@ -3550,10 +3574,10 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         cursor === 0 && headSha !== null
           ? resolveHistoryComparison(input.cwd).pipe(Effect.orElseSucceed(() => undefined))
           : Effect.void;
-      const [result, refsResult, totalCount, comparison] = yield* Effect.all(
-        [historyEffect, refsEffect, totalCountEffect, comparisonEffect],
+      const [result, refsResult, branchTipsResult, totalCount, comparison] = yield* Effect.all(
+        [historyEffect, refsEffect, branchTipsEffect, totalCountEffect, comparisonEffect],
         {
-          concurrency: 4,
+          concurrency: 5,
         },
       );
       const parsedRefs = yield* parseGitHistoryRefsOutput({
@@ -3572,9 +3596,21 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         ...commit,
         refs: refsBySha.get(commit.sha) ?? [],
       }));
+      const branchTips =
+        branchTipsResult === null
+          ? undefined
+          : (yield* parseGitHistoryLogOutput({
+              cwd: input.cwd,
+              stdout: branchTipsResult.stdout,
+              stdoutTruncated: branchTipsResult.stdoutTruncated,
+            })).map((commit) => ({
+              ...commit,
+              refs: refsBySha.get(commit.sha) ?? [],
+            }));
 
       return {
         commits,
+        ...(branchTips === undefined ? {} : { branchTips }),
         headSha,
         nextCursor: hasNextPage ? cursor + commits.length : null,
         totalCount,

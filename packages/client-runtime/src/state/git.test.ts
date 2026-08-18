@@ -40,6 +40,7 @@ function page(
   nextCursor: number | null,
   totalCount: number | null = commits.length,
   comparison?: GitListHistoryResult["comparison"],
+  branchTips?: GitListHistoryResult["branchTips"],
 ): GitListHistoryResult {
   return {
     commits,
@@ -47,6 +48,7 @@ function page(
     nextCursor,
     totalCount,
     ...(comparison === undefined ? {} : { comparison }),
+    ...(branchTips === undefined ? {} : { branchTips }),
   };
 }
 
@@ -103,11 +105,13 @@ describe("Git history accumulation", () => {
   it("appends older commits in order and keeps the first duplicate", () => {
     const current = replaceGitHistoryPage(
       target(),
-      page([commit(SHA.first, "first"), commit(SHA.second, "second")], 2, 3, {
-        base: "upstream/main",
-        ahead: 1,
-        behind: 2,
-      }),
+      page(
+        [commit(SHA.first, "first"), commit(SHA.second, "second")],
+        2,
+        3,
+        { base: "upstream/main", ahead: 1, behind: 2 },
+        [commit(SHA.first, "first tip")],
+      ),
     );
 
     const appended = appendGitHistoryPage(
@@ -122,6 +126,7 @@ describe("Git history accumulation", () => {
     expect(appended.headSha).toBe(SHA.first);
     expect(appended.totalCount).toBe(3);
     expect(appended.comparison).toEqual({ base: "upstream/main", ahead: 1, behind: 2 });
+    expect(appended.branchTips?.map(({ sha }) => sha)).toEqual([SHA.first]);
   });
 
   it("replaces the complete generation with a refreshed first page", () => {
@@ -192,6 +197,7 @@ describe("Git history accumulation", () => {
   it("creates an explicitly empty generation for a target", () => {
     expect(createEmptyGitHistoryAccumulation(target())).toMatchObject({
       commits: [],
+      branchTips: undefined,
       headSha: null,
       nextCursor: null,
       totalCount: null,

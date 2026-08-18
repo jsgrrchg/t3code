@@ -252,6 +252,27 @@ describe("GitListHistoryResult", () => {
 
     expect(encodeListHistoryResult(decodeListHistoryResult(input))).toEqual(input);
   });
+
+  it("round-trips branch tips independently from the paginated commits", () => {
+    const tip = {
+      sha: SHA_1,
+      parentShas: [PARENT_SHA_1],
+      subject: "feature tip",
+      authorName: "T3 Code",
+      authorEmail: "dev@example.com",
+      authoredAt: "2026-08-09T14:30:00Z",
+      refs: [{ kind: "branch" as const, label: "feature/history" }],
+    };
+    const input = {
+      commits: [],
+      branchTips: [tip],
+      headSha: SHA_1,
+      nextCursor: null,
+      totalCount: 1,
+    };
+
+    expect(encodeListHistoryResult(decodeListHistoryResult(input))).toEqual(input);
+  });
 });
 
 describe("historical commit resources", () => {

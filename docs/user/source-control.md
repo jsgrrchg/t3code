@@ -115,6 +115,11 @@ Branch, remote-branch, and tag labels appear beside the subject on the commit ea
 points to. Rows stay on one line; when a commit has several refs, the remaining labels are grouped
 behind a compact **+N** indicator and remain available in its tooltip.
 
+Use **Show branch tips** in the History header to switch from the paginated commit graph to a compact
+overview containing only the current tips of local and remote branches. Tags do not add overview
+rows, and branches that point to the same commit share one row. Use the same button again to return
+to all commits.
+
 The header shows the total number of commits in that public history. Commit rows load in pages as
 you request older entries, so showing the total does not load every row at once.
 
